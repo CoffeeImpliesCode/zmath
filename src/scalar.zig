@@ -1,3 +1,12 @@
+const cbrt_impl = @import("scalar_cbrt.zig");
+pub const cbrth = cbrt_impl.cbrth;
+pub const cbrtf = cbrt_impl.cbrtf;
+pub const cbrtd = cbrt_impl.cbrtd;
+
+const hypot_impl = @import("scalar_hypot.zig");
+pub const hypoth = hypot_impl.hypoth;
+pub const hypotf = hypot_impl.hypotf;
+pub const hypotd = hypot_impl.hypotd;
 pub const expm1h = @import("scalar_expm1h.zig").expm1h;
 pub const expm1f = @import("scalar_expm1f.zig").expm1f;
 pub const expm1d = @import("scalar_expm1d.zig").expm1d;
@@ -15,6 +24,10 @@ const exp2_impl = @import("scalar_exp2.zig");
 pub const exp2h = exp2_impl.exp2h;
 pub const exp2f = exp2_impl.exp2f;
 pub const exp2d = exp2_impl.exp2d;
+const rsqrt_impl = @import("scalar_rsqrt.zig");
+pub const rsqrth = rsqrt_impl.rsqrth;
+pub const rsqrtf = rsqrt_impl.rsqrtf;
+pub const rsqrtd = rsqrt_impl.rsqrtd;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
