@@ -3,6 +3,13 @@ pub const asinh = asin_impl.asinh;
 pub const asinf = asin_impl.asinf;
 pub const asind = asin_impl.asind;
 
+const sinhh_impl = @import("scalar_sinhh.zig");
+pub const sinhh = sinhh_impl.sinhh;
+const sinhf_impl = @import("scalar_sinhf.zig");
+pub const sinhf = sinhf_impl.sinhf;
+const sinhd_impl = @import("scalar_sinhd.zig");
+pub const sinhd = sinhd_impl.sinhd;
+
 const cbrt_impl = @import("scalar_cbrt.zig");
 pub const cbrth = cbrt_impl.cbrth;
 pub const cbrtf = cbrt_impl.cbrtf;
@@ -40,6 +47,16 @@ pub const rsqrtd = rsqrt_impl.rsqrtd;
 pub const tanh = @import("scalar_tanh.zig").tanh;
 pub const tanf = @import("scalar_tanf.zig").tanf;
 pub const tand = @import("scalar_tand.zig").tand;
+
+const cosh_impl = @import("scalar_cosh.zig");
+pub const coshh = cosh_impl.coshh;
+pub const coshf = cosh_impl.coshf;
+pub const coshd = cosh_impl.coshd;
+
+const tanh_impl = @import("scalar_tanh.zig");
+pub const tanhh = tanh_impl.tanhh;
+pub const tanhf = tanh_impl.tanhf;
+pub const tanhd = tanh_impl.tanhd;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;

@@ -36,6 +36,18 @@ fn expectSin(comptime zmath: type, comptime T: type, value: T) !void {
     try std.testing.expectEqual(expected, got);
 }
 
+fn expectSinh(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.sinh(value);
+    const expected = if (T == f16)
+        zmath.scalar.sinhh(value)
+    else if (T == f32)
+        zmath.scalar.sinhf(value)
+    else
+        zmath.scalar.sinhd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
 fn expectCos(comptime zmath: type, comptime T: type, value: T) !void {
     const got = zmath.cos(value);
     const expected = if (T == f16)
@@ -44,6 +56,30 @@ fn expectCos(comptime zmath: type, comptime T: type, value: T) !void {
         zmath.scalar.cosf(value)
     else
         zmath.scalar.cosd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
+fn expectCosh(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.cosh(value);
+    const expected = if (T == f16)
+        zmath.scalar.coshh(value)
+    else if (T == f32)
+        zmath.scalar.coshf(value)
+    else
+        zmath.scalar.coshd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
+fn expectTanh(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.tanh(value);
+    const expected = if (T == f16)
+        zmath.scalar.tanhh(value)
+    else if (T == f32)
+        zmath.scalar.tanhf(value)
+    else
+        zmath.scalar.tanhd(value);
     comptime std.debug.assert(@TypeOf(got) == T);
     try std.testing.expectEqual(expected, got);
 }
@@ -84,6 +120,9 @@ pub fn run(comptime zmath: type) !void {
     try expectSin(zmath, f16, @as(f16, 0.5));
     try expectSin(zmath, f32, @as(f32, 0.5));
     try expectSin(zmath, f64, @as(f64, 0.5));
+    try expectSinh(zmath, f16, @as(f16, 0.5));
+    try expectSinh(zmath, f32, @as(f32, 0.5));
+    try expectSinh(zmath, f64, @as(f64, 0.5));
 
     try expectCos(zmath, f16, @as(f16, 0.5));
     try expectCos(zmath, f32, @as(f32, 0.5));
@@ -91,6 +130,14 @@ pub fn run(comptime zmath: type) !void {
     try expectTan(zmath, f16, @as(f16, 0.5));
     try expectTan(zmath, f32, @as(f32, 0.5));
     try expectTan(zmath, f64, @as(f64, 0.5));
+
+    try expectCosh(zmath, f16, @as(f16, 0.5));
+    try expectCosh(zmath, f32, @as(f32, 0.5));
+    try expectCosh(zmath, f64, @as(f64, 0.5));
+
+    try expectTanh(zmath, f16, @as(f16, 0.5));
+    try expectTanh(zmath, f32, @as(f32, 0.5));
+    try expectTanh(zmath, f64, @as(f64, 0.5));
     try expectRsqrt(zmath, f16, @as(f16, 1.5));
     try expectRsqrt(zmath, f32, @as(f32, 1.5));
     try expectRsqrt(zmath, f64, @as(f64, 1.5));
