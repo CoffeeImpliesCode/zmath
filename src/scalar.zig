@@ -1,8 +1,20 @@
+pub const expm1h = @import("scalar_expm1h.zig").expm1h;
+pub const expm1f = @import("scalar_expm1f.zig").expm1f;
+pub const expm1d = @import("scalar_expm1d.zig").expm1d;
 const logd_impl = @import("logd.zig");
+const log1p_impl = @import("scalar_log1p.zig");
+const log1pd_impl = @import("scalar_log1pd.zig");
 
 pub const logd = logd_impl.logd;
+pub const log1ph = log1p_impl.log1ph;
+pub const log1pf = log1p_impl.log1pf;
+pub const log1pd = log1pd_impl.log1pd;
 pub const sind = @import("scalar_sind.zig").sind;
 pub const cosd = @import("scalar_sind.zig").cosd;
+const exp2_impl = @import("scalar_exp2.zig");
+pub const exp2h = exp2_impl.exp2h;
+pub const exp2f = exp2_impl.exp2f;
+pub const exp2d = exp2_impl.exp2d;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
