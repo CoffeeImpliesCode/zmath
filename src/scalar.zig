@@ -1,3 +1,6 @@
+pub const expm1h = @import("scalar_expm1h.zig").expm1h;
+pub const expm1f = @import("scalar_expm1f.zig").expm1f;
+pub const expm1d = @import("scalar_expm1d.zig").expm1d;
 const logd_impl = @import("logd.zig");
 
 pub const logd = logd_impl.logd;
