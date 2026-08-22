@@ -704,6 +704,54 @@ pub fn sinh(value: f16) f16 {
     const result = @mulAdd(f32, sin_x1, cos_x2, cos_x1 * sin_x2);
     return @floatCast(result);
 }
+// Correctly rounded cosine for binary16 values.
+//
+// Copyright (c) 2025 Maxence Ponsardin and Paul Zimmermann.
+//
+// This code is derived from CORE-MATH src/binary16/cos/cosf16.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa and is used under the MIT License:
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+const cosh_data = @import("scalar_cosh_data.zig");
+
+pub fn cosh(value: f16) f16 {
+    const bits: u16 = @bitCast(value);
+    const magnitude = bits & magnitude_mask_h;
+
+    if (magnitude > infinity_bits_h) {
+        const quiet_nan_bit_h: u16 = 0x0200;
+        return @bitCast(bits | quiet_nan_bit_h);
+    }
+    if (magnitude == infinity_bits_h) return @bitCast(@as(u16, 0x7e00));
+    if (magnitude == 0) return 1.0;
+
+    // Decompose x into x1 + x2 and evaluate
+    // cos(x1) * cos(x2) - sin(x1) * sin(x2).
+    const table1_index: usize = bits >> 5;
+    const table2_index: usize = ((bits >> 10) << 5) | (bits & 0x001f);
+    const sin_x1: f32 = @bitCast(cosh_data.s1[table1_index]);
+    const cos_x1: f32 = @bitCast(cosh_data.c1[table1_index]);
+    const minus_sin_x2: f32 = @bitCast(cosh_data.s2[table2_index]);
+    const cos_x2: f32 = @bitCast(cosh_data.c2[table2_index]);
+    const result = @mulAdd(f32, cos_x1, cos_x2, sin_x1 * minus_sin_x2);
+    return @floatCast(result);
+}
 
 // Correctly rounded natural logarithm for binary32 values.
 //

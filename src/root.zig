@@ -28,6 +28,7 @@ test {
     _ = @import("scalar_log_test.zig");
     _ = @import("scalar_sin_test.zig");
     _ = @import("scalar_sind_test.zig");
+    _ = @import("scalar_cos_test.zig");
 }
 
 test "basic add functionality" {
