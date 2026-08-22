@@ -141,15 +141,15 @@ Finite complex results use the scalar manifest accuracy contract for each compon
 ```zig
 pub const Quatf = struct { x: f32, y: f32, z: f32, w: f32 };
 pub const Quatd = struct { x: f64, y: f64, z: f64, w: f64 };
-pub const UnitQuatf = opaque {};
-pub const UnitQuatd = opaque {};
+pub const UnitQuatf = struct { raw: Quatf };
+pub const UnitQuatd = struct { raw: Quatd };
 ```
 
 `w` is the scalar component. `Quatf.mul(a, b)` is Hamilton multiplication. A `UnitQuatf` represents an active, right-handed rotation of a column vector.
 
 `UnitQuatf.rotate(v)` applies `q * (v, 0) * conjugate(q)`. `a.then(b)` means apply `a` first, then `b`, and equals `b * a`.
 
-`UnitQuatf.init(raw)` returns `?UnitQuatf`. It rejects zero, non-finite, and non-unit values after normalization. Raw `Quatf` supports algebraic operations. It does not expose a total rotation operation.
+`raw` is private to `zmath.quaternion`. `UnitQuatf.init(raw)` returns `?UnitQuatf`. It rejects zero, non-finite, and non-unit values after normalization. Raw `Quatf` supports algebraic operations. It does not expose a total rotation operation.
 
 ## Matrices
 
