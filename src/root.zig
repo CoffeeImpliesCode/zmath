@@ -63,6 +63,17 @@ pub fn rsqrt(value: anytype) @TypeOf(value) {
     @compileError("zmath.rsqrt supports only f16, f32, and f64");
 }
 
+/// Computes the inverse sine of `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn asin(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.asinh(value);
+    if (T == f32) return scalar.asinf(value);
+    if (T == f64) return scalar.asind(value);
+    @compileError("zmath.asin supports only f16, f32, and f64");
+}
+
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
 /// Accepting an `Io.Writer` instance is a handy way to write reusable code.
@@ -94,10 +105,26 @@ test {
     _ = @import("scalar_exp2_test.zig");
     _ = @import("scalar_cbrt_test.zig");
     _ = @import("scalar_hypot_test.zig");
+    _ = @import("scalar_asin_test.zig");
 }
 
 test "basic add functionality" {
     try std.testing.expect(add(3, 7) == 10);
+}
+
+test "root exports nearest-even Asin family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3e48),
+        @as(u16, @bitCast(asin(@as(f16, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3fc9_0fdb),
+        @as(u32, @bitCast(asin(@as(f32, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff9_21fb_5444_2d18),
+        @as(u64, @bitCast(asin(@as(f64, 1.0)))),
+    );
 }
 
 test "generic scalar dispatch covers all formats" {
