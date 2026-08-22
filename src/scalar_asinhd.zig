@@ -251,12 +251,12 @@ pub fn asinhd(value: f64) f64 {
                         (-0x1.6db6d9a665159p-5 + square_high * 0x1.f186866d775fp-6)));
             }
         } else {
+            const c1 = 0x1.333333333331p-4 + square_high * -0x1.6db6db6da466cp-5;
+            const c3 = 0x1.f1c71c2ea7be4p-6 + square_high * -0x1.6e8b651b09d72p-6;
+            const c5 = 0x1.1c309fc0e69c2p-6 + square_high * -0x1.bab7833c1ep-7;
+            const x4 = square_high * square_high;
             correction = cube_high * (-0x1.5555555555555p-3 + square_high *
-                (0x1.333333333331p-4 + square_high *
-                    (-0x1.6db6db6da466cp-5 + square_high *
-                        (0x1.f1c71c2ea7be4p-6 + square_high *
-                            (-0x1.6e8b651b09d72p-6 + square_high *
-                                (0x1.1c309fc0e69c2p-6 + square_high * -0x1.bab7833c1ep-7))))));
+                (c1 + x4 * (c3 + x4 * c5)));
         }
         const epsilon = 0x1.79p-53 * cube_high;
         const lower = value + (correction - epsilon);

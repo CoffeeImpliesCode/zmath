@@ -48,8 +48,8 @@ pub fn asinhh(value: f16) f16 {
     if (exponent <= 0) {
         if (absolute_bits <= 0x3d38_a000) {
             if (magnitude == 0) return value;
-            const correction: f32 = if (sign) -0x1p-26 else 0x1p-26;
-            return @floatCast(value_f + correction);
+            if (sign) return @floatCast(value_f + 0x1p-26);
+            return @floatCast(value_f - 0x1p-26);
         }
         const p = coefficients[0];
         const c5 = @mulAdd(f32, p[3], t_squared, p[2]);
