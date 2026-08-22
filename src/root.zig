@@ -51,6 +51,18 @@ pub fn cos(value: anytype) @TypeOf(value) {
     @compileError("zmath.cos supports only f16, f32, and f64");
 }
 
+/// Computes the hyperbolic tangent of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn tanh(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.tanhh(value);
+    if (T == f32) return scalar.tanhf(value);
+    if (T == f64) return scalar.tanhd(value);
+    @compileError("zmath.tanh supports only f16, f32, and f64");
+}
+
 /// Computes the reciprocal square root of `value` with the scalar
 /// implementation for its type.
 ///
@@ -94,6 +106,7 @@ test {
     _ = @import("scalar_exp2_test.zig");
     _ = @import("scalar_cbrt_test.zig");
     _ = @import("scalar_hypot_test.zig");
+    _ = @import("scalar_tanh_test.zig");
 }
 
 test "basic add functionality" {
@@ -111,6 +124,13 @@ test "root exports nearest-even binary64 sine" {
 test "root exports nearest-even binary64 cosine" {
     const input: f64 = 1.0;
     try std.testing.expectEqual(@as(u64, 0x3fe1_4a28_0fb5_068c), @as(u64, @bitCast(scalar.cosd(input))));
+}
+test "root exports nearest-even binary64 hyperbolic tangent" {
+    const input: f64 = 1.0;
+    try std.testing.expectEqual(
+        @as(u64, 0x3fe8_5efa_b514_f394),
+        @as(u64, @bitCast(tanh(input))),
+    );
 }
 test "root exports nearest-even Exp2 family" {
     try std.testing.expectEqual(
