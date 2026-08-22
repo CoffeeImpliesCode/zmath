@@ -14,6 +14,25 @@ const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
 // src/binary16/exp/expf16.c at revision
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa (MIT license).
 const exph_data = @import("scalar_exph_data.zig");
+const logf_data = @import("scalar_logf_data.zig");
+
+const logf_quiet_nan_bit: u32 = 0x0040_0000;
+const logf_canonical_nan_bits: u32 = 0x7fc0_0000;
+const logf_minus_infinity_bits: u32 = 0xff80_0000;
+const logf_fast_coefficients = [_]f64{
+    0x1.00000006342eap+0,
+    -0x1.0001f7fdc3977p-1,
+    0x1.554a4e5cae9cfp-2,
+};
+const logf_accurate_coefficients = [_]f64{
+    -0x1p-1,
+    0x1.55555555571cap-2,
+    -0x1.0000000002d85p-2,
+    0x1.9999987d0c963p-3,
+    -0x1.555554059a8bbp-3,
+    0x1.24aebcf71a38fp-3,
+    -0x1.001c73915d758p-3,
+};
 
 pub fn exph(value: f16) f16 {
     const bits: u16 = @bitCast(value);
@@ -615,6 +634,99 @@ pub fn logh(value: f16) f16 {
     const significand_index = bits & 0x03ff;
     if (exponent_index == 0) return @floatCast(logh_t3[significand_index]);
     return @floatCast(logh_t1[exponent_index] + logh_t2[significand_index]);
+}
+
+// Correctly rounded natural logarithm for binary32 values.
+//
+// Copyright (c) 2023-2026 Alexei Sibidanov and Paul Zimmermann.
+//
+// This code is derived from CORE-MATH src/binary32/log/logf.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa and is used under the MIT License:
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+pub fn logf(value: f32) f32 {
+    @setFloatMode(.strict);
+
+    const input_bits: u32 = @bitCast(value);
+    const magnitude = input_bits & magnitude_mask_f;
+
+    if (magnitude == 0) return @bitCast(logf_minus_infinity_bits);
+    if (magnitude > infinity_bits_f) {
+        return @bitCast(input_bits | logf_quiet_nan_bit);
+    }
+    if (magnitude == infinity_bits_f) {
+        if ((input_bits & sign_mask_f) == 0) return value;
+        return @bitCast(logf_canonical_nan_bits);
+    }
+    if ((input_bits & sign_mask_f) != 0) return @bitCast(logf_canonical_nan_bits);
+
+    var bits = input_bits;
+    if (bits < 0x0080_0000) {
+        const shift: u32 = @clz(bits) - 8;
+        bits <<= @intCast(shift);
+        bits -%= shift << 23;
+    }
+    if (bits == 127 << 23) return 0.0;
+
+    const mantissa = bits & 0x007f_ffff;
+    const table_index: usize = @intCast((mantissa + 0x0000_8000) >> 17);
+    const normalized_bits: i32 = @bitCast(bits);
+    const exponent: i32 = (normalized_bits >> 23) - 127;
+    const exponent_wide: f64 = @floatFromInt(exponent);
+    const tz_bits: u64 =
+        (@as(u64, mantissa) | (@as(u64, 1023) << 23)) << 29;
+    const tz: f64 = @bitCast(tz_bits);
+    const z = tz * logf_data.tr[table_index] - 1.0;
+    const z_squared = z * z;
+
+    var result = ((exponent_wide * 0x1.62e42fefa39efp-1 + logf_data.tl[table_index]) +
+        z * logf_fast_coefficients[0]) +
+        z_squared * (logf_fast_coefficients[1] + z * logf_fast_coefficients[2]);
+    var upper: f32 = @floatCast(result);
+    const lower: f32 = @floatCast(result + 0x1.f06p-33);
+    if (upper == lower) return upper;
+
+    var accurate = z_squared *
+        ((logf_accurate_coefficients[0] + z * logf_accurate_coefficients[1]) +
+            z_squared *
+                ((logf_accurate_coefficients[2] + z * logf_accurate_coefficients[3]) +
+                    z_squared *
+                        (logf_accurate_coefficients[4] + z * logf_accurate_coefficients[5] +
+                            z_squared * logf_accurate_coefficients[6])));
+    const delta_bits: u32 = @bitCast(value - 1.0);
+    if ((delta_bits & magnitude_mask_f) < 0x3a80_0000) {
+        return @floatCast(z + accurate);
+    }
+
+    accurate -= 0x1.0ca86c3898dp-49 * exponent_wide;
+    accurate += z;
+    accurate += logf_data.tl[table_index] - logf_data.tl[0];
+    const exponent_log: f64 = exponent_wide * 0x1.62e42fefa3ap-1;
+    result = exponent_log + accurate;
+    upper = @floatCast(result);
+    const result_bits: u64 = @bitCast(result);
+    if ((result_bits & 0x0fff_ffff) == 0) {
+        const rounding_remainder = (exponent_log - result) + accurate;
+        result += rounding_remainder * 64.0;
+        upper = @floatCast(result);
+    }
+    return upper;
 }
 
 pub fn absh(value: f16) f16 {
