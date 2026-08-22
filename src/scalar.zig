@@ -1,3 +1,8 @@
+const hypot_impl = @import("scalar_hypot.zig");
+pub const hypoth = hypot_impl.hypoth;
+pub const hypotf = hypot_impl.hypotf;
+pub const hypotd = hypot_impl.hypotd;
+
 pub const expm1h = @import("scalar_expm1h.zig").expm1h;
 pub const expm1f = @import("scalar_expm1f.zig").expm1f;
 pub const expm1d = @import("scalar_expm1d.zig").expm1d;

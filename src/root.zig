@@ -79,6 +79,7 @@ test {
     _ = @import("scalar_sind_test.zig");
     _ = @import("scalar_stdlib_agreement_test.zig");
     _ = @import("scalar_exp2_test.zig");
+    _ = @import("scalar_hypot_test.zig");
 }
 
 test "basic add functionality" {
@@ -118,5 +119,20 @@ test "root exports nearest-even Log1p H, F, and D" {
     try std.testing.expectEqual(
         @as(u64, 0x3fe6_2e42_fefa_39ef),
         @as(u64, @bitCast(scalar.log1pd(@as(f64, 1.0)))),
+    );
+}
+
+test "root exports nearest-even Hypot H, F, and D" {
+    try std.testing.expectEqual(
+        @as(u16, 0x4500),
+        @as(u16, @bitCast(scalar.hypoth(@as(f16, 3.0), @as(f16, 4.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x40a0_0000),
+        @as(u32, @bitCast(scalar.hypotf(3.0, 4.0))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x4014_0000_0000_0000),
+        @as(u64, @bitCast(scalar.hypotd(3.0, 4.0))),
     );
 }
