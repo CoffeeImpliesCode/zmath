@@ -1,3 +1,8 @@
+const cbrt_impl = @import("scalar_cbrt.zig");
+pub const cbrth = cbrt_impl.cbrth;
+pub const cbrtf = cbrt_impl.cbrtf;
+pub const cbrtd = cbrt_impl.cbrtd;
+
 pub const expm1h = @import("scalar_expm1h.zig").expm1h;
 pub const expm1f = @import("scalar_expm1f.zig").expm1f;
 pub const expm1d = @import("scalar_expm1d.zig").expm1d;

@@ -79,6 +79,7 @@ test {
     _ = @import("scalar_sind_test.zig");
     _ = @import("scalar_stdlib_agreement_test.zig");
     _ = @import("scalar_exp2_test.zig");
+    _ = @import("scalar_cbrt_test.zig");
 }
 
 test "basic add functionality" {
@@ -109,6 +110,21 @@ test "root exports nearest-even Exp2 family" {
     try std.testing.expectEqual(
         @as(u64, 0x4000_0000_0000_0000),
         @as(u64, @bitCast(scalar.exp2d(1.0))),
+    );
+}
+
+test "root exports nearest-even Cbrt H, F, and D" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3d0a),
+        @as(u16, @bitCast(scalar.cbrth(@as(f16, 2.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3fa1_4518),
+        @as(u32, @bitCast(scalar.cbrtf(@as(f32, 2.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff4_28a2_f98d_728b),
+        @as(u64, @bitCast(scalar.cbrtd(@as(f64, 2.0)))),
     );
 }
 
