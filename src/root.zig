@@ -21,6 +21,9 @@ test {
     _ = @import("ieee_edge_test.zig");
     _ = @import("scalar_test.zig");
     _ = @import("scalar_boundary_test.zig");
+    _ = @import("api_suffix_test.zig");
+    _ = @import("ieee_h_complete_test.zig");
+    _ = @import("ieee_exhaustive_h_test.zig");
 }
 
 test "basic add functionality" {

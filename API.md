@@ -10,7 +10,7 @@ The current public root exports `add`, `printAnotherMessage`, `ieee`, and `scala
 
 `zmath` is a dependency-free Zig 0.16 mathematics library. Public fixed-size operations do not allocate.
 
-Public real formats are `f32` and `f64` only. Public type names use `f` or `d` suffixes. Public function names use `F` or `D` suffixes.
+Public real formats are `f16`, `f32`, and `f64` for the current IEEE and scalar primitives. Public type names use `h`, `f`, and `d` suffixes. Public function names use `H`, `F`, and `D` suffixes. The `q` and `Q` suffixes remain reserved for a future `f128` API. No bfloat16 API exists.
 
 The API uses one structural generic, `Mat`. Vectors, quaternions, geometry, factorizations, and geometric algebras use named concrete types.
 
@@ -57,9 +57,9 @@ Geometry and algebra do not depend on each other.
 
 ## IEEE and scalar API
 
-The complete planned `zmath.ieee` API owns classification, total order, bit conversion, successor, predecessor, scaling, and rounding for `f32` and `f64`.
+The complete planned `zmath.ieee` API owns classification, total order, bit conversion, successor, predecessor, scaling, and rounding for the public real formats.
 
-The implemented public IEEE subset is:
+`H` is implemented for the current IEEE and scalar primitives. These primitives implement the `H`, `F`, and `D` suffix families:
 
 ```zig
 pub const RoundMode = enum {
@@ -78,25 +78,31 @@ pub const Class = enum {
     signaling_nan,
 };
 
+pub fn classifyH(value: f16) Class;
 pub fn classifyF(value: f32) Class;
 pub fn classifyD(value: f64) Class;
+pub fn copySignH(value: f16, sign: f16) f16;
 pub fn copySignF(value: f32, sign: f32) f32;
 pub fn copySignD(value: f64, sign: f64) f64;
+pub fn nextAfterH(from: f16, to: f16) f16;
 pub fn nextAfterF(from: f32, to: f32) f32;
 pub fn nextAfterD(from: f64, to: f64) f64;
+pub fn totalOrderH(left: f16, right: f16) bool;
 pub fn totalOrderF(left: f32, right: f32) bool;
 pub fn totalOrderD(left: f64, right: f64) bool;
 ```
 
-`nextAfterF` and `nextAfterD` choose the first NaN operand. If it is a signaling NaN, they set its quiet bit and preserve its sign and payload. They return a quiet NaN unchanged.
+`nextAfterH`, `nextAfterF`, and `nextAfterD` choose the first NaN operand. If it is a signaling NaN, they set its quiet bit and preserve its sign and payload. They return a quiet NaN unchanged.
 
-`totalOrderF` and `totalOrderD` are Boolean predicates. They return `true` when `left` precedes or equals `right` in the IEEE total order.
+`totalOrderH`, `totalOrderF`, and `totalOrderD` are Boolean predicates. They return `true` when `left` precedes or equals `right` in the IEEE total order.
 
 The implemented public scalar subset is:
 
 ```zig
+pub fn absH(value: f16) f16;
 pub fn absF(value: f32) f32;
 pub fn absD(value: f64) f64;
+pub fn ulpDistanceH(a: f16, b: f16) u16;
 pub fn ulpDistanceF(a: f32, b: f32) u32;
 pub fn ulpDistanceD(a: f64, b: f64) u64;
 ```
