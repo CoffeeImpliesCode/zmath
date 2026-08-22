@@ -107,7 +107,7 @@ pub fn ulpDistancef(a: f32, b: f32) u32;
 pub fn ulpDistanced(a: f64, b: f64) u64;
 ```
 
-The initial Exp, Log, and Sin tranche always uses `nearest_even`. These functions do not take a `RoundMode` argument. Other planned scalar operations can take an explicit `RoundMode`. The API does not read or change the process floating-point environment.
+Callers of the initial Exp, Log, and Sin functions must keep IEEE round-to-nearest, ties-to-even active for each call. These functions do not take a `RoundMode` argument. Other planned scalar operations can take an explicit `RoundMode`. `zmath` does not read, validate, set, or restore the process floating-point environment (`fenv`). Behavior under other rounding modes is unsupported.
 
 The CORE-MATH manifest-gated transcendental functions use these declarations as they become supported:
 
@@ -123,7 +123,7 @@ pub fn sinf(x: f32) f32;
 pub fn sind(x: f64) f64;
 ```
 
-The initial Exp, Log, and Sin API supports only `nearest_even`. Other rounding modes are unsupported for this tranche.
+The initial Exp, Log, and Sin API requires callers to keep IEEE round-to-nearest, ties-to-even active. Other rounding modes are unsupported for this tranche.
 
 ### CORE-MATH manifest
 
@@ -131,7 +131,7 @@ Before any manifest-gated transcendental function becomes public, the repository
 
 The manifest pins one CORE-MATH commit. It lists every required function-format pair for `f16`, `f32`, and `f64`. Each entry defines the zmath symbol, domain, special values, supported rounding modes, and accuracy class.
 
-For the initial Exp, Log, and Sin entries, the only supported rounding mode is `nearest_even`. Other rounding modes are unsupported. For these entries, `correct` means correctly rounded in `nearest_even`.
+For the initial Exp, Log, and Sin entries, callers must keep IEEE round-to-nearest, ties-to-even active. Other rounding modes are unsupported. For these entries, `correct` means correctly rounded in `nearest_even`.
 
 A manifest entry is one of:
 
