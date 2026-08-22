@@ -1,6 +1,11 @@
 const logd_impl = @import("logd.zig");
+const log1p_impl = @import("scalar_log1p.zig");
+const log1pd_impl = @import("scalar_log1pd.zig");
 
 pub const logd = logd_impl.logd;
+pub const log1ph = log1p_impl.log1ph;
+pub const log1pf = log1p_impl.log1pf;
+pub const log1pd = log1pd_impl.log1pd;
 pub const sind = @import("scalar_sind.zig").sind;
 pub const cosd = @import("scalar_sind.zig").cosd;
 
