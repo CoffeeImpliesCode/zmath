@@ -1,6 +1,28 @@
 const std = @import("std");
 const scalar = @import("scalar.zig");
 
+fn expectLoghBits(input_bits: u16, expected_bits: u16) !void {
+    const input: f16 = @bitCast(input_bits);
+    const actual_bits: u16 = @bitCast(scalar.logh(input));
+    try std.testing.expectEqual(expected_bits, actual_bits);
+}
+
+test "logh returns exact special values" {
+    try expectLoghBits(0x0000, 0xfc00);
+    try expectLoghBits(0x8000, 0xfc00);
+    try expectLoghBits(0x3c00, 0x0000);
+    try expectLoghBits(0x7c00, 0x7c00);
+    try expectLoghBits(0xbc00, 0x7e00);
+    try expectLoghBits(0xfc00, 0x7e00);
+}
+
+test "logh quiets NaNs while preserving sign and payload" {
+    try expectLoghBits(0x7e55, 0x7e55);
+    try expectLoghBits(0x7c55, 0x7e55);
+    try expectLoghBits(0xfe55, 0xfe55);
+    try expectLoghBits(0xfc55, 0xfe55);
+}
+
 fn expectLogdBits(input_bits: u64, expected_bits: u64) !void {
     const input: f64 = @bitCast(input_bits);
     const actual_bits: u64 = @bitCast(scalar.logd(input));

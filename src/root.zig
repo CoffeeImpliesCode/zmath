@@ -27,6 +27,7 @@ test {
     _ = @import("scalar_exp_test.zig");
     _ = @import("scalar_log_test.zig");
     _ = @import("scalar_sin_test.zig");
+    _ = @import("scalar_cos_test.zig");
     _ = @import("scalar_sind_test.zig");
     _ = @import("scalar_stdlib_agreement_test.zig");
 }
@@ -38,4 +39,8 @@ test "basic add functionality" {
 test "root exports nearest-even binary64 sine" {
     const input: f64 = 1.0;
     try std.testing.expectEqual(@as(u64, 0x3fea_ed54_8f09_0cee), @as(u64, @bitCast(scalar.sind(input))));
+}
+test "root exports nearest-even binary64 cosine" {
+    const input: f64 = 1.0;
+    try std.testing.expectEqual(@as(u64, 0x3fe1_4a28_0fb5_068c), @as(u64, @bitCast(scalar.cosd(input))));
 }
