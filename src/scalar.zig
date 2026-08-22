@@ -28,6 +28,10 @@ const rsqrt_impl = @import("scalar_rsqrt.zig");
 pub const rsqrth = rsqrt_impl.rsqrth;
 pub const rsqrtf = rsqrt_impl.rsqrtf;
 pub const rsqrtd = rsqrt_impl.rsqrtd;
+const cosh_impl = @import("scalar_cosh.zig");
+pub const coshh = cosh_impl.coshh;
+pub const coshf = cosh_impl.coshf;
+pub const coshd = cosh_impl.coshd;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;

@@ -33,5 +33,9 @@ test "scalar exposes h, f, and d suffix exports" {
         _ = scalar.rsqrth;
         _ = scalar.rsqrtf;
         _ = scalar.rsqrtd;
+
+        _ = scalar.coshh;
+        _ = scalar.coshf;
+        _ = scalar.coshd;
     }
 }

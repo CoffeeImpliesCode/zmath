@@ -50,6 +50,17 @@ pub fn cos(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.cosd(value);
     @compileError("zmath.cos supports only f16, f32, and f64");
 }
+/// Computes the hyperbolic cosine of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn cosh(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.coshh(value);
+    if (T == f32) return scalar.coshf(value);
+    if (T == f64) return scalar.coshd(value);
+    @compileError("zmath.cosh supports only f16, f32, and f64");
+}
 
 /// Computes the reciprocal square root of `value` with the scalar
 /// implementation for its type.
@@ -78,6 +89,7 @@ test {
     _ = @import("ieee_test.zig");
     _ = @import("ieee_edge_test.zig");
     _ = @import("scalar_test.zig");
+    _ = @import("scalar_cosh_test.zig");
     _ = @import("scalar_boundary_test.zig");
     _ = @import("scalar_rsqrt_test.zig");
     _ = @import("api_suffix_test.zig");
@@ -111,6 +123,20 @@ test "root exports nearest-even binary64 sine" {
 test "root exports nearest-even binary64 cosine" {
     const input: f64 = 1.0;
     try std.testing.expectEqual(@as(u64, 0x3fe1_4a28_0fb5_068c), @as(u64, @bitCast(scalar.cosd(input))));
+}
+test "root exports nearest-even hyperbolic Cosh family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3c83),
+        @as(u16, @bitCast(cosh(@as(f16, 0.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f90_560c),
+        @as(u32, @bitCast(cosh(@as(f32, 0.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff2_0ac1_862a_e8d0),
+        @as(u64, @bitCast(cosh(@as(f64, 0.5)))),
+    );
 }
 test "root exports nearest-even Exp2 family" {
     try std.testing.expectEqual(

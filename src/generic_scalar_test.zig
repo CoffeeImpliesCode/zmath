@@ -48,6 +48,18 @@ fn expectCos(comptime zmath: type, comptime T: type, value: T) !void {
     try std.testing.expectEqual(expected, got);
 }
 
+fn expectCosh(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.cosh(value);
+    const expected = if (T == f16)
+        zmath.scalar.coshh(value)
+    else if (T == f32)
+        zmath.scalar.coshf(value)
+    else
+        zmath.scalar.coshd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
 fn expectRsqrt(comptime zmath: type, comptime T: type, value: T) !void {
     const got = zmath.rsqrt(value);
     const expected = if (T == f16)
@@ -76,6 +88,9 @@ pub fn run(comptime zmath: type) !void {
     try expectCos(zmath, f16, @as(f16, 0.5));
     try expectCos(zmath, f32, @as(f32, 0.5));
     try expectCos(zmath, f64, @as(f64, 0.5));
+    try expectCosh(zmath, f16, @as(f16, 0.5));
+    try expectCosh(zmath, f32, @as(f32, 0.5));
+    try expectCosh(zmath, f64, @as(f64, 0.5));
     try expectRsqrt(zmath, f16, @as(f16, 1.5));
     try expectRsqrt(zmath, f32, @as(f32, 1.5));
     try expectRsqrt(zmath, f64, @as(f64, 1.5));
