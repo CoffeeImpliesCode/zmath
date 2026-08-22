@@ -29,15 +29,15 @@ const exponent_mask_d: u64 = 0x7ff0_0000_0000_0000;
 const fraction_mask_d: u64 = 0x000f_ffff_ffff_ffff;
 const quiet_mask_d: u64 = 0x0008_0000_0000_0000;
 
-pub fn toBitsH(value: f16) u16 {
+pub fn toBitsh(value: f16) u16 {
     return @bitCast(value);
 }
 
-pub fn fromBitsH(bits: u16) f16 {
+pub fn fromBitsh(bits: u16) f16 {
     return @bitCast(bits);
 }
 
-pub fn classifyH(value: f16) Class {
+pub fn classifyh(value: f16) Class {
     const bits: u16 = @bitCast(value);
     const exponent = bits & exponent_mask_h;
     const fraction = bits & fraction_mask_h;
@@ -52,7 +52,7 @@ pub fn classifyH(value: f16) Class {
     return .signaling_nan;
 }
 
-pub fn classifyF(value: f32) Class {
+pub fn classifyf(value: f32) Class {
     const bits: u32 = @bitCast(value);
     const exponent = bits & exponent_mask_f;
     const fraction = bits & fraction_mask_f;
@@ -67,7 +67,7 @@ pub fn classifyF(value: f32) Class {
     return .signaling_nan;
 }
 
-pub fn classifyD(value: f64) Class {
+pub fn classifyd(value: f64) Class {
     const bits: u64 = @bitCast(value);
     const exponent = bits & exponent_mask_d;
     const fraction = bits & fraction_mask_d;
@@ -82,50 +82,50 @@ pub fn classifyD(value: f64) Class {
     return .signaling_nan;
 }
 
-pub fn copySignH(value: f16, sign: f16) f16 {
+pub fn copySignh(value: f16, sign: f16) f16 {
     const value_bits: u16 = @bitCast(value);
     const sign_bits: u16 = @bitCast(sign);
     const result_bits = (value_bits & ~sign_mask_h) | (sign_bits & sign_mask_h);
     return @bitCast(result_bits);
 }
 
-pub fn copySignF(value: f32, sign: f32) f32 {
+pub fn copySignf(value: f32, sign: f32) f32 {
     const value_bits: u32 = @bitCast(value);
     const sign_bits: u32 = @bitCast(sign);
     const result_bits = (value_bits & ~sign_mask_f) | (sign_bits & sign_mask_f);
     return @bitCast(result_bits);
 }
 
-pub fn copySignD(value: f64, sign: f64) f64 {
+pub fn copySignd(value: f64, sign: f64) f64 {
     const value_bits: u64 = @bitCast(value);
     const sign_bits: u64 = @bitCast(sign);
     const result_bits = (value_bits & ~sign_mask_d) | (sign_bits & sign_mask_d);
     return @bitCast(result_bits);
 }
 
-pub fn nextUpH(value: f16) f16 {
-    const bits = toBitsH(value);
+pub fn nextUph(value: f16) f16 {
+    const bits = toBitsh(value);
     const magnitude = bits & ~sign_mask_h;
 
     if (isNaNH(bits)) return quietNaNH(bits);
-    if (magnitude == 0) return fromBitsH(1);
+    if (magnitude == 0) return fromBitsh(1);
     if (bits == exponent_mask_h) return value;
-    if (bits & sign_mask_h != 0) return fromBitsH(bits - 1);
-    return fromBitsH(bits + 1);
+    if (bits & sign_mask_h != 0) return fromBitsh(bits - 1);
+    return fromBitsh(bits + 1);
 }
 
-pub fn nextDownH(value: f16) f16 {
-    const bits = toBitsH(value);
+pub fn nextDownh(value: f16) f16 {
+    const bits = toBitsh(value);
     const magnitude = bits & ~sign_mask_h;
 
     if (isNaNH(bits)) return quietNaNH(bits);
-    if (magnitude == 0) return fromBitsH(sign_mask_h | 1);
+    if (magnitude == 0) return fromBitsh(sign_mask_h | 1);
     if (bits == (sign_mask_h | exponent_mask_h)) return value;
-    if (bits & sign_mask_h != 0) return fromBitsH(bits + 1);
-    return fromBitsH(bits - 1);
+    if (bits & sign_mask_h != 0) return fromBitsh(bits + 1);
+    return fromBitsh(bits - 1);
 }
 
-pub fn nextAfterH(from: f16, to: f16) f16 {
+pub fn nextAfterh(from: f16, to: f16) f16 {
     const from_bits: u16 = @bitCast(from);
     const to_bits: u16 = @bitCast(to);
 
@@ -149,7 +149,7 @@ pub fn nextAfterH(from: f16, to: f16) f16 {
     return @bitCast(result_bits);
 }
 
-pub fn nextAfterF(from: f32, to: f32) f32 {
+pub fn nextAfterf(from: f32, to: f32) f32 {
     const from_bits: u32 = @bitCast(from);
     const to_bits: u32 = @bitCast(to);
 
@@ -173,7 +173,7 @@ pub fn nextAfterF(from: f32, to: f32) f32 {
     return @bitCast(result_bits);
 }
 
-pub fn nextAfterD(from: f64, to: f64) f64 {
+pub fn nextAfterd(from: f64, to: f64) f64 {
     const from_bits: u64 = @bitCast(from);
     const to_bits: u64 = @bitCast(to);
 
@@ -197,8 +197,8 @@ pub fn nextAfterD(from: f64, to: f64) f64 {
     return @bitCast(result_bits);
 }
 
-pub fn scaleBH(mode: RoundMode, value: f16, exponent: i32) f16 {
-    const bits = toBitsH(value);
+pub fn scaleBh(mode: RoundMode, value: f16, exponent: i32) f16 {
+    const bits = toBitsh(value);
     const sign = bits & sign_mask_h;
     const magnitude = bits & ~sign_mask_h;
 
@@ -225,7 +225,7 @@ pub fn scaleBH(mode: RoundMode, value: f16, exponent: i32) f16 {
         const result_bits = sign |
             (result_exponent << 10) |
             (significand & fraction_mask_h);
-        return fromBitsH(result_bits);
+        return fromBitsh(result_bits);
     }
 
     const shift = 1 - scaled_exponent;
@@ -235,11 +235,11 @@ pub fn scaleBH(mode: RoundMode, value: f16, exponent: i32) f16 {
         significand,
         shift,
     );
-    return fromBitsH(sign | rounded_significand);
+    return fromBitsh(sign | rounded_significand);
 }
 
-pub fn roundIntegralH(mode: RoundMode, value: f16) f16 {
-    const bits = toBitsH(value);
+pub fn roundIntegralh(mode: RoundMode, value: f16) f16 {
+    const bits = toBitsh(value);
     const sign = bits & sign_mask_h;
     const magnitude = bits & ~sign_mask_h;
 
@@ -261,7 +261,7 @@ pub fn roundIntegralH(mode: RoundMode, value: f16) f16 {
             .toward_positive => if (sign == 0) 0x3c00 else 0,
             .toward_negative => if (sign != 0) 0x3c00 else 0,
         };
-        return fromBitsH(sign | rounded_magnitude);
+        return fromBitsh(sign | rounded_magnitude);
     }
 
     const fractional_bits: u4 = @intCast(10 - unbiased_exponent);
@@ -280,22 +280,22 @@ pub fn roundIntegralH(mode: RoundMode, value: f16) f16 {
         .toward_negative => sign != 0,
     };
     const rounded_magnitude = truncated + if (increment) unit else 0;
-    return fromBitsH(sign | rounded_magnitude);
+    return fromBitsh(sign | rounded_magnitude);
 }
 
-pub fn totalOrderH(left: f16, right: f16) bool {
+pub fn totalOrderh(left: f16, right: f16) bool {
     const left_bits: u16 = @bitCast(left);
     const right_bits: u16 = @bitCast(right);
     return totalOrderKeyH(left_bits) <= totalOrderKeyH(right_bits);
 }
 
-pub fn totalOrderF(left: f32, right: f32) bool {
+pub fn totalOrderf(left: f32, right: f32) bool {
     const left_bits: u32 = @bitCast(left);
     const right_bits: u32 = @bitCast(right);
     return totalOrderKeyF(left_bits) <= totalOrderKeyF(right_bits);
 }
 
-pub fn totalOrderD(left: f64, right: f64) bool {
+pub fn totalOrderd(left: f64, right: f64) bool {
     const left_bits: u64 = @bitCast(left);
     const right_bits: u64 = @bitCast(right);
     return totalOrderKeyD(left_bits) <= totalOrderKeyD(right_bits);
@@ -324,7 +324,7 @@ fn overflowH(mode: RoundMode, negative: bool) f16 {
         .toward_positive => if (negative) exponent_mask_h - 1 else exponent_mask_h,
         .toward_negative => if (negative) exponent_mask_h else exponent_mask_h - 1,
     };
-    return fromBitsH((if (negative) sign_mask_h else 0) | magnitude);
+    return fromBitsh((if (negative) sign_mask_h else 0) | magnitude);
 }
 
 fn roundShiftRightH(

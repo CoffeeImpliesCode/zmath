@@ -12,7 +12,7 @@ test "RoundMode defines the four public rounding modes" {
     try std.testing.expectEqual(modes.len, @typeInfo(ieee.RoundMode).@"enum".fields.len);
 }
 
-test "classifyF identifies every public IEEE class" {
+test "classifyf identifies every public IEEE class" {
     const cases = [_]struct {
         bits: u32,
         expected: ieee.Class,
@@ -28,11 +28,11 @@ test "classifyF identifies every public IEEE class" {
 
     for (cases) |case| {
         const value: f32 = @bitCast(case.bits);
-        try std.testing.expectEqual(case.expected, ieee.classifyF(value));
+        try std.testing.expectEqual(case.expected, ieee.classifyf(value));
     }
 }
 
-test "classifyD identifies every public IEEE class" {
+test "classifyd identifies every public IEEE class" {
     const cases = [_]struct {
         bits: u64,
         expected: ieee.Class,
@@ -48,11 +48,11 @@ test "classifyD identifies every public IEEE class" {
 
     for (cases) |case| {
         const value: f64 = @bitCast(case.bits);
-        try std.testing.expectEqual(case.expected, ieee.classifyD(value));
+        try std.testing.expectEqual(case.expected, ieee.classifyd(value));
     }
 }
 
-test "copySignF copies only the sign bit" {
+test "copySignf copies only the sign bit" {
     const positive: f32 = @bitCast(@as(u32, 0x3fc0_0000));
     const negative: f32 = @bitCast(@as(u32, 0xbfc0_0000));
     const positive_sign: f32 = @bitCast(@as(u32, 0x0000_0000));
@@ -60,15 +60,15 @@ test "copySignF copies only the sign bit" {
 
     try std.testing.expectEqual(
         @as(u32, 0xbfc0_0000),
-        @as(u32, @bitCast(ieee.copySignF(positive, negative_sign))),
+        @as(u32, @bitCast(ieee.copySignf(positive, negative_sign))),
     );
     try std.testing.expectEqual(
         @as(u32, 0x3fc0_0000),
-        @as(u32, @bitCast(ieee.copySignF(negative, positive_sign))),
+        @as(u32, @bitCast(ieee.copySignf(negative, positive_sign))),
     );
 }
 
-test "copySignD copies only the sign bit" {
+test "copySignd copies only the sign bit" {
     const positive: f64 = @bitCast(@as(u64, 0x3ff8_0000_0000_0000));
     const negative: f64 = @bitCast(@as(u64, 0xbff8_0000_0000_0000));
     const positive_sign: f64 = @bitCast(@as(u64, 0x0000_0000_0000_0000));
@@ -76,15 +76,15 @@ test "copySignD copies only the sign bit" {
 
     try std.testing.expectEqual(
         @as(u64, 0xbff8_0000_0000_0000),
-        @as(u64, @bitCast(ieee.copySignD(positive, negative_sign))),
+        @as(u64, @bitCast(ieee.copySignd(positive, negative_sign))),
     );
     try std.testing.expectEqual(
         @as(u64, 0x3ff8_0000_0000_0000),
-        @as(u64, @bitCast(ieee.copySignD(negative, positive_sign))),
+        @as(u64, @bitCast(ieee.copySignd(negative, positive_sign))),
     );
 }
 
-test "nextAfterF advances signed zero toward positive and negative one" {
+test "nextAfterf advances signed zero toward positive and negative one" {
     const positive_zero: f32 = @bitCast(@as(u32, 0x0000_0000));
     const negative_zero: f32 = @bitCast(@as(u32, 0x8000_0000));
     const positive_one: f32 = @bitCast(@as(u32, 0x3f80_0000));
@@ -92,23 +92,23 @@ test "nextAfterF advances signed zero toward positive and negative one" {
 
     try std.testing.expectEqual(
         @as(u32, 0x0000_0001),
-        @as(u32, @bitCast(ieee.nextAfterF(positive_zero, positive_one))),
+        @as(u32, @bitCast(ieee.nextAfterf(positive_zero, positive_one))),
     );
     try std.testing.expectEqual(
         @as(u32, 0x0000_0001),
-        @as(u32, @bitCast(ieee.nextAfterF(negative_zero, positive_one))),
+        @as(u32, @bitCast(ieee.nextAfterf(negative_zero, positive_one))),
     );
     try std.testing.expectEqual(
         @as(u32, 0x8000_0001),
-        @as(u32, @bitCast(ieee.nextAfterF(positive_zero, negative_one))),
+        @as(u32, @bitCast(ieee.nextAfterf(positive_zero, negative_one))),
     );
     try std.testing.expectEqual(
         @as(u32, 0x8000_0001),
-        @as(u32, @bitCast(ieee.nextAfterF(negative_zero, negative_one))),
+        @as(u32, @bitCast(ieee.nextAfterf(negative_zero, negative_one))),
     );
 }
 
-test "nextAfterD advances signed zero toward positive and negative one" {
+test "nextAfterd advances signed zero toward positive and negative one" {
     const positive_zero: f64 = @bitCast(@as(u64, 0x0000_0000_0000_0000));
     const negative_zero: f64 = @bitCast(@as(u64, 0x8000_0000_0000_0000));
     const positive_one: f64 = @bitCast(@as(u64, 0x3ff0_0000_0000_0000));
@@ -116,34 +116,34 @@ test "nextAfterD advances signed zero toward positive and negative one" {
 
     try std.testing.expectEqual(
         @as(u64, 0x0000_0000_0000_0001),
-        @as(u64, @bitCast(ieee.nextAfterD(positive_zero, positive_one))),
+        @as(u64, @bitCast(ieee.nextAfterd(positive_zero, positive_one))),
     );
     try std.testing.expectEqual(
         @as(u64, 0x0000_0000_0000_0001),
-        @as(u64, @bitCast(ieee.nextAfterD(negative_zero, positive_one))),
+        @as(u64, @bitCast(ieee.nextAfterd(negative_zero, positive_one))),
     );
     try std.testing.expectEqual(
         @as(u64, 0x8000_0000_0000_0001),
-        @as(u64, @bitCast(ieee.nextAfterD(positive_zero, negative_one))),
+        @as(u64, @bitCast(ieee.nextAfterd(positive_zero, negative_one))),
     );
     try std.testing.expectEqual(
         @as(u64, 0x8000_0000_0000_0001),
-        @as(u64, @bitCast(ieee.nextAfterD(negative_zero, negative_one))),
+        @as(u64, @bitCast(ieee.nextAfterd(negative_zero, negative_one))),
     );
 }
 
-test "totalOrderF orders negative zero before positive zero" {
+test "totalOrderf orders negative zero before positive zero" {
     const positive_zero: f32 = @bitCast(@as(u32, 0x0000_0000));
     const negative_zero: f32 = @bitCast(@as(u32, 0x8000_0000));
 
-    try std.testing.expect(ieee.totalOrderF(negative_zero, positive_zero));
-    try std.testing.expect(!ieee.totalOrderF(positive_zero, negative_zero));
+    try std.testing.expect(ieee.totalOrderf(negative_zero, positive_zero));
+    try std.testing.expect(!ieee.totalOrderf(positive_zero, negative_zero));
 }
 
-test "totalOrderD orders negative zero before positive zero" {
+test "totalOrderd orders negative zero before positive zero" {
     const positive_zero: f64 = @bitCast(@as(u64, 0x0000_0000_0000_0000));
     const negative_zero: f64 = @bitCast(@as(u64, 0x8000_0000_0000_0000));
 
-    try std.testing.expect(ieee.totalOrderD(negative_zero, positive_zero));
-    try std.testing.expect(!ieee.totalOrderD(positive_zero, negative_zero));
+    try std.testing.expect(ieee.totalOrderd(negative_zero, positive_zero));
+    try std.testing.expect(!ieee.totalOrderd(positive_zero, negative_zero));
 }

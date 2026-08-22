@@ -10,7 +10,7 @@ The current public root exports `add`, `printAnotherMessage`, `ieee`, and `scala
 
 `zmath` is a dependency-free Zig 0.16 mathematics library. Public fixed-size operations do not allocate.
 
-Public real formats are `f16`, `f32`, and `f64` for the current IEEE and scalar primitives. Public type names use `h`, `f`, and `d` suffixes. Public function names use `H`, `F`, and `D` suffixes. The `q` and `Q` suffixes remain reserved for a future `f128` API. No bfloat16 API exists.
+Public real formats are `f16`, `f32`, and `f64` for the current IEEE and scalar primitives. Public type and function names use lower-case `h`, `f`, and `d` suffixes. The `q` suffix remains reserved for a future `f128` API. No bfloat16 API exists.
 
 The API uses one structural generic, `Mat`. Vectors, quaternions, geometry, factorizations, and geometric algebras use named concrete types.
 
@@ -59,7 +59,7 @@ Geometry and algebra do not depend on each other.
 
 The complete planned `zmath.ieee` API owns classification, total order, bit conversion, successor, predecessor, scaling, and rounding for the public real formats.
 
-`H` is implemented for the current IEEE and scalar primitives. These primitives implement the `H`, `F`, and `D` suffix families:
+`h` is implemented for the current IEEE and scalar primitives. These primitives implement the `h`, `f`, and `d` suffix families:
 
 ```zig
 pub const RoundMode = enum {
@@ -78,33 +78,33 @@ pub const Class = enum {
     signaling_nan,
 };
 
-pub fn classifyH(value: f16) Class;
-pub fn classifyF(value: f32) Class;
-pub fn classifyD(value: f64) Class;
-pub fn copySignH(value: f16, sign: f16) f16;
-pub fn copySignF(value: f32, sign: f32) f32;
-pub fn copySignD(value: f64, sign: f64) f64;
-pub fn nextAfterH(from: f16, to: f16) f16;
-pub fn nextAfterF(from: f32, to: f32) f32;
-pub fn nextAfterD(from: f64, to: f64) f64;
-pub fn totalOrderH(left: f16, right: f16) bool;
-pub fn totalOrderF(left: f32, right: f32) bool;
-pub fn totalOrderD(left: f64, right: f64) bool;
+pub fn classifyh(value: f16) Class;
+pub fn classifyf(value: f32) Class;
+pub fn classifyd(value: f64) Class;
+pub fn copySignh(value: f16, sign: f16) f16;
+pub fn copySignf(value: f32, sign: f32) f32;
+pub fn copySignd(value: f64, sign: f64) f64;
+pub fn nextAfterh(from: f16, to: f16) f16;
+pub fn nextAfterf(from: f32, to: f32) f32;
+pub fn nextAfterd(from: f64, to: f64) f64;
+pub fn totalOrderh(left: f16, right: f16) bool;
+pub fn totalOrderf(left: f32, right: f32) bool;
+pub fn totalOrderd(left: f64, right: f64) bool;
 ```
 
-`nextAfterH`, `nextAfterF`, and `nextAfterD` choose the first NaN operand. If it is a signaling NaN, they set its quiet bit and preserve its sign and payload. They return a quiet NaN unchanged.
+`nextAfterh`, `nextAfterf`, and `nextAfterd` choose the first NaN operand. If it is a signaling NaN, they set its quiet bit and preserve its sign and payload. They return a quiet NaN unchanged.
 
-`totalOrderH`, `totalOrderF`, and `totalOrderD` are Boolean predicates. They return `true` when `left` precedes or equals `right` in the IEEE total order.
+`totalOrderh`, `totalOrderf`, and `totalOrderd` are Boolean predicates. They return `true` when `left` precedes or equals `right` in the IEEE total order.
 
 The implemented public scalar subset is:
 
 ```zig
-pub fn absH(value: f16) f16;
-pub fn absF(value: f32) f32;
-pub fn absD(value: f64) f64;
-pub fn ulpDistanceH(a: f16, b: f16) u16;
-pub fn ulpDistanceF(a: f32, b: f32) u32;
-pub fn ulpDistanceD(a: f64, b: f64) u64;
+pub fn absh(value: f16) f16;
+pub fn absf(value: f32) f32;
+pub fn absd(value: f64) f64;
+pub fn ulpDistanceh(a: f16, b: f16) u16;
+pub fn ulpDistancef(a: f32, b: f32) u32;
+pub fn ulpDistanced(a: f64, b: f64) u64;
 ```
 
 A planned scalar operation takes an explicit `RoundMode` when its result depends on rounding. The API does not read or change the process floating-point environment.
@@ -112,12 +112,15 @@ A planned scalar operation takes an explicit `RoundMode` when its result depends
 The CORE-MATH manifest-gated transcendental functions below remain planned. `zmath` does not currently export them.
 
 ```zig
-pub fn sinF(mode: RoundMode, x: f32) f32;
-pub fn sinD(mode: RoundMode, x: f64) f64;
-pub fn expF(mode: RoundMode, x: f32) f32;
-pub fn expD(mode: RoundMode, x: f64) f64;
-pub fn logF(mode: RoundMode, x: f32) f32;
-pub fn logD(mode: RoundMode, x: f64) f64;
+pub fn sinh(mode: RoundMode, x: f16) f16;
+pub fn sinf(mode: RoundMode, x: f32) f32;
+pub fn sind(mode: RoundMode, x: f64) f64;
+pub fn exph(mode: RoundMode, x: f16) f16;
+pub fn expf(mode: RoundMode, x: f32) f32;
+pub fn expd(mode: RoundMode, x: f64) f64;
+pub fn logh(mode: RoundMode, x: f16) f16;
+pub fn logf(mode: RoundMode, x: f32) f32;
+pub fn logd(mode: RoundMode, x: f64) f64;
 ```
 
 ### CORE-MATH manifest
@@ -146,18 +149,18 @@ pub const Complexd = struct { re: f64, im: f64 };
 The complete C99/C23 complex surface is required for both types. The planned module functions use an explicit type suffix:
 
 ```zig
-pub fn realF(value: Complexf) f32;
-pub fn realD(value: Complexd) f64;
-pub fn imagF(value: Complexf) f32;
-pub fn imagD(value: Complexd) f64;
-pub fn conjF(value: Complexf) Complexf;
-pub fn conjD(value: Complexd) Complexd;
-pub fn projF(value: Complexf) Complexf;
-pub fn projD(value: Complexd) Complexd;
-pub fn absF(value: Complexf) f32;
-pub fn absD(value: Complexd) f64;
-pub fn argF(value: Complexf) f32;
-pub fn argD(value: Complexd) f64;
+pub fn realf(value: Complexf) f32;
+pub fn reald(value: Complexd) f64;
+pub fn imagf(value: Complexf) f32;
+pub fn imagd(value: Complexd) f64;
+pub fn conjf(value: Complexf) Complexf;
+pub fn conjd(value: Complexd) Complexd;
+pub fn projf(value: Complexf) Complexf;
+pub fn projd(value: Complexd) Complexd;
+pub fn absf(value: Complexf) f32;
+pub fn absd(value: Complexd) f64;
+pub fn argf(value: Complexf) f32;
+pub fn argd(value: Complexd) f64;
 ```
 
 For both suffixes, the manifest enumerates `add`, `sub`, `mul`, `div`, `exp`, `log`, `log10`, `pow`, `sqrt`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, and `atanh`.

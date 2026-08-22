@@ -1,7 +1,7 @@
 const ieee = @import("ieee.zig");
 
 fn expectBits(expected: u16, actual: f16) !void {
-    if (ieee.toBitsH(actual) != expected) return error.TestExpectedEqual;
+    if (ieee.toBitsh(actual) != expected) return error.TestExpectedEqual;
 }
 
 test "H bit conversions preserve representative IEEE encodings" {
@@ -21,43 +21,43 @@ test "H bit conversions preserve representative IEEE encodings" {
     };
 
     for (encodings) |bits| {
-        if (ieee.toBitsH(ieee.fromBitsH(bits)) != bits) return error.TestExpectedEqual;
+        if (ieee.toBitsh(ieee.fromBitsh(bits)) != bits) return error.TestExpectedEqual;
     }
 }
 
-test "nextUpH and nextDownH step across both signed zeros" {
-    const positive_zero = ieee.fromBitsH(0x0000);
-    const negative_zero = ieee.fromBitsH(0x8000);
+test "nextUph and nextDownh step across both signed zeros" {
+    const positive_zero = ieee.fromBitsh(0x0000);
+    const negative_zero = ieee.fromBitsh(0x8000);
 
-    try expectBits(0x0001, ieee.nextUpH(positive_zero));
-    try expectBits(0x0001, ieee.nextUpH(negative_zero));
-    try expectBits(0x8001, ieee.nextDownH(positive_zero));
-    try expectBits(0x8001, ieee.nextDownH(negative_zero));
+    try expectBits(0x0001, ieee.nextUph(positive_zero));
+    try expectBits(0x0001, ieee.nextUph(negative_zero));
+    try expectBits(0x8001, ieee.nextDownh(positive_zero));
+    try expectBits(0x8001, ieee.nextDownh(negative_zero));
 }
 
-test "nextUpH and nextDownH handle infinity boundaries" {
-    const positive_infinity = ieee.fromBitsH(0x7c00);
-    const negative_infinity = ieee.fromBitsH(0xfc00);
+test "nextUph and nextDownh handle infinity boundaries" {
+    const positive_infinity = ieee.fromBitsh(0x7c00);
+    const negative_infinity = ieee.fromBitsh(0xfc00);
 
-    try expectBits(0x7c00, ieee.nextUpH(positive_infinity));
-    try expectBits(0x7bff, ieee.nextDownH(positive_infinity));
-    try expectBits(0xfbff, ieee.nextUpH(negative_infinity));
-    try expectBits(0xfc00, ieee.nextDownH(negative_infinity));
+    try expectBits(0x7c00, ieee.nextUph(positive_infinity));
+    try expectBits(0x7bff, ieee.nextDownh(positive_infinity));
+    try expectBits(0xfbff, ieee.nextUph(negative_infinity));
+    try expectBits(0xfc00, ieee.nextDownh(negative_infinity));
 }
 
-test "nextUpH and nextDownH quiet signaling NaNs" {
-    const positive_signaling_nan = ieee.fromBitsH(0x7d55);
-    const negative_signaling_nan = ieee.fromBitsH(0xfd55);
+test "nextUph and nextDownh quiet signaling NaNs" {
+    const positive_signaling_nan = ieee.fromBitsh(0x7d55);
+    const negative_signaling_nan = ieee.fromBitsh(0xfd55);
 
-    try expectBits(0x7f55, ieee.nextUpH(positive_signaling_nan));
-    try expectBits(0x7f55, ieee.nextDownH(positive_signaling_nan));
-    try expectBits(0xff55, ieee.nextUpH(negative_signaling_nan));
-    try expectBits(0xff55, ieee.nextDownH(negative_signaling_nan));
+    try expectBits(0x7f55, ieee.nextUph(positive_signaling_nan));
+    try expectBits(0x7f55, ieee.nextDownh(positive_signaling_nan));
+    try expectBits(0xff55, ieee.nextUph(negative_signaling_nan));
+    try expectBits(0xff55, ieee.nextDownh(negative_signaling_nan));
 }
 
-test "scaleBH rounds positive and negative overflow in every mode" {
-    const positive_maximum = ieee.fromBitsH(0x7bff);
-    const negative_maximum = ieee.fromBitsH(0xfbff);
+test "scaleBh rounds positive and negative overflow in every mode" {
+    const positive_maximum = ieee.fromBitsh(0x7bff);
+    const negative_maximum = ieee.fromBitsh(0xfbff);
     const cases = [_]struct {
         mode: ieee.RoundMode,
         positive_bits: u16,
@@ -70,14 +70,14 @@ test "scaleBH rounds positive and negative overflow in every mode" {
     };
 
     for (cases) |case| {
-        try expectBits(case.positive_bits, ieee.scaleBH(case.mode, positive_maximum, 1));
-        try expectBits(case.negative_bits, ieee.scaleBH(case.mode, negative_maximum, 1));
+        try expectBits(case.positive_bits, ieee.scaleBh(case.mode, positive_maximum, 1));
+        try expectBits(case.negative_bits, ieee.scaleBh(case.mode, negative_maximum, 1));
     }
 }
 
-test "scaleBH rounds positive and negative underflow in every mode" {
-    const positive_minimum = ieee.fromBitsH(0x0001);
-    const negative_minimum = ieee.fromBitsH(0x8001);
+test "scaleBh rounds positive and negative underflow in every mode" {
+    const positive_minimum = ieee.fromBitsh(0x0001);
+    const negative_minimum = ieee.fromBitsh(0x8001);
     const cases = [_]struct {
         mode: ieee.RoundMode,
         positive_bits: u16,
@@ -90,14 +90,14 @@ test "scaleBH rounds positive and negative underflow in every mode" {
     };
 
     for (cases) |case| {
-        try expectBits(case.positive_bits, ieee.scaleBH(case.mode, positive_minimum, -1));
-        try expectBits(case.negative_bits, ieee.scaleBH(case.mode, negative_minimum, -1));
+        try expectBits(case.positive_bits, ieee.scaleBh(case.mode, positive_minimum, -1));
+        try expectBits(case.negative_bits, ieee.scaleBh(case.mode, negative_minimum, -1));
     }
 }
 
-test "roundIntegralH rounds positive and negative ties in every mode" {
-    const positive_tie = ieee.fromBitsH(0x4100);
-    const negative_tie = ieee.fromBitsH(0xc100);
+test "roundIntegralh rounds positive and negative ties in every mode" {
+    const positive_tie = ieee.fromBitsh(0x4100);
+    const negative_tie = ieee.fromBitsh(0xc100);
     const cases = [_]struct {
         mode: ieee.RoundMode,
         positive_bits: u16,
@@ -110,7 +110,7 @@ test "roundIntegralH rounds positive and negative ties in every mode" {
     };
 
     for (cases) |case| {
-        try expectBits(case.positive_bits, ieee.roundIntegralH(case.mode, positive_tie));
-        try expectBits(case.negative_bits, ieee.roundIntegralH(case.mode, negative_tie));
+        try expectBits(case.positive_bits, ieee.roundIntegralh(case.mode, positive_tie));
+        try expectBits(case.negative_bits, ieee.roundIntegralh(case.mode, negative_tie));
     }
 }

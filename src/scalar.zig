@@ -10,22 +10,22 @@ const infinity_bits_h: u16 = 0x7c00;
 const infinity_bits_f: u32 = 0x7f80_0000;
 const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
 
-pub fn absH(value: f16) f16 {
+pub fn absh(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     return @bitCast(bits & magnitude_mask_h);
 }
 
-pub fn absF(value: f32) f32 {
+pub fn absf(value: f32) f32 {
     const bits: u32 = @bitCast(value);
     return @bitCast(bits & magnitude_mask_f);
 }
 
-pub fn absD(value: f64) f64 {
+pub fn absd(value: f64) f64 {
     const bits: u64 = @bitCast(value);
     return @bitCast(bits & magnitude_mask_d);
 }
 
-pub fn ulpDistanceH(a: f16, b: f16) u16 {
+pub fn ulpDistanceh(a: f16, b: f16) u16 {
     const a_bits: u16 = @bitCast(a);
     const b_bits: u16 = @bitCast(b);
 
@@ -37,7 +37,7 @@ pub fn ulpDistanceH(a: f16, b: f16) u16 {
     return b_ordered - a_ordered;
 }
 
-pub fn ulpDistanceF(a: f32, b: f32) u32 {
+pub fn ulpDistancef(a: f32, b: f32) u32 {
     const a_bits: u32 = @bitCast(a);
     const b_bits: u32 = @bitCast(b);
 
@@ -49,7 +49,7 @@ pub fn ulpDistanceF(a: f32, b: f32) u32 {
     return b_ordered - a_ordered;
 }
 
-pub fn ulpDistanceD(a: f64, b: f64) u64 {
+pub fn ulpDistanced(a: f64, b: f64) u64 {
     const a_bits: u64 = @bitCast(a);
     const b_bits: u64 = @bitCast(b);
 

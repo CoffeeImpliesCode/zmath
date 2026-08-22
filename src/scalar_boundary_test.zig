@@ -9,11 +9,11 @@ test "ULP distance across signed minimum subnormals is two" {
 
     try std.testing.expectEqual(
         @as(u32, 2),
-        scalar.ulpDistanceF(negative_minimum_f, positive_minimum_f),
+        scalar.ulpDistancef(negative_minimum_f, positive_minimum_f),
     );
     try std.testing.expectEqual(
         @as(u64, 2),
-        scalar.ulpDistanceD(negative_minimum_d, positive_minimum_d),
+        scalar.ulpDistanced(negative_minimum_d, positive_minimum_d),
     );
 }
 
@@ -25,11 +25,11 @@ test "ULP distance across infinities spans the finite encoding range" {
 
     try std.testing.expectEqual(
         @as(u32, 0xff00_0000),
-        scalar.ulpDistanceF(negative_infinity_f, positive_infinity_f),
+        scalar.ulpDistancef(negative_infinity_f, positive_infinity_f),
     );
     try std.testing.expectEqual(
         @as(u64, 0xffe0_0000_0000_0000),
-        scalar.ulpDistanceD(negative_infinity_d, positive_infinity_d),
+        scalar.ulpDistanced(negative_infinity_d, positive_infinity_d),
     );
 }
 
@@ -39,10 +39,10 @@ test "ULP distance from NaN is the maximum unsigned sentinel" {
 
     try std.testing.expectEqual(
         @as(u32, 0xffff_ffff),
-        scalar.ulpDistanceF(nan_f, 0.0),
+        scalar.ulpDistancef(nan_f, 0.0),
     );
     try std.testing.expectEqual(
         @as(u64, 0xffff_ffff_ffff_ffff),
-        scalar.ulpDistanceD(nan_d, 0.0),
+        scalar.ulpDistanced(nan_d, 0.0),
     );
 }
