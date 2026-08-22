@@ -824,3 +824,104 @@ pub fn cosd(value: f64) f64 {
 
     return cosAccurate(absolute_value);
 }
+
+// The following Dint quotient and finite tangent path are derived from
+// CORE-MATH src/binary64/tan/tan.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa (MIT License).
+
+fn divideDint(result: *Dint, numerator: *const Dint, denominator: *const Dint) void {
+    const numerator_bits = dintBits(numerator.*);
+    const denominator_bits = dintBits(denominator.*);
+    const integer_part = numerator_bits / denominator_bits;
+    var remainder = numerator_bits % denominator_bits;
+    var quotient = integer_part << 127;
+    var bit_index: i32 = 126;
+    const half_denominator = (denominator_bits >> 1) + (denominator_bits & 1);
+    while (bit_index >= 0) : (bit_index -= 1) {
+        if (remainder >= half_denominator) {
+            remainder = (remainder << 1) -% denominator_bits;
+            quotient |= @as(u128, 1) << @as(u7, @intCast(bit_index));
+        } else {
+            remainder <<= 1;
+        }
+    }
+    const round_up = if ((denominator_bits & 1) == 0)
+        remainder > half_denominator or
+            (remainder == half_denominator and (quotient & 1) != 0)
+    else
+        remainder >= half_denominator;
+    const quotient_overflow = round_up and quotient == ~@as(u128, 0);
+    if (round_up and !quotient_overflow) quotient += 1;
+
+    var exponent = numerator.ex - denominator.ex;
+    if (quotient_overflow) {
+        quotient = @as(u128, 1) << 127;
+        exponent += 2;
+    } else if ((quotient >> 127) != 0) {
+        exponent += 1;
+    } else {
+        quotient <<= 1;
+    }
+    if (quotient == 0) {
+        result.* = zero;
+        result.sgn = numerator.sgn ^ denominator.sgn;
+        return;
+    }
+    result.* = .{
+        .hi = @truncate(quotient >> 64),
+        .lo = @truncate(quotient),
+        .ex = exponent,
+        .sgn = numerator.sgn ^ denominator.sgn,
+    };
+}
+
+/// Return the direct CORE-MATH accurate tangent path.
+pub fn tanAccurate(value: f64) f64 {
+    @setFloatMode(.strict);
+    const input_bits: u64 = @bitCast(value);
+    const absolute_bits = input_bits & magnitude_mask;
+    const absolute_value: f64 = @bitCast(absolute_bits);
+    var reduced = dintFromDouble(absolute_value);
+    reduce(&reduced);
+
+    var is_tan = true;
+    var negative = (input_bits & sign_mask) != 0;
+    var index = reduce2(&reduced);
+    index &= 0x3ff;
+
+    if ((index & 0x200) != 0) {
+        is_tan = false;
+        negative = !negative;
+        index &= 0x1ff;
+    }
+    if ((index & 0x100) != 0) {
+        is_tan = !is_tan;
+        reduced.sgn = 1;
+        addDint(&reduced, &magic, &reduced);
+        index = 0x1ff - index;
+    }
+
+    var square: Dint = undefined;
+    mulDint(&square, &reduced, &reduced);
+    const cosine_tail = evalCosAccurate(&square);
+    const sine_tail = evalSinAccurate(&reduced, &square);
+    var sine_result: Dint = undefined;
+    var cosine_result: Dint = undefined;
+    var sine_from_cosine: Dint = undefined;
+    var cosine_from_sine: Dint = undefined;
+    mulDint(&sine_from_cosine, &data.s[index], &cosine_tail);
+    mulDint(&cosine_from_sine, &data.c[index], &sine_tail);
+    addDint(&sine_result, &sine_from_cosine, &cosine_from_sine);
+    mulDint(&cosine_result, &data.c[index], &cosine_tail);
+    mulDint(&cosine_from_sine, &data.s[index], &sine_tail);
+    cosine_from_sine.sgn = 1 - cosine_from_sine.sgn;
+    addDint(&cosine_result, &cosine_result, &cosine_from_sine);
+    var numerator: Dint = undefined;
+    if (is_tan) {
+        divideDint(&numerator, &sine_result, &cosine_result);
+    } else {
+        divideDint(&numerator, &cosine_result, &sine_result);
+    }
+    if (negative) numerator.sgn = 1 - numerator.sgn;
+    return dintToDouble(numerator);
+}

@@ -51,6 +51,17 @@ pub fn cos(value: anytype) @TypeOf(value) {
     @compileError("zmath.cos supports only f16, f32, and f64");
 }
 
+/// Computes the tangent of `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn tan(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.tanh(value);
+    if (T == f32) return scalar.tanf(value);
+    if (T == f64) return scalar.tand(value);
+    @compileError("zmath.tan supports only f16, f32, and f64");
+}
+
 /// Computes the reciprocal square root of `value` with the scalar
 /// implementation for its type.
 ///
@@ -90,6 +101,7 @@ test {
     _ = @import("scalar_sin_test.zig");
     _ = @import("scalar_cos_test.zig");
     _ = @import("scalar_sind_test.zig");
+    _ = @import("scalar_tan_test.zig");
     _ = @import("scalar_stdlib_agreement_test.zig");
     _ = @import("scalar_exp2_test.zig");
     _ = @import("scalar_cbrt_test.zig");
@@ -111,6 +123,11 @@ test "root exports nearest-even binary64 sine" {
 test "root exports nearest-even binary64 cosine" {
     const input: f64 = 1.0;
     try std.testing.expectEqual(@as(u64, 0x3fe1_4a28_0fb5_068c), @as(u64, @bitCast(scalar.cosd(input))));
+}
+test "root exports nearest-even binary16/32/64 tangent" {
+    try std.testing.expectEqual(@as(u16, 0x3e3b), @as(u16, @bitCast(tan(@as(f16, 1.0)))));
+    try std.testing.expectEqual(@as(u32, 0x3fc7_5923), @as(u32, @bitCast(tan(@as(f32, 1.0)))));
+    try std.testing.expectEqual(@as(u64, 0x3ff8_eb24_5cbe_e3a6), @as(u64, @bitCast(tan(@as(f64, 1.0)))));
 }
 test "root exports nearest-even Exp2 family" {
     try std.testing.expectEqual(

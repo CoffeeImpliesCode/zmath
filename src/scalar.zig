@@ -28,6 +28,9 @@ const rsqrt_impl = @import("scalar_rsqrt.zig");
 pub const rsqrth = rsqrt_impl.rsqrth;
 pub const rsqrtf = rsqrt_impl.rsqrtf;
 pub const rsqrtd = rsqrt_impl.rsqrtd;
+pub const tanh = @import("scalar_tanh.zig").tanh;
+pub const tanf = @import("scalar_tanf.zig").tanf;
+pub const tand = @import("scalar_tand.zig").tand;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
