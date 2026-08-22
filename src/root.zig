@@ -120,6 +120,18 @@ pub fn asin(value: anytype) @TypeOf(value) {
     @compileError("zmath.asin supports only f16, f32, and f64");
 }
 
+/// Computes the inverse hyperbolic tangent of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn atanh(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.atanhh(value);
+    if (T == f32) return scalar.atanhf(value);
+    if (T == f64) return scalar.atanhd(value);
+    @compileError("zmath.atanh supports only f16, f32, and f64");
+}
+
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
 /// Accepting an `Io.Writer` instance is a handy way to write reusable code.
@@ -145,6 +157,7 @@ test {
     _ = @import("scalar_expm1_test.zig");
     _ = @import("scalar_log_test.zig");
     _ = @import("scalar_log1p_test.zig");
+    _ = @import("scalar_atanh_test.zig");
     _ = @import("scalar_sin_test.zig");
     _ = @import("scalar_cos_test.zig");
     _ = @import("scalar_sind_test.zig");
@@ -171,6 +184,21 @@ test "root exports nearest-even Atan H, F, and D" {
     try std.testing.expectEqual(
         @as(u64, 0x3fe9_21fb_5444_2d18),
         @as(u64, @bitCast(scalar.atand(@as(f64, 1.0)))),
+    );
+}
+
+test "root exports nearest-even Atanh family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3865),
+        @as(u16, @bitCast(atanh(@as(f16, 0.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f0c_9f54),
+        @as(u32, @bitCast(atanh(@as(f32, 0.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3fe1_93ea_7aad_030b),
+        @as(u64, @bitCast(atanh(@as(f64, 0.5)))),
     );
 }
 
