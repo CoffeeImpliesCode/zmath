@@ -1,3 +1,5 @@
+pub const sind = @import("scalar_sind.zig").sind;
+
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;
