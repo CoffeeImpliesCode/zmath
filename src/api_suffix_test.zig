@@ -29,5 +29,9 @@ test "scalar exposes h, f, and d suffix exports" {
         _ = scalar.ulpDistanceh;
         _ = scalar.ulpDistancef;
         _ = scalar.ulpDistanced;
+
+        _ = scalar.rsqrth;
+        _ = scalar.rsqrtf;
+        _ = scalar.rsqrtd;
     }
 }

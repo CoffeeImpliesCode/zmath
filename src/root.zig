@@ -51,6 +51,18 @@ pub fn cos(value: anytype) @TypeOf(value) {
     @compileError("zmath.cos supports only f16, f32, and f64");
 }
 
+/// Computes the reciprocal square root of `value` with the scalar
+/// implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn rsqrt(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.rsqrth(value);
+    if (T == f32) return scalar.rsqrtf(value);
+    if (T == f64) return scalar.rsqrtd(value);
+    @compileError("zmath.rsqrt supports only f16, f32, and f64");
+}
+
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
 /// Accepting an `Io.Writer` instance is a handy way to write reusable code.
@@ -67,6 +79,7 @@ test {
     _ = @import("ieee_edge_test.zig");
     _ = @import("scalar_test.zig");
     _ = @import("scalar_boundary_test.zig");
+    _ = @import("scalar_rsqrt_test.zig");
     _ = @import("api_suffix_test.zig");
     _ = @import("ieee_h_complete_test.zig");
     _ = @import("ieee_exhaustive_h_test.zig");
@@ -106,9 +119,24 @@ test "root exports nearest-even Exp2 family" {
         @as(u32, 0x4000_0000),
         @as(u32, @bitCast(scalar.exp2f(1.0))),
     );
+
     try std.testing.expectEqual(
         @as(u64, 0x4000_0000_0000_0000),
         @as(u64, @bitCast(scalar.exp2d(1.0))),
+    );
+}
+test "root exports nearest-even Rsqrt family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x39a8),
+        @as(u16, @bitCast(rsqrt(@as(f16, 2.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f35_04f3),
+        @as(u32, @bitCast(rsqrt(@as(f32, 2.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3fe6_a09e_667f_3bcd),
+        @as(u64, @bitCast(rsqrt(@as(f64, 2.0)))),
     );
 }
 
