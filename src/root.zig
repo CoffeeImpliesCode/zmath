@@ -94,6 +94,22 @@ test {
     _ = @import("scalar_exp2_test.zig");
     _ = @import("scalar_cbrt_test.zig");
     _ = @import("scalar_hypot_test.zig");
+    _ = @import("scalar_atan_test.zig");
+}
+
+test "root exports nearest-even Atan H, F, and D" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3a48),
+        @as(u16, @bitCast(scalar.atanh(@as(f16, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f49_0fdb),
+        @as(u32, @bitCast(scalar.atanf(@as(f32, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3fe9_21fb_5444_2d18),
+        @as(u64, @bitCast(scalar.atand(@as(f64, 1.0)))),
+    );
 }
 
 test "basic add functionality" {
