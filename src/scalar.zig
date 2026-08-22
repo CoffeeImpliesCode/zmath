@@ -1,3 +1,8 @@
+const asin_impl = @import("scalar_asin.zig");
+pub const asinh = asin_impl.asinh;
+pub const asinf = asin_impl.asinf;
+pub const asind = asin_impl.asind;
+
 const cbrt_impl = @import("scalar_cbrt.zig");
 pub const cbrth = cbrt_impl.cbrth;
 pub const cbrtf = cbrt_impl.cbrtf;
@@ -7,6 +12,10 @@ const hypot_impl = @import("scalar_hypot.zig");
 pub const hypoth = hypot_impl.hypoth;
 pub const hypotf = hypot_impl.hypotf;
 pub const hypotd = hypot_impl.hypotd;
+const atan_impl = @import("scalar_atan.zig");
+pub const atanh = atan_impl.atanh;
+pub const atanf = atan_impl.atanf;
+pub const atand = atan_impl.atand;
 pub const expm1h = @import("scalar_expm1h.zig").expm1h;
 pub const expm1f = @import("scalar_expm1f.zig").expm1f;
 pub const expm1d = @import("scalar_expm1d.zig").expm1d;
@@ -28,6 +37,9 @@ const rsqrt_impl = @import("scalar_rsqrt.zig");
 pub const rsqrth = rsqrt_impl.rsqrth;
 pub const rsqrtf = rsqrt_impl.rsqrtf;
 pub const rsqrtd = rsqrt_impl.rsqrtd;
+pub const tanh = @import("scalar_tanh.zig").tanh;
+pub const tanf = @import("scalar_tanf.zig").tanf;
+pub const tand = @import("scalar_tand.zig").tand;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
