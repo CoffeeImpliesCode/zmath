@@ -6,12 +6,29 @@ const std = @import("std");
 // for defining build steps and express dependencies between them, allowing the
 // build runner to parallelize the build automatically (and the cache system to
 // know when a step doesn't need to be re-run).
+fn erfcTargetSupportsFma(target: std.Build.ResolvedTarget) bool {
+    return switch (target.result.cpu.arch) {
+        .x86, .x86_64 => target.result.cpu.has(.x86, .fma),
+        .aarch64, .aarch64_be => true,
+        else => false,
+    };
+}
+
+fn requireErfcTargetFma(target: std.Build.ResolvedTarget) void {
+    if (!erfcTargetSupportsFma(target)) {
+        @panic(
+            "zmath Erfc kernels require scalar fused multiply-add; use x86/x86_64 with FMA or aarch64",
+        );
+    }
+}
+
 pub fn build(b: *std.Build) void {
     // Standard target options allow the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
+    requireErfcTargetFma(target);
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
@@ -39,6 +56,23 @@ pub fn build(b: *std.Build) void {
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,
+    });
+    const core_math_erfc_flags = &.{
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+    };
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_erfch.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_erfcf.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_erfcd.c"),
+        .flags = core_math_erfc_flags,
     });
 
     // Here we define an executable. An executable needs to have a root module

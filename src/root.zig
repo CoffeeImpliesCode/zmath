@@ -17,6 +17,18 @@ pub fn exp(value: anytype) @TypeOf(value) {
     @compileError("zmath.exp supports only f16, f32, and f64");
 }
 
+/// Computes the complementary error function of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn erfc(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.erfch(value);
+    if (T == f32) return scalar.erfcf(value);
+    if (T == f64) return scalar.erfcd(value);
+    @compileError("zmath.erfc supports only f16, f32, and f64");
+}
+
 /// Computes the natural logarithm of `value` with the scalar implementation
 /// for its type.
 ///
@@ -27,6 +39,18 @@ pub fn log(value: anytype) @TypeOf(value) {
     if (T == f32) return scalar.logf(value);
     if (T == f64) return scalar.logd(value);
     @compileError("zmath.log supports only f16, f32, and f64");
+}
+
+/// Computes the error function of `value` with the scalar implementation for
+/// its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn erf(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.erfh(value);
+    if (T == f32) return scalar.erff(value);
+    if (T == f64) return scalar.erfd(value);
+    @compileError("zmath.erf supports only f16, f32, and f64");
 }
 
 /// Computes the hyperbolic sine of `value` with the scalar implementation
@@ -169,6 +193,7 @@ test {
     _ = @import("ieee_test.zig");
     _ = @import("ieee_edge_test.zig");
     _ = @import("scalar_test.zig");
+    _ = @import("scalar_erfc_test.zig");
     _ = @import("scalar_cosh_test.zig");
     _ = @import("scalar_boundary_test.zig");
     _ = @import("scalar_rsqrt_test.zig");
@@ -193,6 +218,7 @@ test {
     _ = @import("scalar_asinh_test.zig");
     _ = @import("scalar_atan_test.zig");
     _ = @import("scalar_sinh_test.zig");
+    _ = @import("scalar_erf_test.zig");
     _ = @import("scalar_tanh_test.zig");
 }
 
