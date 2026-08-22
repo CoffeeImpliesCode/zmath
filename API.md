@@ -107,7 +107,7 @@ pub fn ulpDistancef(a: f32, b: f32) u32;
 pub fn ulpDistanced(a: f64, b: f64) u64;
 ```
 
-A planned scalar operation takes an explicit `RoundMode` when its result depends on rounding. The API does not read or change the process floating-point environment.
+A planned scalar operation takes an explicit `RoundMode` when its result depends on rounding. The initial Exp API below is the exception. The API does not read or change the process floating-point environment.
 
 The CORE-MATH manifest-gated transcendental functions below remain planned. `zmath` does not currently export them.
 
@@ -115,19 +115,23 @@ The CORE-MATH manifest-gated transcendental functions below remain planned. `zma
 pub fn sinh(mode: RoundMode, x: f16) f16;
 pub fn sinf(mode: RoundMode, x: f32) f32;
 pub fn sind(mode: RoundMode, x: f64) f64;
-pub fn exph(mode: RoundMode, x: f16) f16;
-pub fn expf(mode: RoundMode, x: f32) f32;
-pub fn expd(mode: RoundMode, x: f64) f64;
+pub fn exph(x: f16) f16;
+pub fn expf(x: f32) f32;
+pub fn expd(x: f64) f64;
 pub fn logh(mode: RoundMode, x: f16) f16;
 pub fn logf(mode: RoundMode, x: f32) f32;
 pub fn logd(mode: RoundMode, x: f64) f64;
 ```
+
+The initial Exp API always uses `nearest_even`. It does not support other rounding modes.
 
 ### CORE-MATH manifest
 
 Before any manifest-gated transcendental function becomes public, the repository adds a versioned manifest at `spec/core-math-<commit>.md`.
 
 The manifest pins one CORE-MATH commit. It lists every required f32 and f64 function-format pair, its zmath symbol, domain, special values, supported rounding modes, and accuracy class.
+
+For the initial Exp entries, the only supported rounding mode is `nearest_even`. Other rounding modes are unsupported. For these entries, `correct` means correctly rounded in `nearest_even`.
 
 A manifest entry is one of:
 
