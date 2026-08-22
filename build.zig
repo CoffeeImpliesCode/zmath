@@ -109,10 +109,12 @@ pub fn build(b: *std.Build) void {
     // installation directory rather than directly from within the cache directory.
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
+    // Zig 0.17 development builds temporarily removed Build.args. The coverage
+    // lane does not invoke `run`; retain argument forwarding where the field exists.
+    if (comptime @hasField(std.Build, "args")) {
+        if (@field(b, "args")) |args| {
+            run_cmd.addArgs(args);
+        }
     }
 
     // Creates an executable that will run `test` blocks from the provided module.
