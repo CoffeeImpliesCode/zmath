@@ -10,7 +10,7 @@ The current public root exports `add`, `printAnotherMessage`, `ieee`, and `scala
 
 `zmath` is a dependency-free Zig 0.16 mathematics library. Public fixed-size operations do not allocate.
 
-Public real formats are `f16`, `f32`, and `f64` for the current IEEE and scalar primitives. Public type and function names use lower-case `h`, `f`, and `d` suffixes. The `q` suffix remains reserved for a future `f128` API. No bfloat16 API exists.
+Public real formats are `f16`, `f32`, and `f64` for the current IEEE and scalar primitives. Public type and function names use lower-case `h`, `f`, and `d` suffixes. `q`, `f128`, and bfloat16 are outside this contract and have no public API.
 
 The API uses one structural generic, `Mat`. Vectors, quaternions, geometry, factorizations, and geometric algebras use named concrete types.
 
@@ -57,81 +57,370 @@ Geometry and algebra do not depend on each other.
 
 ## IEEE and scalar API
 
-The complete planned `zmath.ieee` API owns classification, total order, bit conversion, successor, predecessor, scaling, and rounding for the public real formats.
+### Status terms
 
-`h` is implemented for the current IEEE and scalar primitives. These primitives implement the `h`, `f`, and `d` suffix families:
+This contract uses three independent status terms:
+
+- **Target** names a planned public symbol.
+- **Implemented** means that the current `zmath` root or module exports the symbol.
+- **Manifest-accepted** means that a `correct` or `bounded` manifest row accepts one operation-format pair.
+
+A target symbol is not necessarily implemented. An implemented symbol is not necessarily manifest-accepted.
+
+The current root exports the `zmath.ieee` and `zmath.scalar` modules. A target `zmath.<op>` generic is a separate root export and is implemented only when it appears in an implementation-source snapshot.
+
+The implemented `zmath.ieee` exports are:
 
 ```zig
-pub const RoundMode = enum {
-    nearest_even,
-    toward_zero,
-    toward_positive,
-    toward_negative,
-};
-
-pub const Class = enum {
-    zero,
-    subnormal,
-    normal,
-    infinity,
-    quiet_nan,
-    signaling_nan,
-};
-
+pub const RoundMode = enum { nearest_even, toward_zero, toward_positive, toward_negative };
+pub const Class = enum { zero, subnormal, normal, infinity, quiet_nan, signaling_nan };
+pub fn toBitsh(value: f16) u16;
+pub fn fromBitsh(bits: u16) f16;
 pub fn classifyh(value: f16) Class;
 pub fn classifyf(value: f32) Class;
 pub fn classifyd(value: f64) Class;
 pub fn copySignh(value: f16, sign: f16) f16;
 pub fn copySignf(value: f32, sign: f32) f32;
 pub fn copySignd(value: f64, sign: f64) f64;
+pub fn nextUph(value: f16) f16;
+pub fn nextDownh(value: f16) f16;
 pub fn nextAfterh(from: f16, to: f16) f16;
 pub fn nextAfterf(from: f32, to: f32) f32;
 pub fn nextAfterd(from: f64, to: f64) f64;
+pub fn scaleBh(mode: RoundMode, value: f16, exponent: i32) f16;
+pub fn roundIntegralh(mode: RoundMode, value: f16) f16;
 pub fn totalOrderh(left: f16, right: f16) bool;
 pub fn totalOrderf(left: f32, right: f32) bool;
 pub fn totalOrderd(left: f64, right: f64) bool;
 ```
 
-`nextAfterh`, `nextAfterf`, and `nextAfterd` choose the first NaN operand. If it is a signaling NaN, they set its quiet bit and preserve its sign and payload. They return a quiet NaN unchanged.
-
-`totalOrderh`, `totalOrderf`, and `totalOrderd` are Boolean predicates. They return `true` when `left` precedes or equals `right` in the IEEE total order.
-
-The implemented public scalar subset is:
+The implemented `zmath.scalar` exports are:
 
 ```zig
+pub const logd = logd_impl.logd;
+pub const sind = @import("scalar_sind.zig").sind;
+pub const cosd = @import("scalar_sind.zig").cosd;
+pub fn exph(value: f16) f16;
+pub fn logh(value: f16) f16;
+pub fn sinh(value: f16) f16;
+pub fn cosh(value: f16) f16;
+pub fn logf(value: f32) f32;
 pub fn absh(value: f16) f16;
 pub fn absf(value: f32) f32;
 pub fn absd(value: f64) f64;
 pub fn ulpDistanceh(a: f16, b: f16) u16;
 pub fn ulpDistancef(a: f32, b: f32) u32;
 pub fn ulpDistanced(a: f64, b: f64) u64;
+pub fn expf(value: f32) f32;
+pub fn expd(value: f64) f64;
+pub fn sinf(value: f32) f32;
+pub fn cosf(value: f32) f32;
 ```
 
-Callers of the initial Exp, Log, and Sin functions must keep IEEE round-to-nearest, ties-to-even active for each call. These functions do not take a `RoundMode` argument. Other planned scalar operations can take an explicit `RoundMode`. `zmath` does not read, validate, set, or restore the process floating-point environment (`fenv`). Behavior under other rounding modes is unsupported.
+These are source exports. They do not imply a target generic root export or manifest acceptance.
 
-The CORE-MATH manifest-gated transcendental functions use these declarations as they become supported:
+The implemented target scalar families are:
+
+```text
+abs{h,f,d}
+ulpDistance{h,f,d}
+exp{h,f,d}
+log{h,f,d}
+sin{h,f,d}
+cos{h,f,d}
+```
+
+`ulpDistance` is a zmath extension. It is not a C23 scalar operation.
+
+This implemented-symbol list does not grant manifest acceptance. The versioned corpus manifest is the only acceptance authority.
+
+
+### Generic dispatch
+
+The target root API uses one generic operation name for `f16`, `f32`, and `f64`.
 
 ```zig
-pub fn exph(x: f16) f16;
-pub fn expf(x: f32) f32;
-pub fn expd(x: f64) f64;
-pub fn logh(x: f16) f16;
-pub fn logf(x: f32) f32;
-pub fn logd(x: f64) f64;
-pub fn sinh(x: f16) f16;
-pub fn sinf(x: f32) f32;
-pub fn sind(x: f64) f64;
+zmath.abs(value)
+zmath.sin(value)
+zmath.sinh(value)
+zmath.atan2(y, x)
+zmath.compoundn(value, exponent)
 ```
 
-The initial Exp, Log, and Sin API requires callers to keep IEEE round-to-nearest, ties-to-even active. Other rounding modes are unsupported for this tranche.
+The floating input type selects one exact scalar implementation:
+
+| Input type | Scalar suffix |
+| --- | --- |
+| `f16` | `h` |
+| `f32` | `f` |
+| `f64` | `d` |
+
+For example, `zmath.sin(x)` selects `zmath.scalar.sinh`, `sinf`, or `sind`.
+`zmath.sinh(x)` selects `zmath.scalar.sinhh`, `sinhf`, or `sinhd`.
+
+The scalar name is the operation name followed by the type suffix. The suffix rule produces `sinhh`, `coshh`, `tanhh`, `asinhh`, `acoshh`, and `atanhh` for binary16 hyperbolic operations.
+
+All floating arguments to a normal binary or ternary generic must have the same type. Dispatch does not widen, narrow, or coerce a floating argument.
+
+The first floating argument selects the family when an operation also takes an integer or an output pointer. Integer-result operations keep the suffix of their floating input.
+
+`zmath.abs` is the C23 `fabs` equivalent. Its scalar symbols remain `absh`, `absf`, and `absd`.
+The API does not add `fabs`, `fabsh`, `fabsf`, or `fabsd` aliases.
+
+The target has no `q`, `f128`, bfloat16, or bfloat suffix family. These types do not participate in generic dispatch.
+
+### Rounding environment
+
+Callers must keep IEEE round-to-nearest, ties-to-even active for each scalar call. Scalar functions do not take a general `RoundMode` argument.
+
+An operation-defined direction parameter, such as the `fromfp` direction, is part of that operation. It does not change the process environment.
+
+`zmath` does not read, validate, set, or restore the process floating-point environment (`fenv`). Behavior with another active rounding mode is unsupported.
+
+This caller precondition also applies to narrowing operations. They compute the exact mathematical operation and round once to the declared destination type.
+
+### Target C23 scalar families
+
+In the tables below, `op{h,f,d}` names three exact `zmath.scalar` symbols. For example, `exp{h,f,d}` means `exph`, `expf`, and `expd`.
+
+Each operation also has one target root generic named `zmath.<op>`, unless a table states an exception. These tables define target names only.
+
+#### Basic and rounding
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `abs` | `abs{h,f,d}` |
+| `ceil` | `ceil{h,f,d}` |
+| `floor` | `floor{h,f,d}` |
+| `nearbyint` | `nearbyint{h,f,d}` |
+| `rint` | `rint{h,f,d}` |
+| `round` | `round{h,f,d}` |
+| `roundeven` | `roundeven{h,f,d}` |
+| `trunc` | `trunc{h,f,d}` |
+| `lrint` | `lrint{h,f,d}` |
+| `llrint` | `llrint{h,f,d}` |
+| `lround` | `lround{h,f,d}` |
+| `llround` | `llround{h,f,d}` |
+| `fromfp` | `fromfp{h,f,d}` |
+| `ufromfp` | `ufromfp{h,f,d}` |
+| `fromfpx` | `fromfpx{h,f,d}` |
+| `ufromfpx` | `ufromfpx{h,f,d}` |
+
+#### Exponential and logarithmic
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `exp` | `exp{h,f,d}` |
+| `exp2` | `exp2{h,f,d}` |
+| `exp10` | `exp10{h,f,d}` |
+| `expm1` | `expm1{h,f,d}` |
+| `exp2m1` | `exp2m1{h,f,d}` |
+| `exp10m1` | `exp10m1{h,f,d}` |
+| `log` | `log{h,f,d}` |
+| `log2` | `log2{h,f,d}` |
+| `log10` | `log10{h,f,d}` |
+| `log1p` | `log1p{h,f,d}` |
+| `logp1` | `logp1{h,f,d}` |
+| `log2p1` | `log2p1{h,f,d}` |
+| `log10p1` | `log10p1{h,f,d}` |
+
+`log1p` and `logp1` are distinct C23 public spellings with the same mathematical operation.
+
+#### Trigonometric, inverse, and pi-scaled
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `sin` | `sin{h,f,d}` |
+| `cos` | `cos{h,f,d}` |
+| `tan` | `tan{h,f,d}` |
+| `asin` | `asin{h,f,d}` |
+| `acos` | `acos{h,f,d}` |
+| `atan` | `atan{h,f,d}` |
+| `atan2` | `atan2{h,f,d}` |
+| `sinpi` | `sinpi{h,f,d}` |
+| `cospi` | `cospi{h,f,d}` |
+| `tanpi` | `tanpi{h,f,d}` |
+| `asinpi` | `asinpi{h,f,d}` |
+| `acospi` | `acospi{h,f,d}` |
+| `atanpi` | `atanpi{h,f,d}` |
+| `atan2pi` | `atan2pi{h,f,d}` |
+
+#### Hyperbolic and inverse hyperbolic
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `sinh` | `sinh{h,f,d}` |
+| `cosh` | `cosh{h,f,d}` |
+| `tanh` | `tanh{h,f,d}` |
+| `asinh` | `asinh{h,f,d}` |
+| `acosh` | `acosh{h,f,d}` |
+| `atanh` | `atanh{h,f,d}` |
+
+The family notation expands mechanically. Thus, `sinh{h,f,d}` means `sinhh`, `sinhf`, and `sinhd`.
+
+#### Power, root, and norm
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `pow` | `pow{h,f,d}` |
+| `pown` | `pown{h,f,d}` |
+| `powr` | `powr{h,f,d}` |
+| `compoundn` | `compoundn{h,f,d}` |
+| `sqrt` | `sqrt{h,f,d}` |
+| `cbrt` | `cbrt{h,f,d}` |
+| `rsqrt` | `rsqrt{h,f,d}` |
+| `rootn` | `rootn{h,f,d}` |
+| `hypot` | `hypot{h,f,d}` |
+
+`compoundn`, `pown`, and `rootn` take a signed integer exponent or degree. The target fixed-width Zig integer is `i64`.
+
+The C23 `compoundn(x, n)` operation computes `(1 + x)^n`. A CORE-MATH `compound` source with a floating exponent is not a direct implementation of this operation.
+
+#### Error and gamma
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `erf` | `erf{h,f,d}` |
+| `erfc` | `erfc{h,f,d}` |
+| `lgamma` | `lgamma{h,f,d}` |
+| `tgamma` | `tgamma{h,f,d}` |
+
+`lgamma` returns `LgammaResult(T) { value: T, sign: i2 }`. The sign field is `-1`, `0`, or `1`.
+The root generic returns the same result shape for its input type.
+
+The API has no global `signgam` value and no hidden mutable gamma-sign state.
+
+#### Remainder, decomposition, and scaling
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `fmod` | `fmod{h,f,d}` |
+| `remainder` | `remainder{h,f,d}` |
+| `remquo` | `remquo{h,f,d}` |
+| `frexp` | `frexp{h,f,d}` |
+| `modf` | `modf{h,f,d}` |
+| `ilogb` | `ilogb{h,f,d}` |
+| `llogb` | `llogb{h,f,d}` |
+| `logb` | `logb{h,f,d}` |
+| `ldexp` | `ldexp{h,f,d}` |
+| `scalbn` | `scalbn{h,f,d}` |
+| `scalbln` | `scalbln{h,f,d}` |
+
+`frexp`, `modf`, and `remquo` keep their C23 decomposition semantics. Their target Zig result containers replace C output-pointer syntax.
+
+#### Fused operation, difference, maximum, and minimum
+
+| Root generic | Scalar implementation family |
+| --- | --- |
+| `fma` | `fma{h,f,d}` |
+| `fdim` | `fdim{h,f,d}` |
+| `fmax` | `fmax{h,f,d}` |
+| `fmin` | `fmin{h,f,d}` |
+| `fmaximum` | `fmaximum{h,f,d}` |
+| `fminimum` | `fminimum{h,f,d}` |
+| `fmaximum_mag` | `fmaximum_mag{h,f,d}` |
+| `fminimum_mag` | `fminimum_mag{h,f,d}` |
+| `fmaximum_num` | `fmaximum_num{h,f,d}` |
+| `fminimum_num` | `fminimum_num{h,f,d}` |
+| `fmaximum_mag_num` | `fmaximum_mag_num{h,f,d}` |
+| `fminimum_mag_num` | `fminimum_mag_num{h,f,d}` |
+
+#### Narrowing operations
+
+Narrowing operations are the exception to one-operation-name dispatch. C23 encodes the source and destination format in each IEC 60559 symbol.
+
+C23 7.12.14 defines these public binary-format signatures:
+
+```zig
+pub fn fadd(x: f64, y: f64) f32;
+pub fn fsub(x: f64, y: f64) f32;
+pub fn fmul(x: f64, y: f64) f32;
+pub fn fdiv(x: f64, y: f64) f32;
+pub fn ffma(x: f64, y: f64, z: f64) f32;
+pub fn fsqrt(x: f64) f32;
+```
+
+The target also includes the C23 Annex F `_FloatM` forms for the supported public formats:
+
+| Destination | Source | Add | Subtract | Multiply | Divide | Fused multiply-add | Square root |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `f16` | `f32` | `f16addf32(x: f32, y: f32) f16` | `f16subf32(x: f32, y: f32) f16` | `f16mulf32(x: f32, y: f32) f16` | `f16divf32(x: f32, y: f32) f16` | `f16fmaf32(x: f32, y: f32, z: f32) f16` | `f16sqrtf32(x: f32) f16` |
+| `f16` | `f64` | `f16addf64(x: f64, y: f64) f16` | `f16subf64(x: f64, y: f64) f16` | `f16mulf64(x: f64, y: f64) f16` | `f16divf64(x: f64, y: f64) f16` | `f16fmaf64(x: f64, y: f64, z: f64) f16` | `f16sqrtf64(x: f64) f16` |
+| `f32` | `f64` | `f32addf64(x: f64, y: f64) f32` | `f32subf64(x: f64, y: f64) f32` | `f32mulf64(x: f64, y: f64) f32` | `f32divf64(x: f64, y: f64) f32` | `f32fmaf64(x: f64, y: f64, z: f64) f32` | `f32sqrtf64(x: f64) f32` |
+
+These names are target scalar implementation names. They are not aliases for a same-type operation.
+The target has no `f128`, `q`, bfloat16, decimal, or long-double source or destination form.
+
+The legacy `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, and `fsqrt` forms are root-level C23 names with the signatures above.
+The format-pair forms are available from `zmath.scalar` and use the exact names in the table.
+
+Each narrowing operation computes as if to infinite precision and rounds once to the declared destination type.
+
+### C23 operations owned by `zmath.ieee`
+
+The scalar module does not duplicate representation and successor operations. The target `zmath.ieee` module owns these C23 equivalents:
+
+```text
+canonicalize{h,f,d}
+copySign{h,f,d}
+nan{h,f,d}
+nextAfter{h,f,d}
+nextToward{h,f,d}
+nextUp{h,f,d}
+nextDown{h,f,d}
+totalOrder{h,f,d}
+```
+
+Classification predicates, signaling tests, ordered comparisons, bit conversion, and total order also remain in `zmath.ieee`.
+
+### Optional IEC 60559 extension family
+
+C23 Annex F defines these optional IEC 60559 operations. They are target names, but they are not baseline C23 7.12 scalar names:
+
+| Root generic | `zmath.ieee` implementation family |
+| --- | --- |
+| `totalOrderMag` | `totalOrderMag{h,f,d}` |
+| `getPayload` | `getPayload{h,f,d}` |
+| `setPayload` | `setPayload{h,f,d}` |
+| `setPayloadSig` | `setPayloadSig{h,f,d}` |
+
+No symbol in this optional family is currently implemented or manifest-accepted.
+
+### Exact special-value policy
+
+Each manifest-accepted operation-format pair must define exact output bits for zeros, subnormals, infinities, and NaNs.
+
+The format encodings are:
+
+| Format | `+0` | `-0` | `+1` | `+infinity` | `-infinity` | Canonical quiet NaN |
+| --- | --- | --- | --- | --- | --- | --- |
+| `h` | `0000` | `8000` | `3c00` | `7c00` | `fc00` | `7e00` |
+| `f` | `00000000` | `80000000` | `3f800000` | `7f800000` | `ff800000` | `7fc00000` |
+| `d` | `0000000000000000` | `8000000000000000` | `3ff0000000000000` | `7ff0000000000000` | `fff0000000000000` | `7ff8000000000000` |
+
+For a NaN input, preserve the sign and payload and set the format quiet bit.
+The quiet-bit masks are `0200`, `00400000`, and `0008000000000000` for `h`, `f`, and `d`.
+A quiet NaN remains unchanged. A signaling NaN becomes a quiet NaN.
+
+Unless an operation has a stricter C23 rule, the first NaN argument in parameter order selects the result.
+An invalid non-NaN input returns the positive canonical quiet NaN for its format.
+An operation-specific C23 rule takes precedence. This includes the number-preferring maximum and minimum families.
+
+Signed-zero and infinity results follow the operation-specific C23 and IEC 60559 rules.
+Implementations must not replace those results with a host-library choice.
+
+The manifest must record every operation-specific exception before acceptance.
+Target status or source availability cannot substitute for this evidence.
 
 ### CORE-MATH manifest
 
-Before any manifest-gated transcendental function becomes public, the repository adds a versioned manifest at `spec/core-math-<commit>.md`.
+Before a manifest-gated scalar pair becomes accepted, the repository adds or updates a versioned contract at `spec/core-math-<date>.md`.
 
-The manifest pins one CORE-MATH commit. It lists every required function-format pair for `f16`, `f32`, and `f64`. Each entry defines the zmath symbol, domain, special values, supported rounding modes, and accuracy class.
+The machine-readable manifest pins one CORE-MATH commit. It lists each accepted or unsupported function-format pair separately for `f16`, `f32`, and `f64`.
+At this contract revision, the schema version 1 manifest has nine `exp`, `log`, and `sin` rows.
+All nine rows have status `unsupported`. Other target pairs have no manifest acceptance in schema version 1.
 
-For the initial Exp, Log, and Sin entries, callers must keep IEEE round-to-nearest, ties-to-even active. Other rounding modes are unsupported. For these entries, `correct` means correctly rounded in `nearest_even`.
+Each entry defines the zmath symbol, domain, special values, supported rounding policy, and accuracy class.
 
 A manifest entry is one of:
 
@@ -139,7 +428,9 @@ A manifest entry is one of:
 - `bounded`: the result has a stated maximum ULP error in `nearest_even`.
 - `unsupported`: the manifest has no accepted accuracy claim for the pair. It does not state that an implementation is absent.
 
-A ULP comparison applies only to finite results of the same sign. The manifest defines the exact expected bit pattern for zero, subnormal, infinity, and NaN results. A NaN comparison checks class, sign when required, and payload policy when required.
+A ULP comparison applies only to finite results of the same sign. Special-value rows require exact expected bit patterns.
+
+CORE-MATH source availability does not prove API implementation or manifest acceptance. Each format requires independent implementation and oracle evidence.
 
 ## Complex API
 
