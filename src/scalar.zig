@@ -2,6 +2,12 @@ const asin_impl = @import("scalar_asin.zig");
 pub const asinh = asin_impl.asinh;
 pub const asinf = asin_impl.asinf;
 pub const asind = asin_impl.asind;
+const asinh_impl = @import("scalar_asinhh.zig");
+pub const asinhh = asinh_impl.asinhh;
+const asinhf_impl = @import("scalar_asinhf.zig");
+pub const asinhf = asinhf_impl.asinhf;
+const asinhd_impl = @import("scalar_asinhd.zig");
+pub const asinhd = asinhd_impl.asinhd;
 
 const sinhh_impl = @import("scalar_sinhh.zig");
 pub const sinhh = sinhh_impl.sinhh;

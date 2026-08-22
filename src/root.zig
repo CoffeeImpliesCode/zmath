@@ -120,6 +120,17 @@ pub fn asin(value: anytype) @TypeOf(value) {
     @compileError("zmath.asin supports only f16, f32, and f64");
 }
 
+/// Computes the inverse hyperbolic sine of `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn asinh(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.asinhh(value);
+    if (T == f32) return scalar.asinhf(value);
+    if (T == f64) return scalar.asinhd(value);
+    @compileError("zmath.asinh supports only f16, f32, and f64");
+}
+
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
 /// Accepting an `Io.Writer` instance is a handy way to write reusable code.
@@ -154,6 +165,7 @@ test {
     _ = @import("scalar_cbrt_test.zig");
     _ = @import("scalar_hypot_test.zig");
     _ = @import("scalar_asin_test.zig");
+    _ = @import("scalar_asinh_test.zig");
     _ = @import("scalar_atan_test.zig");
     _ = @import("scalar_sinh_test.zig");
     _ = @import("scalar_tanh_test.zig");
@@ -190,6 +202,20 @@ test "root exports nearest-even Asin family" {
     try std.testing.expectEqual(
         @as(u64, 0x3ff9_21fb_5444_2d18),
         @as(u64, @bitCast(asin(@as(f64, 1.0)))),
+    );
+}
+test "root exports nearest-even Asinh family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3b0d),
+        @as(u16, @bitCast(asinh(@as(f16, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f61_a1b3),
+        @as(u32, @bitCast(asinh(@as(f32, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3fec_3436_6179_d427),
+        @as(u64, @bitCast(asinh(@as(f64, 1.0)))),
     );
 }
 
