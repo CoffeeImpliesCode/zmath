@@ -4,6 +4,52 @@ const Io = std.Io;
 
 pub const ieee = @import("ieee.zig");
 pub const scalar = @import("scalar.zig");
+const generic_scalar_test = @import("generic_scalar_test.zig");
+
+/// Computes e raised to `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn exp(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.exph(value);
+    if (T == f32) return scalar.expf(value);
+    if (T == f64) return scalar.expd(value);
+    @compileError("zmath.exp supports only f16, f32, and f64");
+}
+
+/// Computes the natural logarithm of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn log(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.logh(value);
+    if (T == f32) return scalar.logf(value);
+    if (T == f64) return scalar.logd(value);
+    @compileError("zmath.log supports only f16, f32, and f64");
+}
+
+/// Computes the sine of `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn sin(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.sinh(value);
+    if (T == f32) return scalar.sinf(value);
+    if (T == f64) return scalar.sind(value);
+    @compileError("zmath.sin supports only f16, f32, and f64");
+}
+
+/// Computes the cosine of `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn cos(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.cosh(value);
+    if (T == f32) return scalar.cosf(value);
+    if (T == f64) return scalar.cosd(value);
+    @compileError("zmath.cos supports only f16, f32, and f64");
+}
 
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
@@ -34,6 +80,10 @@ test {
 
 test "basic add functionality" {
     try std.testing.expect(add(3, 7) == 10);
+}
+
+test "generic scalar dispatch covers all formats" {
+    try generic_scalar_test.run(@This());
 }
 
 test "root exports nearest-even binary64 sine" {
