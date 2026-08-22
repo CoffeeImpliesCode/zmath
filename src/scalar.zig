@@ -3,6 +3,10 @@ const logd_impl = @import("logd.zig");
 pub const logd = logd_impl.logd;
 pub const sind = @import("scalar_sind.zig").sind;
 pub const cosd = @import("scalar_sind.zig").cosd;
+const exp2_impl = @import("scalar_exp2.zig");
+pub const exp2h = exp2_impl.exp2h;
+pub const exp2f = exp2_impl.exp2f;
+pub const exp2d = exp2_impl.exp2d;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
