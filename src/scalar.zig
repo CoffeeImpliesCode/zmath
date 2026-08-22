@@ -1659,3 +1659,235 @@ pub fn sinf(value: f32) f32 {
         polynomial_b * (reduced_squared * sine_table);
     return @floatCast(result);
 }
+// Correctly rounded cosine for binary32 values.
+//
+// Copyright (c) 2022-2023 Alexei Sibidanov.
+//
+// This code is derived from CORE-MATH src/binary32/cos/cosf.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa and is used under the MIT License:
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+const cosf_reduction_pi_inverse: [4]u64 = .{
+    0xfe51_63ab_debb_c562,
+    0xdb62_9599_3c43_9041,
+    0xfc27_57d1_f534_ddc0,
+    0xa2f9_836e_4e44_1529,
+};
+
+const cosf_hard_cases: [5]struct { arg: u32, rh: f32, rl: f32 } = .{
+    .{ .arg = 0x4096_cbe4, .rh = 0x1.99bc5cp-27, .rl = -0x1p-52 },
+    .{ .arg = 0x5922_aa80, .rh = 0x1.115d7ep-1, .rl = -0x1p-26 },
+    .{ .arg = 0x5aa4_542c, .rh = 0x1.f48148p-2, .rl = 0x1p-27 },
+    .{ .arg = 0x5f18_b878, .rh = 0x1.fe2976p-1, .rl = 0x1p-26 },
+    .{ .arg = 0x6115_cb11, .rh = 0x1.f0285ep-1, .rl = -0x1p-26 },
+};
+
+const cosf_table: [32]f64 = .{
+    0x1p+0,
+    0x1.f6297cff75cbp-1,
+    0x1.d906bcf328d46p-1,
+    0x1.a9b66290ea1a3p-1,
+    0x1.6a09e667f3bcdp-1,
+    0x1.1c73b39ae68c8p-1,
+    0x1.87de2a6aea963p-2,
+    0x1.8f8b83c69a60bp-3,
+    0x0p+0,
+    -0x1.8f8b83c69a60bp-3,
+    -0x1.87de2a6aea963p-2,
+    -0x1.1c73b39ae68c8p-1,
+    -0x1.6a09e667f3bcdp-1,
+    -0x1.a9b66290ea1a3p-1,
+    -0x1.d906bcf328d46p-1,
+    -0x1.f6297cff75cbp-1,
+    -0x1p+0,
+    -0x1.f6297cff75cbp-1,
+    -0x1.d906bcf328d46p-1,
+    -0x1.a9b66290ea1a3p-1,
+    -0x1.6a09e667f3bcdp-1,
+    -0x1.1c73b39ae68c8p-1,
+    -0x1.87de2a6aea963p-2,
+    -0x1.8f8b83c69a60bp-3,
+    0x0p+0,
+    0x1.8f8b83c69a60bp-3,
+    0x1.87de2a6aea963p-2,
+    0x1.1c73b39ae68c8p-1,
+    0x1.6a09e667f3bcdp-1,
+    0x1.a9b66290ea1a3p-1,
+    0x1.d906bcf328d46p-1,
+    0x1.f6297cff75cbp-1,
+};
+
+const cosf_b: [4]f64 = .{
+    0x1.3bd3cc9be45dcp-6,
+    -0x1.03c1f081b0833p-14,
+    0x1.55d3c6fc9ac1fp-24,
+    -0x1.e1d3ff281b40dp-35,
+};
+
+const cosf_a: [4]f64 = .{
+    0x1.921fb54442d17p-3,
+    -0x1.4abbce6256a39p-10,
+    0x1.466bc5a518c16p-19,
+    -0x1.32bdc61074ff6p-29,
+};
+
+fn cosfRltl(value: f32, quadrant: *i32) f64 {
+    @setFloatMode(.strict);
+    const value_wide: f64 = value;
+    const id_low = -0x1.b1bbead603d8bp-29 * value_wide;
+    const id_high = 0x1.45f306ep+2 * value_wide;
+    const id = sinf_round_even(id_high);
+    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
+    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    return (id_high - id) + id_low;
+}
+
+fn cosfRltl0(value: f64, quadrant: *i32) f64 {
+    @setFloatMode(.strict);
+    const id_high = 0x1.45f306dc9c883p+2 * value;
+    const id = sinf_round_even(id_high);
+    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
+    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    return id_high - id;
+}
+
+fn cosfRbig(bits: u32, quadrant: *i32) f64 {
+    @setFloatMode(.strict);
+    const exponent: i32 = @intCast((bits >> 23) & 0xff);
+    const mantissa: u64 = @as(u64, bits & 0x007f_ffff) | 0x0080_0000;
+    const product_0: u128 = @as(u128, mantissa) * cosf_reduction_pi_inverse[0];
+    var product_1: u128 = @as(u128, mantissa) * cosf_reduction_pi_inverse[1];
+    product_1 += product_0 >> 64;
+    var product_2: u128 = @as(u128, mantissa) * cosf_reduction_pi_inverse[2];
+    product_2 += product_1 >> 64;
+    var product_3: u128 = @as(u128, mantissa) * cosf_reduction_pi_inverse[3];
+    product_3 += product_2 >> 64;
+
+    const product_3_high: u64 = @truncate(product_3 >> 64);
+    const product_3_low: u64 = @truncate(product_3);
+    const product_2_low: u64 = @truncate(product_2);
+    const product_1_low: u64 = @truncate(product_1);
+    const shift: i32 = exponent - 147;
+    // SAFETY: Every shift branch assigns both values before they are read.
+    var integer_bits: u64 = undefined;
+    // SAFETY: The same shift branch assigns this value before it is read.
+    var fraction_bits: u64 = undefined;
+
+    if (shift < 64) {
+        const left_shift: u6 = @intCast(shift);
+        const right_shift: u6 = @intCast(64 - shift);
+        integer_bits = (product_3_high << left_shift) | (product_3_low >> right_shift);
+        fraction_bits = (product_3_low << left_shift) | (product_2_low >> right_shift);
+    } else if (shift == 64) {
+        integer_bits = product_3_low;
+        fraction_bits = product_2_low;
+    } else {
+        const left_shift: u6 = @intCast(shift - 64);
+        const right_shift: u6 = @intCast(128 - shift);
+        integer_bits = (product_3_low << left_shift) | (product_2_low >> right_shift);
+        fraction_bits = (product_2_low << left_shift) | (product_1_low >> right_shift);
+    }
+
+    var integer_part: i32 = @bitCast(@as(u32, @truncate(integer_bits)));
+    const fraction_part: i64 = @bitCast(fraction_bits);
+    const sign: i64 = if ((bits & sign_mask_f) != 0) -1 else 0;
+    const fraction_sign: i64 = fraction_part >> 63;
+    integer_part -= @intCast(fraction_sign);
+    const reduced = @as(f64, @floatFromInt(fraction_part ^ sign)) * 0x1p-64;
+    const integer_sign: i32 = @intCast(sign);
+    integer_part = (integer_part ^ integer_sign) - integer_sign;
+    quadrant.* = integer_part;
+    return reduced;
+}
+
+fn cosfDatabase(value: f32, reduced: f64) f32 {
+    @setFloatMode(.strict);
+    const magnitude = @as(u32, @bitCast(value)) & magnitude_mask_f;
+    for (cosf_hard_cases) |entry| {
+        if (entry.arg == magnitude) return entry.rh + entry.rl;
+    }
+    return @floatCast(reduced);
+}
+
+fn cosfBig(value: f32) f32 {
+    @setFloatMode(.strict);
+    const bits: u32 = @bitCast(value);
+    const absolute_bits = bits << 1;
+    if (absolute_bits >= 0xff00_0000) {
+        if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
+        return @bitCast(@as(u32, 0x7fc0_0000));
+    }
+
+    var quadrant: i32 = 0;
+    const reduced = cosfRbig(bits, &quadrant);
+    const reduced_squared = reduced * reduced;
+    const reduced_fourth = reduced_squared * reduced_squared;
+    const polynomial_a = (cosf_a[0] + reduced_squared * cosf_a[1]) +
+        reduced_fourth * (cosf_a[2] + reduced_squared * cosf_a[3]);
+    const polynomial_b = (cosf_b[0] + reduced_squared * cosf_b[1]) +
+        reduced_fourth * (cosf_b[2] + reduced_squared * cosf_b[3]);
+    const cosine_table = cosf_table[@intCast(@as(u32, @bitCast(quadrant)) & 31)];
+    const sine_table =
+        cosf_table[@intCast((@as(u32, @bitCast(quadrant)) +% 8) & 31)];
+    const result = cosine_table + reduced * (polynomial_a * sine_table -
+        polynomial_b * (reduced * cosine_table));
+    const result_bits: u64 = @bitCast(result);
+    const tail = (result_bits + 6) & (~@as(u64, 0) >> 36);
+    if (tail <= 12) return cosfDatabase(value, result);
+    return @floatCast(result);
+}
+
+/// Correctly rounded binary32 cosine. Callers must keep nearest-even rounding
+/// active; this function does not inspect or modify the floating-point mode.
+pub fn cosf(value: f32) f32 {
+    @setFloatMode(.strict);
+    const bits: u32 = @bitCast(value);
+    const absolute_bits = bits << 1;
+    if (absolute_bits >= 0xff00_0000) {
+        if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
+        return @bitCast(@as(u32, 0x7fc0_0000));
+    }
+
+    if (absolute_bits > 0x9900_0000 or absolute_bits < 0x7400_0000) {
+        if (absolute_bits < 0x7400_0000) {
+            return 0.5 * @mulAdd(f32, value, -value, 2.0);
+        }
+        return cosfBig(value);
+    }
+
+    var quadrant: i32 = 0;
+    const reduced: f64 = if (absolute_bits < 0x82a4_1896) blk: {
+        if (absolute_bits == 0x812d_97c8) return cosfDatabase(value, 0.0);
+        break :blk cosfRltl0(@as(f64, value), &quadrant);
+    } else cosfRltl(value, &quadrant);
+
+    const reduced_squared = reduced * reduced;
+    const reduced_fourth = reduced_squared * reduced_squared;
+    const polynomial_a = (cosf_a[0] + reduced_squared * cosf_a[1]) +
+        reduced_fourth * (cosf_a[2] + reduced_squared * cosf_a[3]);
+    const polynomial_b = (cosf_b[0] + reduced_squared * cosf_b[1]) +
+        reduced_fourth * (cosf_b[2] + reduced_squared * cosf_b[3]);
+    const cosine_table = cosf_table[@intCast(@as(u32, @bitCast(quadrant)) & 31)];
+    const sine_table =
+        cosf_table[@intCast((@as(u32, @bitCast(quadrant)) +% 8) & 31)];
+    const result = cosine_table + polynomial_a * (reduced * sine_table) -
+        polynomial_b * (reduced_squared * cosine_table);
+    return @floatCast(result);
+}
