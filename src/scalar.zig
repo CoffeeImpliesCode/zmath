@@ -1,3 +1,8 @@
+const asin_impl = @import("scalar_asin.zig");
+pub const asinh = asin_impl.asinh;
+pub const asinf = asin_impl.asinf;
+pub const asind = asin_impl.asind;
+
 const cbrt_impl = @import("scalar_cbrt.zig");
 pub const cbrth = cbrt_impl.cbrth;
 pub const cbrtf = cbrt_impl.cbrtf;
