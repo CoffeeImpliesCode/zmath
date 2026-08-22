@@ -1,3 +1,8 @@
+const acos_impl = @import("scalar_acos.zig");
+pub const acosh = acos_impl.acosh;
+pub const acosf = acos_impl.acosf;
+pub const acosd = acos_impl.acosd;
+
 const acosh_impl = @import("scalar_acosh.zig");
 pub const acoshh = acosh_impl.acoshh;
 pub const acoshf = acosh_impl.acoshf;

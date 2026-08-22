@@ -144,6 +144,17 @@ pub fn rsqrt(value: anytype) @TypeOf(value) {
     @compileError("zmath.rsqrt supports only f16, f32, and f64");
 }
 
+/// Computes the inverse cosine of `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn acos(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.acosh(value);
+    if (T == f32) return scalar.acosf(value);
+    if (T == f64) return scalar.acosd(value);
+    @compileError("zmath.acos supports only f16, f32, and f64");
+}
+
 /// Computes the inverse sine of `value` with the scalar implementation for its type.
 ///
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
@@ -207,6 +218,7 @@ test {
     _ = @import("scalar_atanh_test.zig");
     _ = @import("scalar_sin_test.zig");
     _ = @import("scalar_acosh_test.zig");
+    _ = @import("scalar_acos_test.zig");
     _ = @import("scalar_cos_test.zig");
     _ = @import("scalar_sind_test.zig");
     _ = @import("scalar_tan_test.zig");
@@ -270,6 +282,21 @@ test "root exports nearest-even Asin family" {
         @as(u64, @bitCast(asin(@as(f64, 1.0)))),
     );
 }
+test "root exports nearest-even Acos family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3c30),
+        @as(u16, @bitCast(acos(@as(f16, 0.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f86_0a92),
+        @as(u32, @bitCast(acos(@as(f32, 0.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff0_c152_382d_7366),
+        @as(u64, @bitCast(acos(@as(f64, 0.5)))),
+    );
+}
+
 test "root exports nearest-even Asinh family" {
     try std.testing.expectEqual(
         @as(u16, 0x3b0d),
