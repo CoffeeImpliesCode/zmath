@@ -616,6 +616,70 @@ pub fn logh(value: f16) f16 {
     if (exponent_index == 0) return @floatCast(logh_t3[significand_index]);
     return @floatCast(logh_t1[exponent_index] + logh_t2[significand_index]);
 }
+// Correctly rounded sine for binary16 values.
+//
+// Copyright (c) 2025 Maxence Ponsardin and Paul Zimmermann.
+//
+// This code is derived from CORE-MATH src/binary16/sin/sinf16.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa and is used under the MIT License:
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+const sinh_data = @import("scalar_sinh_data.zig");
+
+pub fn sinh(value: f16) f16 {
+    const bits: u16 = @bitCast(value);
+    const magnitude = bits & magnitude_mask_h;
+
+    if (magnitude > infinity_bits_h) {
+        const quiet_nan_bit_h: u16 = 0x0200;
+        return @bitCast(bits | quiet_nan_bit_h);
+    }
+    if (magnitude == infinity_bits_h) return @bitCast(@as(u16, 0x7e00));
+
+    // These are the two remaining hard-to-round inputs after optimizing the
+    // four lookup tables. Each case also covers the input with the other sign.
+    if (magnitude == 0x658c) {
+        const result: f32 = if ((bits & sign_mask_h) == 0)
+            0x1.f9bd02p-14
+        else
+            -0x1.f9bd02p-14;
+        return @floatCast(result);
+    }
+    if (magnitude == 0x6429) {
+        const result: f32 = if ((bits & sign_mask_h) == 0)
+            -0x1.7b4dc2p-14
+        else
+            0x1.7b4dc2p-14;
+        return @floatCast(result);
+    }
+
+    // Decompose x into x1 + x2 and evaluate
+    // sin(x1) * cos(x2) + cos(x1) * sin(x2).
+    const table1_index: usize = bits >> 5;
+    const table2_index: usize = ((bits >> 10) << 5) | (bits & 0x001f);
+    const sin_x1: f32 = @bitCast(sinh_data.s1[table1_index]);
+    const cos_x1: f32 = @bitCast(sinh_data.c1[table1_index]);
+    const sin_x2: f32 = @bitCast(sinh_data.s2[table2_index]);
+    const cos_x2: f32 = @bitCast(sinh_data.c2[table2_index]);
+    const result = @mulAdd(f32, sin_x1, cos_x2, cos_x1 * sin_x2);
+    return @floatCast(result);
+}
 
 pub fn absh(value: f16) f16 {
     const bits: u16 = @bitCast(value);
