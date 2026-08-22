@@ -69,7 +69,8 @@ pub fn asinhf(value: f32) f32 {
     const table_index: usize = @intCast(rounded_mantissa);
     const exponent: i64 = @as(i64, @intCast(root_bits >> 52)) - 0x3ff;
     const normalized: f64 = @bitCast(mantissa | (@as(u64, 0x3ff) << 52));
-    const delta = @mulAdd(f64, normalized, inverse_table[table_index], -1.0);
+    const delta_product = normalized * inverse_table[table_index];
+    const delta = delta_product - 1.0;
     const delta_squared = delta * delta;
     const coefficients = [3]f64{
         0x1.0000000066947p+0, -0x1.00007f053d8cbp-1, 0x1.555280111d914p-2,

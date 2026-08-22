@@ -48,6 +48,8 @@ pub fn asinhh(value: f16) f16 {
     if (exponent <= 0) {
         if (absolute_bits <= 0x3d38_a000) {
             if (magnitude == 0) return value;
+            // CORE-MATH corrects the f32 intermediate toward zero. The f16 conversion
+            // maps both corrected values back to the input encoding in this region.
             if (sign) return @floatCast(value_f + 0x1p-26);
             return @floatCast(value_f - 0x1p-26);
         }

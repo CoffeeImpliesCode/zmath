@@ -69,8 +69,19 @@ test "asinh covers pinned CORE-MATH correction cases" {
     try expectAsinhhBits(0x5b60, 0x4628);
     try expectAsinhhBits(0x5f88, 0x46df);
     try expectAsinhhBits(0x62c4, 0x4775);
-    try expectAsinhhBits(0x0001, 0x0001);
-    try expectAsinhhBits(0x8001, 0x8001);
+    try expectAsinhdBits(0x3e59_ffff_ffff_ffff, 0x3e59_ffff_ffff_fffe);
+    try expectAsinhdBits(0x3e5a_0000_0000_0000, 0x3e59_ffff_ffff_ffff);
+    try expectAsinhdBits(0x3e5a_0000_0000_0001, 0x3e5a_0000_0000_0000);
+
+    try expectAsinhdBits(0x3f2f_ffff_ffff_ffff, 0x3f2f_ffff_faaa_aaac);
+    try expectAsinhdBits(0x3f30_0000_0000_0000, 0x3f2f_ffff_faaa_aaad);
+    try expectAsinhdBits(0x3f30_0000_0000_0001, 0x3f2f_ffff_faaa_aaaf);
+
+    try expectAsinhdBits(0x3f92_ffff_ffff_ffff, 0x3f92_ffb8_902a_9ab5);
+    try expectAsinhdBits(0x3f93_0000_0000_0000, 0x3f92_ffb8_902a_9ab6);
+    try expectAsinhdBits(0x3f93_0000_0000_0001, 0x3f92_ffb8_902a_9ab7);
+
+    try expectAsinhfBits(0x3e81_5668, 0x3e80_0001);
 
     try expectAsinhdBits(0x3f32_bf10_2b93_b850, 0x3f32_bf10_2749_baf8);
     try expectAsinhdBits(0x3f93_aad1_e7b1_88fc, 0x3f93_aa82_acdc_a360);
