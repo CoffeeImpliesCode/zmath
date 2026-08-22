@@ -685,7 +685,7 @@ pub fn logf(value: f32) f32 {
     if (bits == 127 << 23) return 0.0;
 
     const mantissa = bits & 0x007f_ffff;
-    const table_index: usize = @intCast((mantissa + 0x0000_8000) >> 17);
+    const table_index: usize = @intCast((mantissa + 0x0001_0000) >> 17);
     const normalized_bits: i32 = @bitCast(bits);
     const exponent: i32 = (normalized_bits >> 23) - 127;
     const exponent_wide: f64 = @floatFromInt(exponent);

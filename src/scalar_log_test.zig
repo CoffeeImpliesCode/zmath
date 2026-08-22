@@ -13,6 +13,7 @@ test "logf uses the nearest-even binary32 API" {
 
 test "logf maps exact special values" {
     try expectLogfBits(0x0000_0000, 0xff80_0000);
+    try expectLogfBits(0x8000_0000, 0xff80_0000);
     try expectLogfBits(0x7f80_0000, 0x7f80_0000);
     try expectLogfBits(0xff80_0000, 0x7fc0_0000);
     try expectLogfBits(0x7fc1_2345, 0x7fc1_2345);
@@ -52,6 +53,26 @@ test "logf rounds subnormal and normal reductions exactly" {
         .{ .input_bits = 0x4120_0000, .expected_bits = 0x4013_5d8e },
         .{ .input_bits = 0x42c8_0000, .expected_bits = 0x4093_5d8e },
         .{ .input_bits = 0x7f7f_ffff, .expected_bits = 0x42b1_7218 },
+    };
+
+    for (cases) |case| {
+        try expectLogfBits(case.input_bits, case.expected_bits);
+    }
+}
+
+test "logf rounds accurate fallback and low-correction vectors" {
+    const cases = [_]struct { input_bits: u32, expected_bits: u32 }{
+        // This input is outside the near-one accurate-path shortcut.
+        .{ .input_bits = 0x3f80_2000, .expected_bits = 0x3a7f_e005 },
+        // These inputs exercise the final low-28-bit rounding correction.
+        .{ .input_bits = 0x1f11_6ab8, .expected_bits = 0xc233_b53e },
+        .{ .input_bits = 0x3c41_3d3a, .expected_bits = 0xc08e_158f },
+        .{ .input_bits = 0x4117_8feb, .expected_bits = 0x400f_e5e7 },
+        .{ .input_bits = 0x4c5d_65a5, .expected_bits = 0x418f_034b },
+        .{ .input_bits = 0x4d60_4ebe, .expected_bits = 0x419a_352c },
+        .{ .input_bits = 0x65d8_90d3, .expected_bits = 0x4254_d1f9 },
+        .{ .input_bits = 0x66a8_c860, .expected_bits = 0x4259_5e46 },
+        .{ .input_bits = 0x6f31_a8ec, .expected_bits = 0x4284_5a89 },
     };
 
     for (cases) |case| {
