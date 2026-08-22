@@ -29,6 +29,18 @@ pub fn log(value: anytype) @TypeOf(value) {
     @compileError("zmath.log supports only f16, f32, and f64");
 }
 
+/// Computes the error function of `value` with the scalar implementation for
+/// its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn erf(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.erfh(value);
+    if (T == f32) return scalar.erff(value);
+    if (T == f64) return scalar.erfd(value);
+    @compileError("zmath.erf supports only f16, f32, and f64");
+}
+
 /// Computes the hyperbolic sine of `value` with the scalar implementation
 /// for its type.
 ///
@@ -193,6 +205,7 @@ test {
     _ = @import("scalar_asinh_test.zig");
     _ = @import("scalar_atan_test.zig");
     _ = @import("scalar_sinh_test.zig");
+    _ = @import("scalar_erf_test.zig");
     _ = @import("scalar_tanh_test.zig");
 }
 

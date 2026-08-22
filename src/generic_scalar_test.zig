@@ -24,6 +24,18 @@ fn expectLog(comptime zmath: type, comptime T: type, value: T) !void {
     try std.testing.expectEqual(expected, got);
 }
 
+fn expectErf(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.erf(value);
+    const expected = if (T == f16)
+        zmath.scalar.erfh(value)
+    else if (T == f32)
+        zmath.scalar.erff(value)
+    else
+        zmath.scalar.erfd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
 fn expectSin(comptime zmath: type, comptime T: type, value: T) !void {
     const got = zmath.sin(value);
     const expected = if (T == f16)
@@ -139,6 +151,10 @@ pub fn run(comptime zmath: type) !void {
     try expectLog(zmath, f16, @as(f16, 1.5));
     try expectLog(zmath, f32, @as(f32, 1.5));
     try expectLog(zmath, f64, @as(f64, 1.5));
+
+    try expectErf(zmath, f16, @as(f16, 0.5));
+    try expectErf(zmath, f32, @as(f32, 0.5));
+    try expectErf(zmath, f64, @as(f64, 0.5));
 
     try expectSin(zmath, f16, @as(f16, 0.5));
     try expectSin(zmath, f32, @as(f32, 0.5));

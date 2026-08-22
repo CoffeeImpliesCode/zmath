@@ -73,6 +73,13 @@ pub const tanhh = tanh_impl.tanhh;
 pub const tanhf = tanh_impl.tanhf;
 pub const tanhd = tanh_impl.tanhd;
 
+const erfh_impl = @import("scalar_erfh.zig");
+pub const erfh = erfh_impl.erfh;
+const erff_impl = @import("scalar_erff.zig");
+pub const erff = erff_impl.erff;
+const erfd_impl = @import("scalar_erfd.zig");
+pub const erfd = erfd_impl.erfd;
+
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;
