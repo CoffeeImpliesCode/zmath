@@ -1,3 +1,9 @@
+const sinhh_impl = @import("scalar_sinhh.zig");
+pub const sinhh = sinhh_impl.sinhh;
+const sinhf_impl = @import("scalar_sinhf.zig");
+pub const sinhf = sinhf_impl.sinhf;
+const sinhd_impl = @import("scalar_sinhd.zig");
+pub const sinhd = sinhd_impl.sinhd;
 const cbrt_impl = @import("scalar_cbrt.zig");
 pub const cbrth = cbrt_impl.cbrth;
 pub const cbrtf = cbrt_impl.cbrtf;

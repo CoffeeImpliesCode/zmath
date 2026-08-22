@@ -29,6 +29,18 @@ pub fn log(value: anytype) @TypeOf(value) {
     @compileError("zmath.log supports only f16, f32, and f64");
 }
 
+/// Computes the hyperbolic sine of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn sinh(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.sinhh(value);
+    if (T == f32) return scalar.sinhf(value);
+    if (T == f64) return scalar.sinhd(value);
+    @compileError("zmath.sinh supports only f16, f32, and f64");
+}
+
 /// Computes the sine of `value` with the scalar implementation for its type.
 ///
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
@@ -94,6 +106,7 @@ test {
     _ = @import("scalar_exp2_test.zig");
     _ = @import("scalar_cbrt_test.zig");
     _ = @import("scalar_hypot_test.zig");
+    _ = @import("scalar_sinh_test.zig");
 }
 
 test "basic add functionality" {
@@ -111,6 +124,20 @@ test "root exports nearest-even binary64 sine" {
 test "root exports nearest-even binary64 cosine" {
     const input: f64 = 1.0;
     try std.testing.expectEqual(@as(u64, 0x3fe1_4a28_0fb5_068c), @as(u64, @bitCast(scalar.cosd(input))));
+}
+test "root exports nearest-even hyperbolic Sinh" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3cb3),
+        @as(u16, @bitCast(sinh(@as(f16, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f96_6cfe),
+        @as(u32, @bitCast(sinh(@as(f32, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff2_cd9f_c44e_b982),
+        @as(u64, @bitCast(sinh(@as(f64, 1.0)))),
+    );
 }
 test "root exports nearest-even Exp2 family" {
     try std.testing.expectEqual(

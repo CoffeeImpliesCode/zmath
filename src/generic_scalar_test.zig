@@ -36,6 +36,18 @@ fn expectSin(comptime zmath: type, comptime T: type, value: T) !void {
     try std.testing.expectEqual(expected, got);
 }
 
+fn expectSinh(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.sinh(value);
+    const expected = if (T == f16)
+        zmath.scalar.sinhh(value)
+    else if (T == f32)
+        zmath.scalar.sinhf(value)
+    else
+        zmath.scalar.sinhd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
 fn expectCos(comptime zmath: type, comptime T: type, value: T) !void {
     const got = zmath.cos(value);
     const expected = if (T == f16)
@@ -72,6 +84,9 @@ pub fn run(comptime zmath: type) !void {
     try expectSin(zmath, f16, @as(f16, 0.5));
     try expectSin(zmath, f32, @as(f32, 0.5));
     try expectSin(zmath, f64, @as(f64, 0.5));
+    try expectSinh(zmath, f16, @as(f16, 0.5));
+    try expectSinh(zmath, f32, @as(f32, 0.5));
+    try expectSinh(zmath, f64, @as(f64, 0.5));
 
     try expectCos(zmath, f16, @as(f16, 0.5));
     try expectCos(zmath, f32, @as(f32, 0.5));
