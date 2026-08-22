@@ -1,3 +1,8 @@
+const logd_impl = @import("logd.zig");
+
+pub const logd = logd_impl.logd;
+pub const sind = @import("scalar_sind.zig").sind;
+
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;
@@ -14,6 +19,25 @@ const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
 // src/binary16/exp/expf16.c at revision
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa (MIT license).
 const exph_data = @import("scalar_exph_data.zig");
+const logf_data = @import("scalar_logf_data.zig");
+
+const logf_quiet_nan_bit: u32 = 0x0040_0000;
+const logf_canonical_nan_bits: u32 = 0x7fc0_0000;
+const logf_minus_infinity_bits: u32 = 0xff80_0000;
+const logf_fast_coefficients = [_]f64{
+    0x1.00000006342eap+0,
+    -0x1.0001f7fdc3977p-1,
+    0x1.554a4e5cae9cfp-2,
+};
+const logf_accurate_coefficients = [_]f64{
+    -0x1p-1,
+    0x1.55555555571cap-2,
+    -0x1.0000000002d85p-2,
+    0x1.9999987d0c963p-3,
+    -0x1.555554059a8bbp-3,
+    0x1.24aebcf71a38fp-3,
+    -0x1.001c73915d758p-3,
+};
 
 pub fn exph(value: f16) f16 {
     const bits: u16 = @bitCast(value);
@@ -681,6 +705,99 @@ pub fn sinh(value: f16) f16 {
     return @floatCast(result);
 }
 
+// Correctly rounded natural logarithm for binary32 values.
+//
+// Copyright (c) 2023-2026 Alexei Sibidanov and Paul Zimmermann.
+//
+// This code is derived from CORE-MATH src/binary32/log/logf.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa and is used under the MIT License:
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+pub fn logf(value: f32) f32 {
+    @setFloatMode(.strict);
+
+    const input_bits: u32 = @bitCast(value);
+    const magnitude = input_bits & magnitude_mask_f;
+
+    if (magnitude == 0) return @bitCast(logf_minus_infinity_bits);
+    if (magnitude > infinity_bits_f) {
+        return @bitCast(input_bits | logf_quiet_nan_bit);
+    }
+    if (magnitude == infinity_bits_f) {
+        if ((input_bits & sign_mask_f) == 0) return value;
+        return @bitCast(logf_canonical_nan_bits);
+    }
+    if ((input_bits & sign_mask_f) != 0) return @bitCast(logf_canonical_nan_bits);
+
+    var bits = input_bits;
+    if (bits < 0x0080_0000) {
+        const shift: u32 = @clz(bits) - 8;
+        bits <<= @intCast(shift);
+        bits -%= shift << 23;
+    }
+    if (bits == 127 << 23) return 0.0;
+
+    const mantissa = bits & 0x007f_ffff;
+    const table_index: usize = @intCast((mantissa + 0x0001_0000) >> 17);
+    const normalized_bits: i32 = @bitCast(bits);
+    const exponent: i32 = (normalized_bits >> 23) - 127;
+    const exponent_wide: f64 = @floatFromInt(exponent);
+    const tz_bits: u64 =
+        (@as(u64, mantissa) | (@as(u64, 1023) << 23)) << 29;
+    const tz: f64 = @bitCast(tz_bits);
+    const z = tz * logf_data.tr[table_index] - 1.0;
+    const z_squared = z * z;
+
+    var result = ((exponent_wide * 0x1.62e42fefa39efp-1 + logf_data.tl[table_index]) +
+        z * logf_fast_coefficients[0]) +
+        z_squared * (logf_fast_coefficients[1] + z * logf_fast_coefficients[2]);
+    var upper: f32 = @floatCast(result);
+    const lower: f32 = @floatCast(result + 0x1.f06p-33);
+    if (upper == lower) return upper;
+
+    var accurate = z_squared *
+        ((logf_accurate_coefficients[0] + z * logf_accurate_coefficients[1]) +
+            z_squared *
+                ((logf_accurate_coefficients[2] + z * logf_accurate_coefficients[3]) +
+                    z_squared *
+                        (logf_accurate_coefficients[4] + z * logf_accurate_coefficients[5] +
+                            z_squared * logf_accurate_coefficients[6])));
+    const delta_bits: u32 = @bitCast(value - 1.0);
+    if ((delta_bits & magnitude_mask_f) < 0x3a80_0000) {
+        return @floatCast(z + accurate);
+    }
+
+    accurate -= 0x1.0ca86c3898dp-49 * exponent_wide;
+    accurate += z;
+    accurate += logf_data.tl[table_index] - logf_data.tl[0];
+    const exponent_log: f64 = exponent_wide * 0x1.62e42fefa3ap-1;
+    result = exponent_log + accurate;
+    upper = @floatCast(result);
+    const result_bits: u64 = @bitCast(result);
+    if ((result_bits & 0x0fff_ffff) == 0) {
+        const rounding_remainder = (exponent_log - result) + accurate;
+        result += rounding_remainder * 64.0;
+        upper = @floatCast(result);
+    }
+    return upper;
+}
+
 pub fn absh(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     return @bitCast(bits & magnitude_mask_h);
@@ -1291,4 +1408,254 @@ pub fn expd(value: f64) f64 {
     const lower = high + (low - error_bound);
     if (upper != lower) return expdAccurate(value);
     return expdScaleNormal(lower, exponent);
+}
+// Correctly rounded sine for binary32 values.
+//
+// Copyright (c) 2022-2025 Alexei Sibidanov.
+//
+// This code is derived from CORE-MATH src/binary32/sin/sinf.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa and is used under the MIT License:
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+const sinf_reduction_pi_inverse: [4]u64 = .{
+    0xfe51_63ab_debb_c562,
+    0xdb62_9599_3c43_9041,
+    0xfc27_57d1_f534_ddc0,
+    0xa2f9_836e_4e44_1529,
+};
+
+const sinf_b: [4]f64 = .{
+    0x1.3bd3cc9be45dcp-6,
+    -0x1.03c1f081b0833p-14,
+    0x1.55d3c6fc9ac1fp-24,
+    -0x1.e1d3ff281b40dp-35,
+};
+
+const sinf_a: [4]f64 = .{
+    0x1.921fb54442d17p-3,
+    -0x1.4abbce6256a39p-10,
+    0x1.466bc5a518c16p-19,
+    -0x1.32bdc61074ff6p-29,
+};
+
+const sinf_table: [32]f64 = .{
+    0x0p+0,
+    0x1.8f8b83c69a60bp-3,
+    0x1.87de2a6aea963p-2,
+    0x1.1c73b39ae68c8p-1,
+    0x1.6a09e667f3bcdp-1,
+    0x1.a9b66290ea1a3p-1,
+    0x1.d906bcf328d46p-1,
+    0x1.f6297cff75cbp-1,
+    0x1p+0,
+    0x1.f6297cff75cbp-1,
+    0x1.d906bcf328d46p-1,
+    0x1.a9b66290ea1a3p-1,
+    0x1.6a09e667f3bcdp-1,
+    0x1.1c73b39ae68c8p-1,
+    0x1.87de2a6aea963p-2,
+    0x1.8f8b83c69a60bp-3,
+    0x0p+0,
+    -0x1.8f8b83c69a60bp-3,
+    -0x1.87de2a6aea963p-2,
+    -0x1.1c73b39ae68c8p-1,
+    -0x1.6a09e667f3bcdp-1,
+    -0x1.a9b66290ea1a3p-1,
+    -0x1.d906bcf328d46p-1,
+    -0x1.f6297cff75cbp-1,
+    -0x1p+0,
+    -0x1.f6297cff75cbp-1,
+    -0x1.d906bcf328d46p-1,
+    -0x1.a9b66290ea1a3p-1,
+    -0x1.6a09e667f3bcdp-1,
+    -0x1.1c73b39ae68c8p-1,
+    -0x1.87de2a6aea963p-2,
+    -0x1.8f8b83c69a60bp-3,
+};
+
+const sinf_hard_cases: [4]struct { arg: u32, rh: f32, rl: f32 } = .{
+    .{ .arg = 0x4619_9998, .rh = -0x1.63f4bap-2, .rl = -0x1p-27 },
+    .{ .arg = 0x3f3a_dc51, .rh = 0x1.55688ap-1, .rl = -0x1p-26 },
+    .{ .arg = 0x3fa7_832a, .rh = 0x1.ee836cp-1, .rl = -0x1p-26 },
+    .{ .arg = 0x4116_cbe4, .rh = -0x1.99bc5ap-26, .rl = -0x1p-51 },
+};
+
+fn sinf_round_even(value: f64) f64 {
+    @setFloatMode(.strict);
+    const truncated: i64 = @intFromFloat(value);
+    const truncated_float: f64 = @floatFromInt(truncated);
+    const fraction = value - truncated_float;
+
+    if (fraction > 0.5) return truncated_float + 1.0;
+    if (fraction < -0.5) return truncated_float - 1.0;
+    if (fraction == 0.5 and (truncated & 1) != 0) return truncated_float + 1.0;
+    if (fraction == -0.5 and (truncated & 1) != 0) return truncated_float - 1.0;
+    return truncated_float;
+}
+
+fn sinf_rltl(value: f32, quadrant: *i32) f64 {
+    @setFloatMode(.strict);
+    const value_wide: f64 = value;
+    const id_low = -0x1.b1bbead603d8bp-29 * value_wide;
+    const id_high = 0x1.45f306ep+2 * value_wide;
+    const id = sinf_round_even(id_high);
+    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
+    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    return (id_high - id) + id_low;
+}
+
+fn sinf_rltl0(value: f64, quadrant: *i32) f64 {
+    @setFloatMode(.strict);
+    const id_high = 0x1.45f306dc9c883p+2 * value;
+    const id = sinf_round_even(id_high);
+    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
+    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    return id_high - id;
+}
+
+fn sinf_rbig(bits: u32, quadrant: *i32) f64 {
+    @setFloatMode(.strict);
+    const exponent: i32 = @intCast((bits >> 23) & 0xff);
+    const mantissa: u64 = @as(u64, bits & 0x007f_ffff) | 0x0080_0000;
+    const product_0: u128 = @as(u128, mantissa) * sinf_reduction_pi_inverse[0];
+    var product_1: u128 = @as(u128, mantissa) * sinf_reduction_pi_inverse[1];
+    product_1 += product_0 >> 64;
+    var product_2: u128 = @as(u128, mantissa) * sinf_reduction_pi_inverse[2];
+    product_2 += product_1 >> 64;
+    var product_3: u128 = @as(u128, mantissa) * sinf_reduction_pi_inverse[3];
+    product_3 += product_2 >> 64;
+
+    const product_3_high: u64 = @truncate(product_3 >> 64);
+    const product_3_low: u64 = @truncate(product_3);
+    const product_2_low: u64 = @truncate(product_2);
+    const product_1_low: u64 = @truncate(product_1);
+    const shift: i32 = exponent - 147;
+    var integer_bits: u64 = undefined;
+    var fraction_bits: u64 = undefined;
+
+    if (shift < 64) {
+        const left_shift: u6 = @intCast(shift);
+        const right_shift: u6 = @intCast(64 - shift);
+        integer_bits = (product_3_high << left_shift) | (product_3_low >> right_shift);
+        fraction_bits = (product_3_low << left_shift) | (product_2_low >> right_shift);
+    } else if (shift == 64) {
+        integer_bits = product_3_low;
+        fraction_bits = product_2_low;
+    } else {
+        const left_shift: u6 = @intCast(shift - 64);
+        const right_shift: u6 = @intCast(128 - shift);
+        integer_bits = (product_3_low << left_shift) | (product_2_low >> right_shift);
+        fraction_bits = (product_2_low << left_shift) | (product_1_low >> right_shift);
+    }
+
+    var integer_part: i32 = @bitCast(@as(u32, @truncate(integer_bits)));
+    const fraction_part: i64 = @bitCast(fraction_bits);
+    const sign: i64 = if ((bits >> 31) != 0) -1 else 0;
+    const fraction_sign: i64 = fraction_part >> 63;
+    integer_part -= @intCast(fraction_sign);
+    const reduced = @as(f64, @floatFromInt(fraction_part ^ sign)) * 0x1p-64;
+    const integer_sign: i32 = @intCast(sign);
+    integer_part = (integer_part ^ integer_sign) - integer_sign;
+    quadrant.* = integer_part;
+    return reduced;
+}
+
+fn sinf_add_sign(value: f32, high: f32, low: f32) f32 {
+    @setFloatMode(.strict);
+    const sign: f32 = if ((@as(u32, @bitCast(value)) & sign_mask_f) != 0) -1.0 else 1.0;
+    return sign * high + sign * low;
+}
+
+fn sinf_database(value: f32, reduced: f64) f32 {
+    const magnitude = @as(u32, @bitCast(value)) & magnitude_mask_f;
+    for (sinf_hard_cases) |entry| {
+        if (entry.arg == magnitude) return sinf_add_sign(value, entry.rh, entry.rl);
+    }
+    return @floatCast(reduced);
+}
+
+fn sinf_big(value: f32) f32 {
+    @setFloatMode(.strict);
+    const bits: u32 = @bitCast(value);
+    const absolute_bits = bits << 1;
+    if (absolute_bits >= 0xff00_0000) {
+        if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
+        return @bitCast(@as(u32, 0x7fc0_0000));
+    }
+
+    var quadrant: i32 = 0;
+    const reduced = sinf_rbig(bits, &quadrant);
+    const reduced_squared = reduced * reduced;
+    const reduced_fourth = reduced_squared * reduced_squared;
+    const polynomial_a = (sinf_a[0] + reduced_squared * sinf_a[1]) +
+        reduced_fourth * (sinf_a[2] + reduced_squared * sinf_a[3]);
+    const polynomial_b = (sinf_b[0] + reduced_squared * sinf_b[1]) +
+        reduced_fourth * (sinf_b[2] + reduced_squared * sinf_b[3]);
+    const sine_table = sinf_table[@intCast(@as(u32, @bitCast(quadrant)) & 31)];
+    const cosine_table =
+        sinf_table[@intCast((@as(u32, @bitCast(quadrant)) +% 8) & 31)];
+    const result = sine_table + reduced * (polynomial_a * cosine_table -
+        polynomial_b * (reduced * sine_table));
+    return @floatCast(result);
+}
+
+pub fn sinf(value: f32) f32 {
+    @setFloatMode(.strict);
+    const bits: u32 = @bitCast(value);
+    const absolute_bits = bits << 1;
+    var quadrant: i32 = 0;
+    var reduced: f64 = 0.0;
+
+    if (absolute_bits > 0x9900_0000 or absolute_bits < 0x7300_0000) {
+        if (absolute_bits < 0x7300_0000) {
+            if (absolute_bits < 0x6600_0000) {
+                if (absolute_bits == 0) return value;
+                const absolute_value: f32 = @bitCast(bits & magnitude_mask_f);
+                const result = @mulAdd(f32, -value, absolute_value, value);
+                return result;
+            }
+            return (-0x1.555556p-3 * value) * (value * value) + value;
+        }
+        return sinf_big(value);
+    }
+
+    if (absolute_bits < 0x822d_97c8) {
+        if (absolute_bits == 0x7e75_b8a2 or absolute_bits == 0x7f4f_0654) {
+            return sinf_database(value, 0.0);
+        }
+        reduced = sinf_rltl0(@as(f64, value), &quadrant);
+    } else {
+        if (absolute_bits == 0x8c33_3330) return sinf_database(value, 0.0);
+        reduced = sinf_rltl(value, &quadrant);
+    }
+
+    const reduced_squared = reduced * reduced;
+    const reduced_fourth = reduced_squared * reduced_squared;
+    const polynomial_a = (sinf_a[0] + reduced_squared * sinf_a[1]) +
+        reduced_fourth * (sinf_a[2] + reduced_squared * sinf_a[3]);
+    const polynomial_b = (sinf_b[0] + reduced_squared * sinf_b[1]) +
+        reduced_fourth * (sinf_b[2] + reduced_squared * sinf_b[3]);
+    const sine_table = sinf_table[@intCast(@as(u32, @bitCast(quadrant)) & 31)];
+    const cosine_table =
+        sinf_table[@intCast((@as(u32, @bitCast(quadrant)) +% 8) & 31)];
+    const result = sine_table + polynomial_a * (reduced * cosine_table) -
+        polynomial_b * (reduced_squared * sine_table);
+    return @floatCast(result);
 }
