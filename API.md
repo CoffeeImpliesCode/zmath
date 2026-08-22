@@ -134,6 +134,12 @@ cos{h,f,d}
 
 This implemented-symbol list does not grant manifest acceptance. The versioned corpus manifest is the only acceptance authority.
 
+`nextAfterh`, `nextAfterf`, and `nextAfterd` choose the first NaN operand.
+If it is signaling, they set its quiet bit and preserve its sign and payload.
+They return a quiet NaN unchanged.
+
+`totalOrderh`, `totalOrderf`, and `totalOrderd` return `true` when the left operand precedes or equals the right operand in IEEE total order.
+
 
 ### Generic dispatch
 
@@ -157,6 +163,10 @@ The floating input type selects one exact scalar implementation:
 
 For example, `zmath.sin(x)` selects `zmath.scalar.sinh`, `sinf`, or `sind`.
 `zmath.sinh(x)` selects `zmath.scalar.sinhh`, `sinhf`, or `sinhd`.
+`zmath.cos(x)` selects `zmath.scalar.cosh`, `cosf`, or `cosd`.
+`zmath.cosh(x)` selects `zmath.scalar.coshh`, `coshf`, or `coshd`.
+`zmath.tan(x)` selects `tanh`, `tanf`, or `tand`.
+`zmath.tanh(x)` selects `tanhh`, `tanhf`, or `tanhd`.
 
 The scalar name is the operation name followed by the type suffix. The suffix rule produces `sinhh`, `coshh`, `tanhh`, `asinhh`, `acoshh`, and `atanhh` for binary16 hyperbolic operations.
 
