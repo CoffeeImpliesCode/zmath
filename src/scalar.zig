@@ -1,7 +1,18 @@
+const acosh_impl = @import("scalar_acosh.zig");
+pub const acoshh = acosh_impl.acoshh;
+pub const acoshf = acosh_impl.acoshf;
+pub const acoshd = acosh_impl.acoshd;
+
 const asin_impl = @import("scalar_asin.zig");
 pub const asinh = asin_impl.asinh;
 pub const asinf = asin_impl.asinf;
 pub const asind = asin_impl.asind;
+const asinh_impl = @import("scalar_asinhh.zig");
+pub const asinhh = asinh_impl.asinhh;
+const asinhf_impl = @import("scalar_asinhf.zig");
+pub const asinhf = asinhf_impl.asinhf;
+const asinhd_impl = @import("scalar_asinhd.zig");
+pub const asinhd = asinhd_impl.asinhd;
 
 const sinhh_impl = @import("scalar_sinhh.zig");
 pub const sinhh = sinhh_impl.sinhh;
@@ -23,6 +34,10 @@ const atan_impl = @import("scalar_atan.zig");
 pub const atanh = atan_impl.atanh;
 pub const atanf = atan_impl.atanf;
 pub const atand = atan_impl.atand;
+const atanh_impl = @import("scalar_atanh.zig");
+pub const atanhh = atanh_impl.atanhh;
+pub const atanhf = atanh_impl.atanhf;
+pub const atanhd = atanh_impl.atanhd;
 pub const expm1h = @import("scalar_expm1h.zig").expm1h;
 pub const expm1f = @import("scalar_expm1f.zig").expm1f;
 pub const expm1d = @import("scalar_expm1d.zig").expm1d;
