@@ -2,9 +2,9 @@
 
 ## Status
 
-This document defines the target API. It does not describe the current implementation.
+This document defines the target API and identifies the currently implemented public subset.
 
-The current public root exports only `add` and `printAnotherMessage`. A planned module or type becomes public only when its implementation, unit tests, and companion oracle contract exist.
+The current public root exports `add`, `printAnotherMessage`, `ieee`, and `scalar`. The implemented `ieee` and `scalar` symbols are limited to the subsets listed below. Other IEEE and scalar functions remain planned.
 
 ## Scope
 
@@ -57,7 +57,9 @@ Geometry and algebra do not depend on each other.
 
 ## IEEE and scalar API
 
-`zmath.ieee` owns classification, total order, bit conversion, successor, predecessor, scaling, and rounding for `f32` and `f64`.
+The complete planned `zmath.ieee` API owns classification, total order, bit conversion, successor, predecessor, scaling, and rounding for `f32` and `f64`.
+
+The implemented public IEEE subset is:
 
 ```zig
 pub const RoundMode = enum {
@@ -67,15 +69,41 @@ pub const RoundMode = enum {
     toward_negative,
 };
 
-pub fn classifyF(x: f32) Class;
-pub fn classifyD(x: f64) Class;
-pub fn totalOrderF(a: f32, b: f32) std.math.Order;
-pub fn totalOrderD(a: f64, b: f64) std.math.Order;
-pub fn nextAfterF(x: f32, y: f32) f32;
-pub fn nextAfterD(x: f64, y: f64) f64;
+pub const Class = enum {
+    zero,
+    subnormal,
+    normal,
+    infinity,
+    quiet_nan,
+    signaling_nan,
+};
+
+pub fn classifyF(value: f32) Class;
+pub fn classifyD(value: f64) Class;
+pub fn copySignF(value: f32, sign: f32) f32;
+pub fn copySignD(value: f64, sign: f64) f64;
+pub fn nextAfterF(from: f32, to: f32) f32;
+pub fn nextAfterD(from: f64, to: f64) f64;
+pub fn totalOrderF(left: f32, right: f32) bool;
+pub fn totalOrderD(left: f64, right: f64) bool;
 ```
 
-Every scalar operation takes an explicit `RoundMode` when its result depends on rounding. The API does not read or change the process floating-point environment.
+`nextAfterF` and `nextAfterD` choose the first NaN operand. If it is a signaling NaN, they set its quiet bit and preserve its sign and payload. They return a quiet NaN unchanged.
+
+`totalOrderF` and `totalOrderD` are Boolean predicates. They return `true` when `left` precedes or equals `right` in the IEEE total order.
+
+The implemented public scalar subset is:
+
+```zig
+pub fn absF(value: f32) f32;
+pub fn absD(value: f64) f64;
+pub fn ulpDistanceF(a: f32, b: f32) u32;
+pub fn ulpDistanceD(a: f64, b: f64) u64;
+```
+
+A planned scalar operation takes an explicit `RoundMode` when its result depends on rounding. The API does not read or change the process floating-point environment.
+
+The CORE-MATH manifest-gated transcendental functions below remain planned. `zmath` does not currently export them.
 
 ```zig
 pub fn sinF(mode: RoundMode, x: f32) f32;
@@ -88,7 +116,7 @@ pub fn logD(mode: RoundMode, x: f64) f64;
 
 ### CORE-MATH manifest
 
-Before any scalar function becomes public, the repository adds a versioned manifest at `spec/core-math-<commit>.md`.
+Before any manifest-gated transcendental function becomes public, the repository adds a versioned manifest at `spec/core-math-<commit>.md`.
 
 The manifest pins one CORE-MATH commit. It lists every required f32 and f64 function-format pair, its zmath symbol, domain, special values, supported rounding modes, and accuracy class.
 
