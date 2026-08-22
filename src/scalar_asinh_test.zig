@@ -69,6 +69,11 @@ test "asinh covers pinned CORE-MATH correction cases" {
     try expectAsinhhBits(0x5b60, 0x4628);
     try expectAsinhhBits(0x5f88, 0x46df);
     try expectAsinhhBits(0x62c4, 0x4775);
+    try expectAsinhhBits(0x0001, 0x0001);
+    try expectAsinhhBits(0x8001, 0x8001);
+
+    try expectAsinhdBits(0x3f32_bf10_2b93_b850, 0x3f32_bf10_2749_baf8);
+    try expectAsinhdBits(0x3f93_aad1_e7b1_88fc, 0x3f93_aa82_acdc_a360);
 
     try expectAsinhdBits(0x3fd0_0f94_7645_0863, 0x3fcf_cb35_067f_343c);
     try expectAsinhdBits(0x4170_fbc6_c02b_1c90, 0x4031_6369_cd53_bb69);
