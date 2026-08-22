@@ -94,6 +94,17 @@ fn expectAcosh(comptime zmath: type, comptime T: type, value: T) !void {
     comptime std.debug.assert(@TypeOf(got) == T);
     try std.testing.expectEqual(expected, got);
 }
+fn expectAcos(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.acos(value);
+    const expected = if (T == f16)
+        zmath.scalar.acosh(value)
+    else if (T == f32)
+        zmath.scalar.acosf(value)
+    else
+        zmath.scalar.acosd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
 
 fn expectTanh(comptime zmath: type, comptime T: type, value: T) !void {
     const got = zmath.tanh(value);
@@ -179,6 +190,9 @@ pub fn run(comptime zmath: type) !void {
     try expectAcosh(zmath, f16, @as(f16, 1.5));
     try expectAcosh(zmath, f32, @as(f32, 1.5));
     try expectAcosh(zmath, f64, @as(f64, 1.5));
+    try expectAcos(zmath, f16, @as(f16, 0.5));
+    try expectAcos(zmath, f32, @as(f32, 0.5));
+    try expectAcos(zmath, f64, @as(f64, 0.5));
 
     try expectTanh(zmath, f64, @as(f64, 0.5));
     try expectAsinh(zmath, f16, @as(f16, 0.5));
