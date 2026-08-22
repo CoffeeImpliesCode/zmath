@@ -2,6 +2,7 @@ const logd_impl = @import("logd.zig");
 
 pub const logd = logd_impl.logd;
 pub const sind = @import("scalar_sind.zig").sind;
+pub const cosd = @import("scalar_sind.zig").cosd;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;

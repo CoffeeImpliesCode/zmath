@@ -676,3 +676,151 @@ fn sinAccurate(value: f64) f64 {
     if (negative) cosine.sgn = 1 - cosine.sgn;
     return dintToDouble(cosine);
 }
+
+// The cosine path is derived from CORE-MATH src/binary64/cos/cos.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa and uses the MIT License.
+fn cosFast(value: f64) FastResult {
+    @setFloatMode(.strict);
+    var negative = false;
+    var use_cosine = true;
+
+    var high: f64 = undefined;
+    var low: f64 = undefined;
+    var reduction_error: f64 = undefined;
+    var index = reduceFast(&high, &low, value, &reduction_error);
+
+    negative = negative != ((index >> 10) != 0);
+    index &= 0x3ff;
+    use_cosine = use_cosine != ((index >> 9) != 0);
+    negative = negative != ((index >> 9) != 0);
+    index &= 0x1ff;
+
+    if ((index & 0x100) != 0) {
+        use_cosine = !use_cosine;
+        index = 0x1ff - index;
+        high = 0x1p-11 - high;
+        low = -low;
+    }
+
+    high -= data.sc[index][0];
+    var square = aMul(high, high);
+    square.low = @mulAdd(f64, high + high, low, square.low);
+    const sine = evalSinFast(high, low, square.high, square.low);
+    const cosine = evalCosFast(square.high, square.low);
+    const sign: f64 = if (negative) -1.0 else 1.0;
+
+    if (!use_cosine) {
+        const sine_scaled = sMul(sign * data.sc[index][2], sine.high, sine.low);
+        const cosine_scaled = sMul(sign * data.sc[index][1], cosine.high, cosine.low);
+        const sum = fastTwoSum(cosine_scaled.high, sine_scaled.high);
+        return .{
+            .high = sum.high,
+            .low = sum.low + (sine_scaled.low + cosine_scaled.low),
+            .error_bound = 0x1.55p-69 + reduction_error,
+        };
+    }
+
+    const cosine_scaled = sMul(sign * data.sc[index][2], cosine.high, cosine.low);
+    const sine_scaled = sMul(sign * data.sc[index][1], sine.high, sine.low);
+    const sum = fastTwoSum(cosine_scaled.high, -sine_scaled.high);
+    return .{
+        .high = sum.high,
+        .low = sum.low + (cosine_scaled.low - sine_scaled.low),
+        .error_bound = 0x1.81p-69 + reduction_error,
+    };
+}
+
+fn cosAccurate(value: f64) f64 {
+    @setFloatMode(.strict);
+    const absolute_bits: u64 = @bitCast(value);
+    var reduced = dintFromDouble(value);
+    reduce(&reduced);
+
+    var negative = false;
+    var use_cosine = true;
+    var index = reduce2(&reduced);
+
+    if ((index & 0x400) != 0) {
+        negative = true;
+        index &= 0x3ff;
+    }
+    if ((index & 0x200) != 0) {
+        negative = !negative;
+        use_cosine = false;
+        index &= 0x1ff;
+    }
+    if ((index & 0x100) != 0) {
+        use_cosine = !use_cosine;
+        reduced.sgn = 1;
+        addDint(&reduced, &magic, &reduced);
+        index = 0x1ff - index;
+    }
+
+    var square: Dint = undefined;
+    mulDint(&square, &reduced, &reduced);
+    var cosine = evalCosAccurate(&square);
+    var sine = evalSinAccurate(&reduced, &square);
+
+    if (!use_cosine) {
+        mulDint(&cosine, &data.s[index], &cosine);
+        mulDint(&sine, &data.c[index], &sine);
+    } else {
+        mulDint(&cosine, &data.c[index], &cosine);
+        mulDint(&sine, &data.s[index], &sine);
+        sine.sgn = 1 - sine.sgn;
+    }
+    addDint(&cosine, &cosine, &sine);
+
+    const error_units: u64 = 41;
+    const lower_low = cosine.lo -% error_units;
+    const lower_high = cosine.hi -% @intFromBool(lower_low > cosine.lo);
+    const upper_low = cosine.lo +% error_units;
+    const upper_high = cosine.hi +% @intFromBool(upper_low < cosine.lo);
+    if ((lower_high >> 10) != (upper_high >> 10)) {
+        if (absolute_bits == 0x3e88_0000_0000_0009) {
+            return @bitCast(@as(u64, 0x3fef_ffff_ffff_ff70));
+        }
+        if (absolute_bits == 0x3e98_0000_0000_0024) {
+            return @bitCast(@as(u64, 0x3fef_ffff_ffff_fdc0));
+        }
+        if (absolute_bits == 0x3ea8_0000_0000_0090) {
+            return @bitCast(@as(u64, 0x3fef_ffff_ffff_f700));
+        }
+        if (absolute_bits == 0x3eb2_0000_0000_00f3) {
+            return @bitCast(@as(u64, 0x3fef_ffff_ffff_ebc0));
+        }
+        if (absolute_bits == 0x3eb8_0000_0000_0240) {
+            return @bitCast(@as(u64, 0x3fef_ffff_ffff_dc00));
+        }
+    }
+
+    if (negative) cosine.sgn = 1 - cosine.sgn;
+    return dintToDouble(cosine);
+}
+
+/// Return correctly rounded cosine with the caller's nearest-even mode.
+///
+/// The caller must set the floating-point environment to nearest-even before
+/// calling this function.
+pub fn cosd(value: f64) f64 {
+    @setFloatMode(.strict);
+    const bits: u64 = @bitCast(value);
+    const magnitude = bits & magnitude_mask;
+
+    if (magnitude > infinity_bits) return @bitCast(bits | quiet_nan_bit);
+    if (magnitude == infinity_bits) return @bitCast(canonical_nan_bits);
+
+    // For this interval, cos(x) rounds to one in nearest-even mode.
+    if (magnitude <= 0x3e46_a09e_667f_3bcc) {
+        const absolute_value: f64 = @bitCast(magnitude);
+        return @mulAdd(f64, absolute_value, -0x1p-28, 1.0);
+    }
+
+    const absolute_value: f64 = @bitCast(magnitude);
+    const fast = cosFast(absolute_value);
+    const left = fast.high + (fast.low - fast.error_bound);
+    const right = fast.high + (fast.low + fast.error_bound);
+    if (left == right) return left;
+
+    return cosAccurate(absolute_value);
+}
