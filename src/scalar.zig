@@ -1,3 +1,8 @@
+const acosh_impl = @import("scalar_acosh.zig");
+pub const acoshh = acosh_impl.acoshh;
+pub const acoshf = acosh_impl.acoshf;
+pub const acoshd = acosh_impl.acoshd;
+
 const asin_impl = @import("scalar_asin.zig");
 pub const asinh = asin_impl.asinh;
 pub const asinf = asin_impl.asinf;

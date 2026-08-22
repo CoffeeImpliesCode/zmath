@@ -73,6 +73,17 @@ pub fn cosh(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.coshd(value);
     @compileError("zmath.cosh supports only f16, f32, and f64");
 }
+/// Computes the inverse hyperbolic cosine of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn acosh(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.acoshh(value);
+    if (T == f32) return scalar.acoshf(value);
+    if (T == f64) return scalar.acoshd(value);
+    @compileError("zmath.acosh supports only f16, f32, and f64");
+}
 
 /// Computes the tangent of `value` with the scalar implementation for its type.
 ///
@@ -146,6 +157,7 @@ test {
     _ = @import("scalar_log_test.zig");
     _ = @import("scalar_log1p_test.zig");
     _ = @import("scalar_sin_test.zig");
+    _ = @import("scalar_acosh_test.zig");
     _ = @import("scalar_cos_test.zig");
     _ = @import("scalar_sind_test.zig");
     _ = @import("scalar_tan_test.zig");
@@ -238,6 +250,20 @@ test "root exports nearest-even hyperbolic Cosh family" {
     try std.testing.expectEqual(
         @as(u64, 0x3ff2_0ac1_862a_e8d0),
         @as(u64, @bitCast(cosh(@as(f64, 0.5)))),
+    );
+}
+test "root exports nearest-even inverse hyperbolic Acosh family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3bb3),
+        @as(u16, @bitCast(acosh(@as(f16, 1.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f76_6165),
+        @as(u32, @bitCast(acosh(@as(f32, 1.5)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3fee_cc2c_aec5_160a),
+        @as(u64, @bitCast(acosh(@as(f64, 1.5)))),
     );
 }
 
