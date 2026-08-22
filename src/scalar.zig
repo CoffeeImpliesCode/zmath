@@ -3,6 +3,11 @@ pub const acoshh = acosh_impl.acoshh;
 pub const acoshf = acosh_impl.acoshf;
 pub const acoshd = acosh_impl.acoshd;
 
+const erfc_impl = @import("scalar_erfc.zig");
+pub const erfch = erfc_impl.erfch;
+pub const erfcf = erfc_impl.erfcf;
+pub const erfcd = erfc_impl.erfcd;
+
 const asin_impl = @import("scalar_asin.zig");
 pub const asinh = asin_impl.asinh;
 pub const asinf = asin_impl.asinf;
