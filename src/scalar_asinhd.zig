@@ -237,12 +237,18 @@ pub fn asinhd(value: f64) f64 {
         const square_low = @mulAdd(f64, value, value, -square_high);
         const cube_high = square_high * value;
         var correction: f64 = undefined;
-        if (magnitude < 0x3f30_0000_0000_0000) {
-            if (magnitude < 0x3e5a_0000_0000_0000) {
-                correction = cube_high * -0x1.5555555555555p-3;
-            } else if (magnitude < 0x3f30_0000_0000_0000) {
+        if (magnitude < 0x3f93_0000_0000_0000) {
+            if (magnitude < 0x3f30_0000_0000_0000) {
+                if (magnitude < 0x3e5a_0000_0000_0000) {
+                    correction = cube_high * -0x1.5555555555555p-3;
+                } else {
+                    correction = cube_high * (-0x1.5555555555555p-3 + square_high *
+                        0x1.3333327c57c6p-4);
+                }
+            } else {
                 correction = cube_high * (-0x1.5555555555555p-3 + square_high *
-                    0x1.333333332f2ffp-4);
+                    (0x1.333333332f2ffp-4 + square_high *
+                        (-0x1.6db6d9a665159p-5 + square_high * 0x1.f186866d775fp-6)));
             }
         } else {
             correction = cube_high * (-0x1.5555555555555p-3 + square_high *
