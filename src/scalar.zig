@@ -147,6 +147,15 @@ pub const powh = pow_impl.powh;
 pub const powf = pow_impl.powf;
 pub const powd = pow_impl.powd;
 
+const fmah_impl = @import("scalar_fmah.zig");
+pub const fmah = fmah_impl.fmah;
+
+const fmaf_impl = @import("scalar_fmaf.zig");
+pub const fmaf = fmaf_impl.fmaf;
+
+const fmad_impl = @import("scalar_fmad.zig");
+pub const fmad = fmad_impl.fmad;
+
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;

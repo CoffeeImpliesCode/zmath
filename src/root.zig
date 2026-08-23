@@ -64,9 +64,24 @@ pub fn exp10m1(value: anytype) @TypeOf(value) {
     if (T == f16) return scalar.exp10m1h(value);
     if (T == f32) return scalar.exp10m1f(value);
     if (T == f64) return scalar.exp10m1d(value);
-    @compileError("zmath.exp10m1 supports only f16, f32, and f64");
 }
 
+/// Computes `a` multiplied by `b` then added to `c` with the scalar implementation
+/// for their common type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn fma(a: anytype, b: anytype, c: anytype) @TypeOf(a) {
+    const T = @TypeOf(a);
+    if (@TypeOf(b) != T or @TypeOf(c) != T) {
+        @compileError("zmath.fma requires all arguments to have the same type");
+    }
+    if (T == f16) return scalar.fmah(a, b, c);
+    if (T == f32) return scalar.fmaf(a, b, c);
+    if (T == f64) return scalar.fmad(a, b, c);
+    @compileError("zmath.fma supports only f16, f32, and f64");
+}
+
+/// Computes 10 raised to `value` with the scalar implementation for its type.
 /// Computes the complementary error function of `value` with the scalar implementation
 /// for its type.
 ///
