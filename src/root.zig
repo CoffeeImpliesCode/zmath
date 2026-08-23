@@ -17,6 +17,17 @@ pub fn exp(value: anytype) @TypeOf(value) {
     @compileError("zmath.exp supports only f16, f32, and f64");
 }
 
+/// Computes 10 raised to `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn exp10(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.exp10h(value);
+    if (T == f32) return scalar.exp10f(value);
+    if (T == f64) return scalar.exp10d(value);
+    @compileError("zmath.exp10 supports only f16, f32, and f64");
+}
+
 /// Computes the base-10 exponential biased by one with the scalar implementation
 /// for its type.
 ///
@@ -226,6 +237,7 @@ test {
     _ = @import("scalar_exp_test.zig");
     _ = @import("scalar_expm1_test.zig");
     _ = @import("scalar_exp10m1_test.zig");
+    _ = @import("scalar_exp10_test.zig");
     _ = @import("scalar_log_test.zig");
     _ = @import("scalar_log1p_test.zig");
     _ = @import("scalar_atanh_test.zig");
@@ -475,5 +487,20 @@ test "root exports nearest-even Exp10m1 family" {
     try std.testing.expectEqual(
         @as(u64, 0x4022_0000_0000_0000),
         @as(u64, @bitCast(exp10m1(@as(f64, 1.0)))),
+    );
+}
+
+test "root exports nearest-even Exp10 family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x4900),
+        @as(u16, @bitCast(exp10(@as(f16, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x4120_0000),
+        @as(u32, @bitCast(exp10(@as(f32, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x4024_0000_0000_0000),
+        @as(u64, @bitCast(exp10(@as(f64, 1.0)))),
     );
 }
