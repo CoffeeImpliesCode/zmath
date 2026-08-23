@@ -133,6 +133,17 @@ pub fn sin(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.sind(value);
     @compileError("zmath.sin supports only f16, f32, and f64");
 }
+/// Computes the sine of `value` in half-revolutions with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn sinpi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.sinpih(value);
+    if (T == f32) return scalar.sinpif(value);
+    if (T == f64) return scalar.sinpid(value);
+    @compileError("zmath.sinpi supports only f16, f32, and f64");
+}
 
 /// Computes the cosine of `value` with the scalar implementation for its type.
 ///
@@ -143,6 +154,17 @@ pub fn cos(value: anytype) @TypeOf(value) {
     if (T == f32) return scalar.cosf(value);
     if (T == f64) return scalar.cosd(value);
     @compileError("zmath.cos supports only f16, f32, and f64");
+}
+
+/// Computes cos(pi * `value`) with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn cospi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.cospih(value);
+    if (T == f32) return scalar.cospif(value);
+    if (T == f64) return scalar.cospid(value);
+    @compileError("zmath.cospi supports only f16, f32, and f64");
 }
 /// Computes the hyperbolic cosine of `value` with the scalar implementation
 /// for its type.
@@ -176,6 +198,17 @@ pub fn tan(value: anytype) @TypeOf(value) {
     if (T == f32) return scalar.tanf(value);
     if (T == f64) return scalar.tand(value);
     @compileError("zmath.tan supports only f16, f32, and f64");
+}
+
+/// Computes the tangent of pi times `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn tanpi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.tanpih(value);
+    if (T == f32) return scalar.tanpif(value);
+    if (T == f64) return scalar.tanpid(value);
+    @compileError("zmath.tanpi supports only f16, f32, and f64");
 }
 
 /// Computes the hyperbolic tangent of `value` with the scalar implementation
@@ -282,8 +315,10 @@ test {
     _ = @import("scalar_acosh_test.zig");
     _ = @import("scalar_acos_test.zig");
     _ = @import("scalar_cos_test.zig");
+    _ = @import("scalar_cospi_test.zig");
     _ = @import("scalar_sind_test.zig");
     _ = @import("scalar_tan_test.zig");
+    _ = @import("scalar_tanpi_test.zig");
     _ = @import("scalar_stdlib_agreement_test.zig");
     _ = @import("scalar_exp2_test.zig");
     _ = @import("scalar_cbrt_test.zig");
@@ -295,6 +330,8 @@ test {
     _ = @import("scalar_erf_test.zig");
     _ = @import("scalar_tanh_test.zig");
     _ = @import("scalar_tgamma_test.zig");
+    _ = @import("scalar_sinpi_test.zig");
+    _ = @import("root_sinpi_test.zig");
 }
 
 test "root exports nearest-even Atan H, F, and D" {
@@ -391,6 +428,21 @@ test "root exports nearest-even binary16/32/64 tangent" {
     try std.testing.expectEqual(@as(u16, 0x3e3b), @as(u16, @bitCast(tan(@as(f16, 1.0)))));
     try std.testing.expectEqual(@as(u32, 0x3fc7_5923), @as(u32, @bitCast(tan(@as(f32, 1.0)))));
     try std.testing.expectEqual(@as(u64, 0x3ff8_eb24_5cbe_e3a6), @as(u64, @bitCast(tan(@as(f64, 1.0)))));
+}
+
+test "root exports nearest-even Tanpi family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3c00),
+        @as(u16, @bitCast(tanpi(@as(f16, 0.25)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f80_0000),
+        @as(u32, @bitCast(tanpi(@as(f32, 0.25)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff0_0000_0000_0000),
+        @as(u64, @bitCast(tanpi(@as(f64, 0.25)))),
+    );
 }
 
 test "root exports nearest-even hyperbolic Sinh" {

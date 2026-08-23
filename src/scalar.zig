@@ -17,6 +17,11 @@ pub const tgammah = tgamma_impl.tgammah;
 pub const tgammaf = tgamma_impl.tgammaf;
 pub const tgammad = tgamma_impl.tgammad;
 
+const cospi_impl = @import("scalar_cospi.zig");
+pub const cospih = cospi_impl.cospih;
+pub const cospif = cospi_impl.cospif;
+pub const cospid = cospi_impl.cospid;
+
 const asin_impl = @import("scalar_asin.zig");
 pub const asinh = asin_impl.asinh;
 pub const asinf = asin_impl.asinf;
@@ -83,6 +88,12 @@ const log2d_impl = @import("scalar_log2d.zig");
 pub const log2d = log2d_impl.log2d;
 pub const sind = @import("scalar_sind.zig").sind;
 pub const cosd = @import("scalar_sind.zig").cosd;
+const sinpi_h_impl = @import("scalar_sinpih.zig");
+pub const sinpih = sinpi_h_impl.sinpih;
+const sinpi_f_impl = @import("scalar_sinpif.zig");
+pub const sinpif = sinpi_f_impl.sinpif;
+const sinpi_d_impl = @import("scalar_sinpid.zig");
+pub const sinpid = sinpi_d_impl.sinpid;
 const exp2_impl = @import("scalar_exp2.zig");
 pub const exp2h = exp2_impl.exp2h;
 pub const exp2f = exp2_impl.exp2f;
@@ -95,6 +106,10 @@ pub const tanh = @import("scalar_tanh.zig").tanh;
 pub const tanf = @import("scalar_tanf.zig").tanf;
 pub const tand = @import("scalar_tand.zig").tand;
 
+const tanpi_impl = @import("scalar_tanpi.zig");
+pub const tanpih = tanpi_impl.tanpih;
+pub const tanpif = tanpi_impl.tanpif;
+pub const tanpid = tanpi_impl.tanpid;
 const cosh_impl = @import("scalar_cosh.zig");
 pub const coshh = cosh_impl.coshh;
 pub const coshf = cosh_impl.coshf;
