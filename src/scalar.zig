@@ -59,6 +59,12 @@ const log1p_impl = @import("scalar_log1p.zig");
 const log1pd_impl = @import("scalar_log1pd.zig");
 
 pub const logd = logd_impl.logd;
+const log10h_impl = @import("scalar_log10h.zig");
+pub const log10h = log10h_impl.log10h;
+const log10f_impl = @import("scalar_log10f.zig");
+pub const log10f = log10f_impl.log10f;
+const log10d_impl = @import("scalar_log10d.zig");
+pub const log10d = log10d_impl.log10d;
 pub const log1ph = log1p_impl.log1ph;
 pub const log1pf = log1p_impl.log1pf;
 pub const log1pd = log1pd_impl.log1pd;

@@ -46,5 +46,8 @@ test "scalar exposes h, f, and d suffix exports" {
         _ = scalar.exp10m1h;
         _ = scalar.exp10m1f;
         _ = scalar.exp10m1d;
+        _ = scalar.log10h;
+        _ = scalar.log10f;
+        _ = scalar.log10d;
     }
 }
