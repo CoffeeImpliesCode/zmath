@@ -284,6 +284,18 @@ pub fn rsqrt(value: anytype) @TypeOf(value) {
     @compileError("zmath.rsqrt supports only f16, f32, and f64");
 }
 
+/// Computes the square root of `value` with the scalar implementation for its
+/// type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn sqrt(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.sqrth(value);
+    if (T == f32) return scalar.sqrtf(value);
+    if (T == f64) return scalar.sqrtd(value);
+    @compileError("zmath.sqrt supports only f16, f32, and f64");
+}
+
 /// Computes the inverse cosine of `value` with the scalar implementation for its type.
 ///
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
@@ -350,6 +362,7 @@ test {
     _ = @import("scalar_cosh_test.zig");
     _ = @import("scalar_boundary_test.zig");
     _ = @import("scalar_rsqrt_test.zig");
+    _ = @import("scalar_sqrt_test.zig");
     _ = @import("api_suffix_test.zig");
     _ = @import("ieee_h_complete_test.zig");
     _ = @import("ieee_exhaustive_h_test.zig");
@@ -589,6 +602,11 @@ test "root exports nearest-even Rsqrt family" {
     );
 }
 
+test "root exports nearest-even Sqrt family" {
+    try std.testing.expectEqual(@as(u16, 0x3da8), @as(u16, @bitCast(sqrt(@as(f16, 2.0)))));
+    try std.testing.expectEqual(@as(u32, 0x3fb5_04f3), @as(u32, @bitCast(sqrt(@as(f32, 2.0)))));
+    try std.testing.expectEqual(@as(u64, 0x3ff6_a09e_667f_3bcd), @as(u64, @bitCast(sqrt(@as(f64, 2.0)))));
+}
 test "root exports nearest-even Cbrt H, F, and D" {
     try std.testing.expectEqual(
         @as(u16, 0x3d0a),
