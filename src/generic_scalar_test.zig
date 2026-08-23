@@ -36,6 +36,18 @@ fn expectExp10m1(comptime zmath: type, comptime T: type, value: T) !void {
     try std.testing.expectEqual(expected, got);
 }
 
+fn expectExp2m1(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.exp2m1(value);
+    const expected = if (T == f16)
+        zmath.scalar.exp2m1h(value)
+    else if (T == f32)
+        zmath.scalar.exp2m1f(value)
+    else
+        zmath.scalar.exp2m1d(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
 fn expectLog(comptime zmath: type, comptime T: type, value: T) !void {
     const got = zmath.log(value);
     const expected = if (T == f16)
@@ -214,6 +226,10 @@ pub fn run(comptime zmath: type) !void {
     try expectExp10m1(zmath, f16, @as(f16, 0.5));
     try expectExp10m1(zmath, f32, @as(f32, 0.5));
     try expectExp10m1(zmath, f64, @as(f64, 0.5));
+
+    try expectExp2m1(zmath, f16, @as(f16, 0.5));
+    try expectExp2m1(zmath, f32, @as(f32, 0.5));
+    try expectExp2m1(zmath, f64, @as(f64, 0.5));
     try expectLog(zmath, f16, @as(f16, 1.5));
     try expectLog(zmath, f32, @as(f32, 1.5));
     try expectLog(zmath, f64, @as(f64, 1.5));

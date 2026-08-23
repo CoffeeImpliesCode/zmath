@@ -43,6 +43,9 @@ test "scalar exposes h, f, and d suffix exports" {
         _ = scalar.acosh;
         _ = scalar.acosf;
         _ = scalar.acosd;
+        _ = scalar.exp2m1h;
+        _ = scalar.exp2m1f;
+        _ = scalar.exp2m1d;
         _ = scalar.exp10m1h;
         _ = scalar.exp10m1f;
         _ = scalar.exp10m1d;
