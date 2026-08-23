@@ -127,6 +127,11 @@ pub const erff = erff_impl.erff;
 const erfd_impl = @import("scalar_erfd.zig");
 pub const erfd = erfd_impl.erfd;
 
+const pow_impl = @import("scalar_pow.zig");
+pub const powh = pow_impl.powh;
+pub const powf = pow_impl.powf;
+pub const powd = pow_impl.powd;
+
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;

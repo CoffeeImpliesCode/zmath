@@ -17,6 +17,21 @@ pub fn exp(value: anytype) @TypeOf(value) {
     @compileError("zmath.exp supports only f16, f32, and f64");
 }
 
+/// Computes `base` raised to `exponent` with the scalar implementation for
+/// their common type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn pow(base: anytype, exponent: anytype) @TypeOf(base) {
+    const T = @TypeOf(base);
+    if (@TypeOf(exponent) != T) {
+        @compileError("zmath.pow requires base and exponent to have the same type");
+    }
+    if (T == f16) return scalar.powh(base, exponent);
+    if (T == f32) return scalar.powf(base, exponent);
+    if (T == f64) return scalar.powd(base, exponent);
+    @compileError("zmath.pow supports only f16, f32, and f64");
+}
+
 /// Computes 10 raised to `value` with the scalar implementation for its type.
 ///
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
@@ -317,6 +332,8 @@ test {
     _ = @import("scalar_cos_test.zig");
     _ = @import("scalar_cospi_test.zig");
     _ = @import("scalar_sind_test.zig");
+    _ = @import("scalar_pow_test.zig");
+    _ = @import("root_pow_test.zig");
     _ = @import("scalar_tan_test.zig");
     _ = @import("scalar_tanpi_test.zig");
     _ = @import("scalar_stdlib_agreement_test.zig");
