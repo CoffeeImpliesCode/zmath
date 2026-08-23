@@ -52,6 +52,18 @@ pub fn erfc(value: anytype) @TypeOf(value) {
     @compileError("zmath.erfc supports only f16, f32, and f64");
 }
 
+/// Computes the true gamma function of `value` with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn tgamma(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.tgammah(value);
+    if (T == f32) return scalar.tgammaf(value);
+    if (T == f64) return scalar.tgammad(value);
+    @compileError("zmath.tgamma supports only f16, f32, and f64");
+}
+
 /// Computes the natural logarithm of `value` with the scalar implementation
 /// for its type.
 ///
@@ -282,6 +294,7 @@ test {
     _ = @import("scalar_sinh_test.zig");
     _ = @import("scalar_erf_test.zig");
     _ = @import("scalar_tanh_test.zig");
+    _ = @import("scalar_tgamma_test.zig");
 }
 
 test "root exports nearest-even Atan H, F, and D" {

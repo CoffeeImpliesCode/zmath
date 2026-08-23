@@ -12,6 +12,10 @@ const erfc_impl = @import("scalar_erfc.zig");
 pub const erfch = erfc_impl.erfch;
 pub const erfcf = erfc_impl.erfcf;
 pub const erfcd = erfc_impl.erfcd;
+const tgamma_impl = @import("scalar_tgamma.zig");
+pub const tgammah = tgamma_impl.tgammah;
+pub const tgammaf = tgamma_impl.tgammaf;
+pub const tgammad = tgamma_impl.tgammad;
 
 const asin_impl = @import("scalar_asin.zig");
 pub const asinh = asin_impl.asinh;
