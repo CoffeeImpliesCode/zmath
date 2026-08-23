@@ -86,6 +86,17 @@ pub fn log2(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.log2d(value);
     @compileError("zmath.log2 supports only f16, f32, and f64");
 }
+/// Computes the base-2 logarithm of one plus `value` with the scalar
+/// implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn log2p1(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.log2p1h(value);
+    if (T == f32) return scalar.log2p1f(value);
+    if (T == f64) return scalar.log2p1d(value);
+    @compileError("zmath.log2p1 supports only f16, f32, and f64");
+}
 
 /// Computes the base-10 logarithm of `value` with the scalar implementation
 /// for its type.
@@ -310,6 +321,7 @@ test {
     _ = @import("scalar_log_test.zig");
     _ = @import("scalar_log2_test.zig");
     _ = @import("scalar_log1p_test.zig");
+    _ = @import("scalar_log2p1_test.zig");
     _ = @import("scalar_atanh_test.zig");
     _ = @import("scalar_sin_test.zig");
     _ = @import("scalar_acosh_test.zig");
