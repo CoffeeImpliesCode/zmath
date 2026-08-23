@@ -52,6 +52,17 @@ pub fn log(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.logd(value);
     @compileError("zmath.log supports only f16, f32, and f64");
 }
+/// Computes the base-2 logarithm of `value` with the scalar implementation for
+/// its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn log2(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.log2h(value);
+    if (T == f32) return scalar.log2f(value);
+    if (T == f64) return scalar.log2d(value);
+    @compileError("zmath.log2 supports only f16, f32, and f64");
+}
 
 /// Computes the error function of `value` with the scalar implementation for
 /// its type.
@@ -227,6 +238,7 @@ test {
     _ = @import("scalar_expm1_test.zig");
     _ = @import("scalar_exp10m1_test.zig");
     _ = @import("scalar_log_test.zig");
+    _ = @import("scalar_log2_test.zig");
     _ = @import("scalar_log1p_test.zig");
     _ = @import("scalar_atanh_test.zig");
     _ = @import("scalar_sin_test.zig");
@@ -407,6 +419,15 @@ test "root exports nearest-even Exp2 family" {
     try std.testing.expectEqual(
         @as(u64, 0x4000_0000_0000_0000),
         @as(u64, @bitCast(scalar.exp2d(1.0))),
+    );
+}
+
+test "root exports nearest-even Log2 family" {
+    try std.testing.expectEqual(@as(u16, 0x3c00), @as(u16, @bitCast(log2(@as(f16, 2.0)))));
+    try std.testing.expectEqual(@as(u32, 0x3f80_0000), @as(u32, @bitCast(log2(@as(f32, 2.0)))));
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff0_0000_0000_0000),
+        @as(u64, @bitCast(log2(@as(f64, 2.0)))),
     );
 }
 test "root exports nearest-even Rsqrt family" {
