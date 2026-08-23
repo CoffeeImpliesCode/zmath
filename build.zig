@@ -86,6 +86,18 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/coremath_tgammad.c"),
         .flags = core_math_erfc_flags,
     });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_cospih.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_cospif.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_cospid.c"),
+        .flags = core_math_erfc_flags,
+    });
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function

@@ -17,6 +17,11 @@ pub const tgammah = tgamma_impl.tgammah;
 pub const tgammaf = tgamma_impl.tgammaf;
 pub const tgammad = tgamma_impl.tgammad;
 
+const cospi_impl = @import("scalar_cospi.zig");
+pub const cospih = cospi_impl.cospih;
+pub const cospif = cospi_impl.cospif;
+pub const cospid = cospi_impl.cospid;
+
 const asin_impl = @import("scalar_asin.zig");
 pub const asinh = asin_impl.asinh;
 pub const asinf = asin_impl.asinf;

@@ -144,6 +144,17 @@ pub fn cos(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.cosd(value);
     @compileError("zmath.cos supports only f16, f32, and f64");
 }
+
+/// Computes cos(pi * `value`) with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn cospi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.cospih(value);
+    if (T == f32) return scalar.cospif(value);
+    if (T == f64) return scalar.cospid(value);
+    @compileError("zmath.cospi supports only f16, f32, and f64");
+}
 /// Computes the hyperbolic cosine of `value` with the scalar implementation
 /// for its type.
 ///
@@ -282,6 +293,7 @@ test {
     _ = @import("scalar_acosh_test.zig");
     _ = @import("scalar_acos_test.zig");
     _ = @import("scalar_cos_test.zig");
+    _ = @import("scalar_cospi_test.zig");
     _ = @import("scalar_sind_test.zig");
     _ = @import("scalar_tan_test.zig");
     _ = @import("scalar_stdlib_agreement_test.zig");
