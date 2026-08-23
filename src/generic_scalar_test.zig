@@ -12,6 +12,18 @@ fn expectExp(comptime zmath: type, comptime T: type, value: T) !void {
     try std.testing.expectEqual(expected, got);
 }
 
+fn expectExp10(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.exp10(value);
+    const expected = if (T == f16)
+        zmath.scalar.exp10h(value)
+    else if (T == f32)
+        zmath.scalar.exp10f(value)
+    else
+        zmath.scalar.exp10d(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
 fn expectExp10m1(comptime zmath: type, comptime T: type, value: T) !void {
     const got = zmath.exp10m1(value);
     const expected = if (T == f16)
@@ -32,6 +44,18 @@ fn expectLog(comptime zmath: type, comptime T: type, value: T) !void {
         zmath.scalar.logf(value)
     else
         zmath.scalar.logd(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
+fn expectLog2(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.log2(value);
+    const expected = if (T == f16)
+        zmath.scalar.log2h(value)
+    else if (T == f32)
+        zmath.scalar.log2f(value)
+    else
+        zmath.scalar.log2d(value);
     comptime std.debug.assert(@TypeOf(got) == T);
     try std.testing.expectEqual(expected, got);
 }
@@ -171,12 +195,19 @@ pub fn run(comptime zmath: type) !void {
     try expectExp(zmath, f32, @as(f32, 0.5));
     try expectExp(zmath, f64, @as(f64, 0.5));
 
+    try expectExp10(zmath, f16, @as(f16, 0.5));
+    try expectExp10(zmath, f32, @as(f32, 0.5));
+    try expectExp10(zmath, f64, @as(f64, 0.5));
+
     try expectExp10m1(zmath, f16, @as(f16, 0.5));
     try expectExp10m1(zmath, f32, @as(f32, 0.5));
     try expectExp10m1(zmath, f64, @as(f64, 0.5));
     try expectLog(zmath, f16, @as(f16, 1.5));
     try expectLog(zmath, f32, @as(f32, 1.5));
     try expectLog(zmath, f64, @as(f64, 1.5));
+    try expectLog2(zmath, f16, @as(f16, 1.5));
+    try expectLog2(zmath, f32, @as(f32, 1.5));
+    try expectLog2(zmath, f64, @as(f64, 1.5));
 
     try expectErf(zmath, f16, @as(f16, 0.5));
     try expectErf(zmath, f32, @as(f32, 0.5));
