@@ -172,17 +172,17 @@ pub fn sinh(value: anytype) @TypeOf(value) {
     @compileError("zmath.sinh supports only f16, f32, and f64");
 }
 
-/// Computes the sine of `value` with the scalar implementation for its type.
-///
-/// Callers must keep IEEE round-to-nearest, ties-to-even active.
-pub fn sin(value: anytype) @TypeOf(value) {
-    const T = @TypeOf(value);
-    if (T == f16) return scalar.sinh(value);
-    if (T == f32) return scalar.sinf(value);
-    if (T == f64) return scalar.sind(value);
-    @compileError("zmath.sin supports only f16, f32, and f64");
+const atan2_impl = @import("scalar_atan2.zig");
+pub fn atan2(y: anytype, x: anytype) @TypeOf(y) {
+    const T = @TypeOf(y);
+    if (@TypeOf(x) != T) {
+        @compileError("zmath.atan2 requires y and x to have the same type");
+    }
+    if (T == f16) return scalar.atan2h(y, x);
+    if (T == f32) return scalar.atan2f(y, x);
+    if (T == f64) return scalar.atan2d(y, x);
+    @compileError("zmath.atan2 supports only f16, f32, and f64");
 }
-/// Computes the sine of `value` in half-revolutions with the scalar implementation
 /// for its type.
 ///
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.

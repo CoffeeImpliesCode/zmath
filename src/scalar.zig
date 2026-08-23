@@ -67,13 +67,15 @@ pub const exp10m1h = @import("scalar_exp10m1h.zig").exp10m1h;
 pub const exp10m1f = @import("scalar_exp10m1f.zig").exp10m1f;
 pub const exp10m1d = @import("scalar_exp10m1d.zig").exp10m1d;
 pub const exp10h = @import("scalar_exp10h.zig").exp10h;
-pub const exp10f = @import("scalar_exp10f.zig").exp10f;
-pub const exp10d = @import("scalar_exp10d.zig").exp10d;
+const atan2_impl = @import("scalar_atan2.zig");
+pub const atan2h = atan2_impl.atan2h;
+pub const atan2f = atan2_impl.atan2f;
+pub const atan2d = atan2_impl.atan2d;
+
 const logd_impl = @import("logd.zig");
 const log1p_impl = @import("scalar_log1p.zig");
 const log1pd_impl = @import("scalar_log1pd.zig");
 
-pub const logd = logd_impl.logd;
 const log10h_impl = @import("scalar_log10h.zig");
 pub const log10h = log10h_impl.log10h;
 const log10f_impl = @import("scalar_log10f.zig");
