@@ -133,6 +133,17 @@ pub fn sin(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.sind(value);
     @compileError("zmath.sin supports only f16, f32, and f64");
 }
+/// Computes the sine of `value` in half-revolutions with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn sinpi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.sinpih(value);
+    if (T == f32) return scalar.sinpif(value);
+    if (T == f64) return scalar.sinpid(value);
+    @compileError("zmath.sinpi supports only f16, f32, and f64");
+}
 
 /// Computes the cosine of `value` with the scalar implementation for its type.
 ///
@@ -295,6 +306,8 @@ test {
     _ = @import("scalar_erf_test.zig");
     _ = @import("scalar_tanh_test.zig");
     _ = @import("scalar_tgamma_test.zig");
+    _ = @import("scalar_sinpi_test.zig");
+    _ = @import("root_sinpi_test.zig");
 }
 
 test "root exports nearest-even Atan H, F, and D" {
