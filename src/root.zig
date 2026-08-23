@@ -28,6 +28,18 @@ pub fn exp10(value: anytype) @TypeOf(value) {
     @compileError("zmath.exp10 supports only f16, f32, and f64");
 }
 
+/// Computes the base-2 exponential biased by one with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn exp2m1(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.exp2m1h(value);
+    if (T == f32) return scalar.exp2m1f(value);
+    if (T == f64) return scalar.exp2m1d(value);
+    @compileError("zmath.exp2m1 supports only f16, f32, and f64");
+}
+
 /// Computes the base-10 exponential biased by one with the scalar implementation
 /// for its type.
 ///
@@ -86,6 +98,17 @@ pub fn log2(value: anytype) @TypeOf(value) {
     if (T == f64) return scalar.log2d(value);
     @compileError("zmath.log2 supports only f16, f32, and f64");
 }
+/// Computes the base-2 logarithm of one plus `value` with the scalar
+/// implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn log2p1(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.log2p1h(value);
+    if (T == f32) return scalar.log2p1f(value);
+    if (T == f64) return scalar.log2p1d(value);
+    @compileError("zmath.log2p1 supports only f16, f32, and f64");
+}
 
 /// Computes the base-10 logarithm of `value` with the scalar implementation
 /// for its type.
@@ -97,6 +120,17 @@ pub fn log10(value: anytype) @TypeOf(value) {
     if (T == f32) return scalar.log10f(value);
     if (T == f64) return scalar.log10d(value);
     @compileError("zmath.log10 supports only f16, f32, and f64");
+}
+/// Computes the base-10 logarithm of one plus `value` with the scalar
+/// implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn log10p1(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.log10p1h(value);
+    if (T == f32) return scalar.log10p1f(value);
+    if (T == f64) return scalar.log10p1d(value);
+    @compileError("zmath.log10p1 supports only f16, f32, and f64");
 }
 
 /// Computes the error function of `value` with the scalar implementation for
@@ -297,6 +331,7 @@ test {
     _ = @import("scalar_test.zig");
     _ = @import("scalar_erfc_test.zig");
     _ = @import("scalar_log10_test.zig");
+    _ = @import("scalar_log10p1_test.zig");
     _ = @import("scalar_cosh_test.zig");
     _ = @import("scalar_boundary_test.zig");
     _ = @import("scalar_rsqrt_test.zig");
@@ -305,11 +340,13 @@ test {
     _ = @import("ieee_exhaustive_h_test.zig");
     _ = @import("scalar_exp_test.zig");
     _ = @import("scalar_expm1_test.zig");
+    _ = @import("scalar_exp2m1_test.zig");
     _ = @import("scalar_exp10m1_test.zig");
     _ = @import("scalar_exp10_test.zig");
     _ = @import("scalar_log_test.zig");
     _ = @import("scalar_log2_test.zig");
     _ = @import("scalar_log1p_test.zig");
+    _ = @import("scalar_log2p1_test.zig");
     _ = @import("scalar_atanh_test.zig");
     _ = @import("scalar_sin_test.zig");
     _ = @import("scalar_acosh_test.zig");
@@ -589,6 +626,21 @@ test "root exports nearest-even Exp10m1 family" {
     );
 }
 
+test "root exports nearest-even Exp2m1 family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3c00),
+        @as(u16, @bitCast(exp2m1(@as(f16, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f80_0000),
+        @as(u32, @bitCast(exp2m1(@as(f32, 1.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff0_0000_0000_0000),
+        @as(u64, @bitCast(exp2m1(@as(f64, 1.0)))),
+    );
+}
+
 test "root exports nearest-even Log10 family" {
     try std.testing.expectEqual(
         @as(u16, 0x3c00),
@@ -601,6 +653,21 @@ test "root exports nearest-even Log10 family" {
     try std.testing.expectEqual(
         @as(u64, 0x3ff0_0000_0000_0000),
         @as(u64, @bitCast(log10(@as(f64, 10.0)))),
+    );
+}
+
+test "root exports nearest-even Log10p1 family" {
+    try std.testing.expectEqual(
+        @as(u16, 0x3c00),
+        @as(u16, @bitCast(log10p1(@as(f16, 9.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u32, 0x3f80_0000),
+        @as(u32, @bitCast(log10p1(@as(f32, 9.0)))),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x3ff0_0000_0000_0000),
+        @as(u64, @bitCast(log10p1(@as(f64, 9.0)))),
     );
 }
 
