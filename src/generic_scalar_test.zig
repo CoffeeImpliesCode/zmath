@@ -190,6 +190,18 @@ fn expectTan(comptime zmath: type, comptime T: type, value: T) !void {
     try std.testing.expectEqual(expected, got);
 }
 
+fn expectTanpi(comptime zmath: type, comptime T: type, value: T) !void {
+    const got = zmath.tanpi(value);
+    const expected = if (T == f16)
+        zmath.scalar.tanpih(value)
+    else if (T == f32)
+        zmath.scalar.tanpif(value)
+    else
+        zmath.scalar.tanpid(value);
+    comptime std.debug.assert(@TypeOf(got) == T);
+    try std.testing.expectEqual(expected, got);
+}
+
 pub fn run(comptime zmath: type) !void {
     try expectExp(zmath, f16, @as(f16, 0.5));
     try expectExp(zmath, f32, @as(f32, 0.5));
@@ -226,6 +238,9 @@ pub fn run(comptime zmath: type) !void {
     try expectTan(zmath, f16, @as(f16, 0.5));
     try expectTan(zmath, f32, @as(f32, 0.5));
     try expectTan(zmath, f64, @as(f64, 0.5));
+    try expectTanpi(zmath, f16, @as(f16, 0.125));
+    try expectTanpi(zmath, f32, @as(f32, 0.125));
+    try expectTanpi(zmath, f64, @as(f64, 0.125));
 
     try expectCosh(zmath, f16, @as(f16, 0.5));
     try expectCosh(zmath, f32, @as(f32, 0.5));

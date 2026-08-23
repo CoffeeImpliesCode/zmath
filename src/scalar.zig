@@ -95,6 +95,10 @@ pub const tanh = @import("scalar_tanh.zig").tanh;
 pub const tanf = @import("scalar_tanf.zig").tanf;
 pub const tand = @import("scalar_tand.zig").tand;
 
+const tanpi_impl = @import("scalar_tanpi.zig");
+pub const tanpih = tanpi_impl.tanpih;
+pub const tanpif = tanpi_impl.tanpif;
+pub const tanpid = tanpi_impl.tanpid;
 const cosh_impl = @import("scalar_cosh.zig");
 pub const coshh = cosh_impl.coshh;
 pub const coshf = cosh_impl.coshf;
