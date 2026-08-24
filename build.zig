@@ -134,6 +134,42 @@ pub fn build(b: *std.Build) void {
         .file = b.path("src/coremath_powd.c"),
         .flags = core_math_erfc_flags,
     });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_atan2h.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_atan2f.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_atan2d.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_lgammah.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_lgammaf.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_lgammad.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_pi_inverseh.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_pi_inversef.c"),
+        .flags = core_math_erfc_flags,
+    });
+    mod.addCSourceFile(.{
+        .file = b.path("src/coremath_pi_inversed.c"),
+        .flags = core_math_erfc_flags,
+    });
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function

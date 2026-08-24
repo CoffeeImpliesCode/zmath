@@ -1,3 +1,39 @@
+const c23_core = @import("ieee_c23_core.zig");
+const c23_optional = @import("ieee_c23_optional.zig");
+const c23_types = @import("scalar_c23_types.zig");
+
+pub const CanonicalizeResult = c23_types.CanonicalizeResult;
+pub const PayloadResult = c23_types.PayloadResult;
+
+pub const canonicalizeh = c23_core.canonicalizeh;
+pub const canonicalizef = c23_core.canonicalizef;
+pub const canonicalized = c23_core.canonicalized;
+pub const nanh = c23_core.nanh;
+pub const nanf = c23_core.nanf;
+pub const nand = c23_core.nand;
+pub const nextTowardh = c23_core.nextTowardh;
+pub const nextTowardf = c23_core.nextTowardf;
+pub const nextTowardd = c23_core.nextTowardd;
+pub const nextUph = c23_core.nextUph;
+pub const nextUpf = c23_core.nextUpf;
+pub const nextUpd = c23_core.nextUpd;
+pub const nextDownh = c23_core.nextDownh;
+pub const nextDownf = c23_core.nextDownf;
+pub const nextDownd = c23_core.nextDownd;
+
+pub const totalOrderMagh = c23_optional.totalOrderMagh;
+pub const totalOrderMagf = c23_optional.totalOrderMagf;
+pub const totalOrderMagd = c23_optional.totalOrderMagd;
+pub const getPayloadh = c23_optional.getPayloadh;
+pub const getPayloadf = c23_optional.getPayloadf;
+pub const getPayloadd = c23_optional.getPayloadd;
+pub const setPayloadh = c23_optional.setPayloadh;
+pub const setPayloadf = c23_optional.setPayloadf;
+pub const setPayloadd = c23_optional.setPayloadd;
+pub const setPayloadSigh = c23_optional.setPayloadSigh;
+pub const setPayloadSigf = c23_optional.setPayloadSigf;
+pub const setPayloadSigd = c23_optional.setPayloadSigd;
+
 pub const RoundMode = enum {
     nearest_even,
     toward_zero,
@@ -101,28 +137,6 @@ pub fn copySignd(value: f64, sign: f64) f64 {
     const sign_bits: u64 = @bitCast(sign);
     const result_bits = (value_bits & ~sign_mask_d) | (sign_bits & sign_mask_d);
     return @bitCast(result_bits);
-}
-
-pub fn nextUph(value: f16) f16 {
-    const bits = toBitsh(value);
-    const magnitude = bits & ~sign_mask_h;
-
-    if (isNaNH(bits)) return quietNaNH(bits);
-    if (magnitude == 0) return fromBitsh(1);
-    if (bits == exponent_mask_h) return value;
-    if (bits & sign_mask_h != 0) return fromBitsh(bits - 1);
-    return fromBitsh(bits + 1);
-}
-
-pub fn nextDownh(value: f16) f16 {
-    const bits = toBitsh(value);
-    const magnitude = bits & ~sign_mask_h;
-
-    if (isNaNH(bits)) return quietNaNH(bits);
-    if (magnitude == 0) return fromBitsh(sign_mask_h | 1);
-    if (bits == (sign_mask_h | exponent_mask_h)) return value;
-    if (bits & sign_mask_h != 0) return fromBitsh(bits + 1);
-    return fromBitsh(bits - 1);
 }
 
 pub fn nextAfterh(from: f16, to: f16) f16 {

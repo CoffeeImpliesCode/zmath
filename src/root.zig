@@ -5,6 +5,30 @@ const Io = std.Io;
 pub const ieee = @import("ieee.zig");
 pub const scalar = @import("scalar.zig");
 const generic_scalar_test = @import("generic_scalar_test.zig");
+const c23_public_surface_test = @import("c23_public_surface_test.zig");
+const scalar_c23_types = @import("scalar_c23_types.zig");
+const scalar_narrow = @import("scalar_narrow.zig");
+
+pub const FromFpRound = scalar_c23_types.FromFpRound;
+pub const IntegerResult = scalar_c23_types.IntegerResult;
+pub const Atan2Result = scalar_c23_types.Atan2Result;
+pub const PowerResult = scalar_c23_types.PowerResult;
+pub const FrexpResult = scalar_c23_types.FrexpResult;
+pub const ModfResult = scalar_c23_types.ModfResult;
+pub const RemquoResult = scalar_c23_types.RemquoResult;
+pub const LgammaResult = scalar_c23_types.LgammaResult;
+pub const CanonicalizeResult = scalar_c23_types.CanonicalizeResult;
+pub const PayloadResult = scalar_c23_types.PayloadResult;
+
+/// Computes the absolute value of `value` with the scalar implementation for
+/// its type.
+pub fn abs(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.absh(value);
+    if (T == f32) return scalar.absf(value);
+    if (T == f64) return scalar.absd(value);
+    @compileError("zmath.abs supports only f16, f32, and f64");
+}
 
 /// Computes e raised to `value` with the scalar implementation for its type.
 ///
@@ -64,6 +88,7 @@ pub fn exp10m1(value: anytype) @TypeOf(value) {
     if (T == f16) return scalar.exp10m1h(value);
     if (T == f32) return scalar.exp10m1f(value);
     if (T == f64) return scalar.exp10m1d(value);
+    @compileError("zmath.exp10m1 supports only f16, f32, and f64");
 }
 
 /// Computes `a` multiplied by `b` then added to `c` with the scalar implementation
@@ -311,6 +336,21 @@ pub fn sqrt(value: anytype) @TypeOf(value) {
     @compileError("zmath.sqrt supports only f16, f32, and f64");
 }
 
+/// Computes the hypotenuse of `x` and `y` with the scalar implementation for
+/// their common type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn hypot(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.hypot requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.hypoth(x, y);
+    if (T == f32) return scalar.hypotf(x, y);
+    if (T == f64) return scalar.hypotd(x, y);
+    @compileError("zmath.hypot supports only f16, f32, and f64");
+}
+
 /// Computes the inverse cosine of `value` with the scalar implementation for its type.
 ///
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
@@ -356,6 +396,628 @@ pub fn atanh(value: anytype) @TypeOf(value) {
     @compileError("zmath.atanh supports only f16, f32, and f64");
 }
 
+pub fn atan(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.atanh(value);
+    if (T == f32) return scalar.atanf(value);
+    if (T == f64) return scalar.atand(value);
+    @compileError("zmath.atan supports only f16, f32, and f64");
+}
+
+pub fn cbrt(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.cbrth(value);
+    if (T == f32) return scalar.cbrtf(value);
+    if (T == f64) return scalar.cbrtd(value);
+    @compileError("zmath.cbrt supports only f16, f32, and f64");
+}
+
+pub fn exp2(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.exp2h(value);
+    if (T == f32) return scalar.exp2f(value);
+    if (T == f64) return scalar.exp2d(value);
+    @compileError("zmath.exp2 supports only f16, f32, and f64");
+}
+
+pub fn expm1(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.expm1h(value);
+    if (T == f32) return scalar.expm1f(value);
+    if (T == f64) return scalar.expm1d(value);
+    @compileError("zmath.expm1 supports only f16, f32, and f64");
+}
+
+pub fn log1p(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.log1ph(value);
+    if (T == f32) return scalar.log1pf(value);
+    if (T == f64) return scalar.log1pd(value);
+    @compileError("zmath.log1p supports only f16, f32, and f64");
+}
+
+pub fn logp1(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.logp1h(value);
+    if (T == f32) return scalar.logp1f(value);
+    if (T == f64) return scalar.logp1d(value);
+    @compileError("zmath.logp1 supports only f16, f32, and f64");
+}
+
+pub fn ceil(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.ceilh(value);
+    if (T == f32) return scalar.ceilf(value);
+    if (T == f64) return scalar.ceild(value);
+    @compileError("zmath.ceil supports only f16, f32, and f64");
+}
+
+pub fn floor(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.floorh(value);
+    if (T == f32) return scalar.floorf(value);
+    if (T == f64) return scalar.floord(value);
+    @compileError("zmath.floor supports only f16, f32, and f64");
+}
+
+pub fn nearbyint(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.nearbyinth(value);
+    if (T == f32) return scalar.nearbyintf(value);
+    if (T == f64) return scalar.nearbyintd(value);
+    @compileError("zmath.nearbyint supports only f16, f32, and f64");
+}
+
+pub fn rint(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.rinth(value);
+    if (T == f32) return scalar.rintf(value);
+    if (T == f64) return scalar.rintd(value);
+    @compileError("zmath.rint supports only f16, f32, and f64");
+}
+
+pub fn round(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.roundh(value);
+    if (T == f32) return scalar.roundf(value);
+    if (T == f64) return scalar.roundd(value);
+    @compileError("zmath.round supports only f16, f32, and f64");
+}
+
+pub fn roundeven(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.roundevenh(value);
+    if (T == f32) return scalar.roundevenf(value);
+    if (T == f64) return scalar.roundevend(value);
+    @compileError("zmath.roundeven supports only f16, f32, and f64");
+}
+
+pub fn trunc(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.trunch(value);
+    if (T == f32) return scalar.truncf(value);
+    if (T == f64) return scalar.truncd(value);
+    @compileError("zmath.trunc supports only f16, f32, and f64");
+}
+
+pub fn lrint(value: anytype) IntegerResult {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.lrinth(value);
+    if (T == f32) return scalar.lrintf(value);
+    if (T == f64) return scalar.lrintd(value);
+    @compileError("zmath.lrint supports only f16, f32, and f64");
+}
+
+pub fn llrint(value: anytype) IntegerResult {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.llrinth(value);
+    if (T == f32) return scalar.llrintf(value);
+    if (T == f64) return scalar.llrintd(value);
+    @compileError("zmath.llrint supports only f16, f32, and f64");
+}
+
+pub fn lround(value: anytype) IntegerResult {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.lroundh(value);
+    if (T == f32) return scalar.lroundf(value);
+    if (T == f64) return scalar.lroundd(value);
+    @compileError("zmath.lround supports only f16, f32, and f64");
+}
+
+pub fn llround(value: anytype) IntegerResult {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.llroundh(value);
+    if (T == f32) return scalar.llroundf(value);
+    if (T == f64) return scalar.llroundd(value);
+    @compileError("zmath.llround supports only f16, f32, and f64");
+}
+
+pub fn fromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.fromfph(value, direction, width);
+    if (T == f32) return scalar.fromfpf(value, direction, width);
+    if (T == f64) return scalar.fromfpd(value, direction, width);
+    @compileError("zmath.fromfp supports only f16, f32, and f64");
+}
+
+pub fn ufromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.ufromfph(value, direction, width);
+    if (T == f32) return scalar.ufromfpf(value, direction, width);
+    if (T == f64) return scalar.ufromfpd(value, direction, width);
+    @compileError("zmath.ufromfp supports only f16, f32, and f64");
+}
+
+pub fn fromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.fromfpxh(value, direction, width);
+    if (T == f32) return scalar.fromfpxf(value, direction, width);
+    if (T == f64) return scalar.fromfpxd(value, direction, width);
+    @compileError("zmath.fromfpx supports only f16, f32, and f64");
+}
+
+pub fn ufromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.ufromfpxh(value, direction, width);
+    if (T == f32) return scalar.ufromfpxf(value, direction, width);
+    if (T == f64) return scalar.ufromfpxd(value, direction, width);
+    @compileError("zmath.ufromfpx supports only f16, f32, and f64");
+}
+
+pub fn atan2(y: anytype, x: anytype) Atan2Result(@TypeOf(y)) {
+    const T = @TypeOf(y);
+    if (@TypeOf(x) != T) {
+        @compileError("zmath.atan2 requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.atan2h(y, x);
+    if (T == f32) return scalar.atan2f(y, x);
+    if (T == f64) return scalar.atan2d(y, x);
+    @compileError("zmath.atan2 supports only f16, f32, and f64");
+}
+
+pub fn asinpi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.asinpih(value);
+    if (T == f32) return scalar.asinpif(value);
+    if (T == f64) return scalar.asinpid(value);
+    @compileError("zmath.asinpi supports only f16, f32, and f64");
+}
+
+pub fn acospi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.acospih(value);
+    if (T == f32) return scalar.acospif(value);
+    if (T == f64) return scalar.acospid(value);
+    @compileError("zmath.acospi supports only f16, f32, and f64");
+}
+
+pub fn atanpi(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.atanpih(value);
+    if (T == f32) return scalar.atanpif(value);
+    if (T == f64) return scalar.atanpid(value);
+    @compileError("zmath.atanpi supports only f16, f32, and f64");
+}
+
+pub fn atan2pi(y: anytype, x: anytype) Atan2Result(@TypeOf(y)) {
+    const T = @TypeOf(y);
+    if (@TypeOf(x) != T) {
+        @compileError("zmath.atan2pi requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.atan2pih(y, x);
+    if (T == f32) return scalar.atan2pif(y, x);
+    if (T == f64) return scalar.atan2pid(y, x);
+    @compileError("zmath.atan2pi supports only f16, f32, and f64");
+}
+
+pub fn pown(value: anytype, exponent: i64) PowerResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.pownh(value, exponent);
+    if (T == f32) return scalar.pownf(value, exponent);
+    if (T == f64) return scalar.pownd(value, exponent);
+    @compileError("zmath.pown supports only f16, f32, and f64");
+}
+
+pub fn powr(base: anytype, exponent: anytype) @TypeOf(base) {
+    const T = @TypeOf(base);
+    if (@TypeOf(exponent) != T) {
+        @compileError("zmath.powr requires base and exponent to have the same type");
+    }
+    if (T == f16) return scalar.powrh(base, exponent);
+    if (T == f32) return scalar.powrf(base, exponent);
+    if (T == f64) return scalar.powrd(base, exponent);
+    @compileError("zmath.powr supports only f16, f32, and f64");
+}
+
+pub fn compoundn(value: anytype, exponent: i64) PowerResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.compoundnh(value, exponent);
+    if (T == f32) return scalar.compoundnf(value, exponent);
+    if (T == f64) return scalar.compoundnd(value, exponent);
+    @compileError("zmath.compoundn supports only f16, f32, and f64");
+}
+
+pub fn rootn(value: anytype, degree: i64) PowerResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.rootnh(value, degree);
+    if (T == f32) return scalar.rootnf(value, degree);
+    if (T == f64) return scalar.rootnd(value, degree);
+    @compileError("zmath.rootn supports only f16, f32, and f64");
+}
+
+pub fn lgamma(value: anytype) LgammaResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.lgammah(value);
+    if (T == f32) return scalar.lgammaf(value);
+    if (T == f64) return scalar.lgammad(value);
+    @compileError("zmath.lgamma supports only f16, f32, and f64");
+}
+
+pub fn fmod(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fmod requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fmodh(x, y);
+    if (T == f32) return scalar.fmodf(x, y);
+    if (T == f64) return scalar.fmodd(x, y);
+    @compileError("zmath.fmod supports only f16, f32, and f64");
+}
+
+pub fn remainder(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.remainder requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.remainderh(x, y);
+    if (T == f32) return scalar.remainderf(x, y);
+    if (T == f64) return scalar.remainderd(x, y);
+    @compileError("zmath.remainder supports only f16, f32, and f64");
+}
+
+pub fn remquo(x: anytype, y: anytype) RemquoResult(@TypeOf(x)) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.remquo requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.remquoh(x, y);
+    if (T == f32) return scalar.remquof(x, y);
+    if (T == f64) return scalar.remquod(x, y);
+    @compileError("zmath.remquo supports only f16, f32, and f64");
+}
+
+pub fn frexp(value: anytype) FrexpResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.frexph(value);
+    if (T == f32) return scalar.frexpf(value);
+    if (T == f64) return scalar.frexpd(value);
+    @compileError("zmath.frexp supports only f16, f32, and f64");
+}
+
+pub fn modf(value: anytype) ModfResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.modfh(value);
+    if (T == f32) return scalar.modff(value);
+    if (T == f64) return scalar.modfd(value);
+    @compileError("zmath.modf supports only f16, f32, and f64");
+}
+
+pub fn ilogb(value: anytype) i32 {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.ilogbh(value);
+    if (T == f32) return scalar.ilogbf(value);
+    if (T == f64) return scalar.ilogbd(value);
+    @compileError("zmath.ilogb supports only f16, f32, and f64");
+}
+
+pub fn llogb(value: anytype) i64 {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.llogbh(value);
+    if (T == f32) return scalar.llogbf(value);
+    if (T == f64) return scalar.llogbd(value);
+    @compileError("zmath.llogb supports only f16, f32, and f64");
+}
+
+pub fn logb(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.logbh(value);
+    if (T == f32) return scalar.logbf(value);
+    if (T == f64) return scalar.logbd(value);
+    @compileError("zmath.logb supports only f16, f32, and f64");
+}
+
+pub fn ldexp(value: anytype, exponent: i32) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.ldexph(value, exponent);
+    if (T == f32) return scalar.ldexpf(value, exponent);
+    if (T == f64) return scalar.ldexpd(value, exponent);
+    @compileError("zmath.ldexp supports only f16, f32, and f64");
+}
+
+pub fn scalbn(value: anytype, exponent: i32) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.scalbnh(value, exponent);
+    if (T == f32) return scalar.scalbnf(value, exponent);
+    if (T == f64) return scalar.scalbnd(value, exponent);
+    @compileError("zmath.scalbn supports only f16, f32, and f64");
+}
+
+pub fn scalbln(value: anytype, exponent: i64) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return scalar.scalblnh(value, exponent);
+    if (T == f32) return scalar.scalblnf(value, exponent);
+    if (T == f64) return scalar.scalblnd(value, exponent);
+    @compileError("zmath.scalbln supports only f16, f32, and f64");
+}
+
+pub fn fdim(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fdim requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fdimh(x, y);
+    if (T == f32) return scalar.fdimf(x, y);
+    if (T == f64) return scalar.fdimd(x, y);
+    @compileError("zmath.fdim supports only f16, f32, and f64");
+}
+
+pub fn fmax(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fmax requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fmaxh(x, y);
+    if (T == f32) return scalar.fmaxf(x, y);
+    if (T == f64) return scalar.fmaxd(x, y);
+    @compileError("zmath.fmax supports only f16, f32, and f64");
+}
+
+pub fn fmin(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fmin requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fminh(x, y);
+    if (T == f32) return scalar.fminf(x, y);
+    if (T == f64) return scalar.fmind(x, y);
+    @compileError("zmath.fmin supports only f16, f32, and f64");
+}
+
+pub fn fmaximum(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fmaximum requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fmaximumh(x, y);
+    if (T == f32) return scalar.fmaximumf(x, y);
+    if (T == f64) return scalar.fmaximumd(x, y);
+    @compileError("zmath.fmaximum supports only f16, f32, and f64");
+}
+
+pub fn fminimum(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fminimum requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fminimumh(x, y);
+    if (T == f32) return scalar.fminimumf(x, y);
+    if (T == f64) return scalar.fminimumd(x, y);
+    @compileError("zmath.fminimum supports only f16, f32, and f64");
+}
+
+fn fmaximumMag(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fmaximum_mag requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fmaximum_magh(x, y);
+    if (T == f32) return scalar.fmaximum_magf(x, y);
+    if (T == f64) return scalar.fmaximum_magd(x, y);
+    @compileError("zmath.fmaximum_mag supports only f16, f32, and f64");
+}
+
+pub const fmaximum_mag = fmaximumMag;
+
+fn fminimumMag(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fminimum_mag requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fminimum_magh(x, y);
+    if (T == f32) return scalar.fminimum_magf(x, y);
+    if (T == f64) return scalar.fminimum_magd(x, y);
+    @compileError("zmath.fminimum_mag supports only f16, f32, and f64");
+}
+
+pub const fminimum_mag = fminimumMag;
+
+fn fmaximumNum(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fmaximum_num requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fmaximum_numh(x, y);
+    if (T == f32) return scalar.fmaximum_numf(x, y);
+    if (T == f64) return scalar.fmaximum_numd(x, y);
+    @compileError("zmath.fmaximum_num supports only f16, f32, and f64");
+}
+
+pub const fmaximum_num = fmaximumNum;
+
+fn fminimumNum(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError("zmath.fminimum_num requires both arguments to have the same type");
+    }
+    if (T == f16) return scalar.fminimum_numh(x, y);
+    if (T == f32) return scalar.fminimum_numf(x, y);
+    if (T == f64) return scalar.fminimum_numd(x, y);
+    @compileError("zmath.fminimum_num supports only f16, f32, and f64");
+}
+
+pub const fminimum_num = fminimumNum;
+
+fn fmaximumMagNum(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError(
+            "zmath.fmaximum_mag_num requires both arguments to have the same type",
+        );
+    }
+    if (T == f16) return scalar.fmaximum_mag_numh(x, y);
+    if (T == f32) return scalar.fmaximum_mag_numf(x, y);
+    if (T == f64) return scalar.fmaximum_mag_numd(x, y);
+    @compileError("zmath.fmaximum_mag_num supports only f16, f32, and f64");
+}
+
+pub const fmaximum_mag_num = fmaximumMagNum;
+
+fn fminimumMagNum(x: anytype, y: anytype) @TypeOf(x) {
+    const T = @TypeOf(x);
+    if (@TypeOf(y) != T) {
+        @compileError(
+            "zmath.fminimum_mag_num requires both arguments to have the same type",
+        );
+    }
+    if (T == f16) return scalar.fminimum_mag_numh(x, y);
+    if (T == f32) return scalar.fminimum_mag_numf(x, y);
+    if (T == f64) return scalar.fminimum_mag_numd(x, y);
+    @compileError("zmath.fminimum_mag_num supports only f16, f32, and f64");
+}
+
+pub const fminimum_mag_num = fminimumMagNum;
+
+pub fn canonicalize(value: anytype) CanonicalizeResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return ieee.canonicalizeh(value);
+    if (T == f32) return ieee.canonicalizef(value);
+    if (T == f64) return ieee.canonicalized(value);
+    @compileError("zmath.canonicalize supports only f16, f32, and f64");
+}
+
+pub fn copySign(value: anytype, sign: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (@TypeOf(sign) != T) {
+        @compileError("zmath.copySign requires both arguments to have the same type");
+    }
+    if (T == f16) return ieee.copySignh(value, sign);
+    if (T == f32) return ieee.copySignf(value, sign);
+    if (T == f64) return ieee.copySignd(value, sign);
+    @compileError("zmath.copySign supports only f16, f32, and f64");
+}
+
+pub fn nan(comptime T: type, tag: []const u8) T {
+    if (T == f16) return ieee.nanh(tag);
+    if (T == f32) return ieee.nanf(tag);
+    if (T == f64) return ieee.nand(tag);
+    @compileError("zmath.nan supports only f16, f32, and f64");
+}
+
+pub fn nextAfter(from: anytype, to: anytype) @TypeOf(from) {
+    const T = @TypeOf(from);
+    if (@TypeOf(to) != T) {
+        @compileError("zmath.nextAfter requires both arguments to have the same type");
+    }
+    if (T == f16) return ieee.nextAfterh(from, to);
+    if (T == f32) return ieee.nextAfterf(from, to);
+    if (T == f64) return ieee.nextAfterd(from, to);
+    @compileError("zmath.nextAfter supports only f16, f32, and f64");
+}
+
+pub fn nextToward(value: anytype, toward: f64) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return ieee.nextTowardh(value, toward);
+    if (T == f32) return ieee.nextTowardf(value, toward);
+    if (T == f64) return ieee.nextTowardd(value, toward);
+    @compileError("zmath.nextToward supports only f16, f32, and f64");
+}
+
+pub fn nextUp(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return ieee.nextUph(value);
+    if (T == f32) return ieee.nextUpf(value);
+    if (T == f64) return ieee.nextUpd(value);
+    @compileError("zmath.nextUp supports only f16, f32, and f64");
+}
+
+pub fn nextDown(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return ieee.nextDownh(value);
+    if (T == f32) return ieee.nextDownf(value);
+    if (T == f64) return ieee.nextDownd(value);
+    @compileError("zmath.nextDown supports only f16, f32, and f64");
+}
+
+pub fn totalOrder(left: anytype, right: anytype) bool {
+    const T = @TypeOf(left);
+    if (@TypeOf(right) != T) {
+        @compileError("zmath.totalOrder requires both arguments to have the same type");
+    }
+    if (T == f16) return ieee.totalOrderh(left, right);
+    if (T == f32) return ieee.totalOrderf(left, right);
+    if (T == f64) return ieee.totalOrderd(left, right);
+    @compileError("zmath.totalOrder supports only f16, f32, and f64");
+}
+
+pub fn totalOrderMag(left: anytype, right: anytype) bool {
+    const T = @TypeOf(left);
+    if (@TypeOf(right) != T) {
+        @compileError("zmath.totalOrderMag requires both arguments to have the same type");
+    }
+    if (T == f16) return ieee.totalOrderMagh(left, right);
+    if (T == f32) return ieee.totalOrderMagf(left, right);
+    if (T == f64) return ieee.totalOrderMagd(left, right);
+    @compileError("zmath.totalOrderMag supports only f16, f32, and f64");
+}
+
+pub fn getPayload(value: anytype) @TypeOf(value) {
+    const T = @TypeOf(value);
+    if (T == f16) return ieee.getPayloadh(value);
+    if (T == f32) return ieee.getPayloadf(value);
+    if (T == f64) return ieee.getPayloadd(value);
+    @compileError("zmath.getPayload supports only f16, f32, and f64");
+}
+
+pub fn setPayload(value: anytype) PayloadResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return ieee.setPayloadh(value);
+    if (T == f32) return ieee.setPayloadf(value);
+    if (T == f64) return ieee.setPayloadd(value);
+    @compileError("zmath.setPayload supports only f16, f32, and f64");
+}
+
+pub fn setPayloadSig(value: anytype) PayloadResult(@TypeOf(value)) {
+    const T = @TypeOf(value);
+    if (T == f16) return ieee.setPayloadSigh(value);
+    if (T == f32) return ieee.setPayloadSigf(value);
+    if (T == f64) return ieee.setPayloadSigd(value);
+    @compileError("zmath.setPayloadSig supports only f16, f32, and f64");
+}
+
+pub fn fadd(x: f64, y: f64) f32 {
+    return scalar_narrow.fadd(x, y);
+}
+
+pub fn fsub(x: f64, y: f64) f32 {
+    return scalar_narrow.fsub(x, y);
+}
+
+pub fn fmul(x: f64, y: f64) f32 {
+    return scalar_narrow.fmul(x, y);
+}
+
+pub fn fdiv(x: f64, y: f64) f32 {
+    return scalar_narrow.fdiv(x, y);
+}
+
+pub fn ffma(x: f64, y: f64, z: f64) f32 {
+    return scalar_narrow.ffma(x, y, z);
+}
+
+pub fn fsqrt(x: f64) f32 {
+    return scalar_narrow.fsqrt(x);
+}
+
 /// This is a documentation comment to explain the `printAnotherMessage` function below.
 ///
 /// Accepting an `Io.Writer` instance is a handy way to write reusable code.
@@ -371,6 +1033,9 @@ test {
     _ = @import("ieee_test.zig");
     _ = @import("ieee_edge_test.zig");
     _ = @import("scalar_test.zig");
+    _ = @import("scalar_fmah_test.zig");
+    _ = @import("scalar_fmaf_test.zig");
+    _ = @import("scalar_fmad_test.zig");
     _ = @import("scalar_erfc_test.zig");
     _ = @import("scalar_log10_test.zig");
     _ = @import("scalar_log10p1_test.zig");
@@ -412,8 +1077,27 @@ test {
     _ = @import("scalar_erf_test.zig");
     _ = @import("scalar_tanh_test.zig");
     _ = @import("scalar_tgamma_test.zig");
+    _ = @import("scalar_tgamma_contract_test.zig");
     _ = @import("scalar_sinpi_test.zig");
     _ = @import("root_sinpi_test.zig");
+    _ = @import("scalar_c23_common_test.zig");
+    _ = @import("scalar_c23_types_test.zig");
+    _ = @import("scalar_rounding_test.zig");
+    _ = @import("scalar_integer_rounding_test.zig");
+    _ = @import("scalar_fromfp_test.zig");
+    _ = @import("scalar_remainder_test.zig");
+    _ = @import("scalar_decompose_test.zig");
+    _ = @import("scalar_scaling_test.zig");
+    _ = @import("scalar_extrema_test.zig");
+    _ = @import("scalar_lgamma_test.zig");
+    _ = @import("scalar_atan2_test.zig");
+    _ = @import("scalar_pi_inverse_test.zig");
+    _ = @import("scalar_power_c23_test.zig");
+    _ = @import("scalar_logp1_alias_test.zig");
+    _ = @import("scalar_narrow_test.zig");
+    _ = @import("ieee_c23_core_test.zig");
+    _ = @import("ieee_c23_optional_test.zig");
+    _ = @import("c23_public_surface_test.zig");
 }
 
 test "root exports nearest-even Atan H, F, and D" {
@@ -496,6 +1180,10 @@ test "root exports nearest-even Asinh family" {
 
 test "generic scalar dispatch covers all formats" {
     try generic_scalar_test.run(@This());
+}
+
+test "C23 public root surface" {
+    try c23_public_surface_test.run(@This());
 }
 
 test "root exports nearest-even binary64 sine" {

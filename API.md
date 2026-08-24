@@ -4,7 +4,7 @@
 
 This document defines the target API and identifies the currently implemented public subset.
 
-The current public root exports `add`, `printAnotherMessage`, `ieee`, and `scalar`. The implemented `ieee` and `scalar` symbols are limited to the subsets listed below. Other IEEE and scalar functions remain planned.
+The current public root exports `ieee`, `scalar`, their shared result types, the generic IEEE/C23 scalar families defined below, the six C23 narrowing functions, `add`, and `printAnotherMessage`. Other module paths below remain planned.
 
 ## Scope
 
@@ -179,15 +179,23 @@ The API does not add `fabs`, `fabsh`, `fabsf`, or `fabsd` aliases.
 
 The target has no `q`, `f128`, bfloat16, or bfloat suffix family. These types do not participate in generic dispatch.
 
-### Rounding environment
+### Pure-value and rounding profile
 
-Callers must keep IEEE round-to-nearest, ties-to-even active for each scalar call. Scalar functions do not take a general `RoundMode` argument.
+The scalar and IEEE APIs use a pure-value profile.
+A call communicates only through its return value, including an explicit result struct when required.
+No result contract uses `errno`, floating-point exception flags, or hidden mutable status.
+`zmath` does not read or write `errno`.
+It does not inspect, clear, report, or restore floating-point exception flags.
+Incidental processor flags are outside this contract.
 
-An operation-defined direction parameter, such as the `fromfp` direction, is part of that operation. It does not change the process environment.
+Callers must keep IEEE round-to-nearest, ties-to-even active for each scalar call.
+Scalar functions do not take a general `RoundMode` argument.
+An operation-defined direction parameter, such as the `fromfp` direction, does not change the process environment.
+`zmath` does not read, validate, set, or restore the process rounding mode.
+Behavior with another active rounding mode is unsupported.
 
-`zmath` does not read, validate, set, or restore the process floating-point environment (`fenv`). Behavior with another active rounding mode is unsupported.
-
-This caller precondition also applies to narrowing operations. They compute the exact mathematical operation and round once to the declared destination type.
+This caller precondition also applies to narrowing operations.
+They compute the exact mathematical operation and round once to the declared destination type.
 
 ### Target C23 scalar families
 
@@ -215,6 +223,30 @@ Each operation also has one target root generic named `zmath.<op>`, unless a tab
 | `ufromfp` | `ufromfp{h,f,d}` |
 | `fromfpx` | `fromfpx{h,f,d}` |
 | `ufromfpx` | `ufromfpx{h,f,d}` |
+
+The `lrint`, `llrint`, `lround`, and `llround` families return this shared result type:
+
+```zig
+pub const IntegerResult = struct { value: i64, ok: bool };
+```
+
+A valid conversion returns `.{ .value = result, .ok = true }`.
+A NaN, either infinity, or a rounded value outside the `i64` range returns `.{ .value = 0, .ok = false }`.
+Invalid input does not trap and does not use a numeric sentinel.
+
+The `fromfp`, `ufromfp`, `fromfpx`, and `ufromfpx` families return an integral value in the input floating type `T`.
+Each family has the target signature `(value: T, round: FromFpRound, width: u32) T`.
+The `u32` width maps the C `unsigned int` argument.
+
+```zig
+pub const FromFpRound = enum {
+    nearest_even,
+    nearest_from_zero,
+    toward_zero,
+    toward_positive,
+    toward_negative,
+};
+```
 
 #### Exponential and logarithmic
 
@@ -254,6 +286,20 @@ Each operation also has one target root generic named `zmath.<op>`, unless a tab
 | `acospi` | `acospi{h,f,d}` |
 | `atanpi` | `atanpi{h,f,d}` |
 | `atan2pi` | `atan2pi{h,f,d}` |
+`atan2` and `atan2pi` return `Atan2Result(T) { value: T, resolved: bool }`.
+The root generics and all suffix variants use this result shape.
+The public symbols are wrappers, and direct CORE-MATH kernel symbols remain private.
+The wrappers own all NaN, axis, zero, and infinity results.
+The `value` field is an operation result only when `resolved=true`.
+Every ordinary result and every documented special result sets `resolved=true`.
+This includes a quiet NaN selected from a NaN input.
+If a finite kernel cannot prove one nearest-even result, the call sets `resolved=false`.
+The `value` field is then the format's positive canonical quiet NaN.
+This false status reports an unresolved computation, not a mathematical NaN or a domain error.
+No valid input may trap or terminate the process.
+The wrappers do not guess a result bit when a kernel cannot decide.
+They do not call host libm or use `fenv` or `errno`.
+
 
 #### Hyperbolic and inverse hyperbolic
 
@@ -282,9 +328,62 @@ The family notation expands mechanically. Thus, `sinh{h,f,d}` means `sinhh`, `si
 | `rootn` | `rootn{h,f,d}` |
 | `hypot` | `hypot{h,f,d}` |
 
-`compoundn`, `pown`, and `rootn` take a signed integer exponent or degree. The target fixed-width Zig integer is `i64`.
+`compoundn`, `pown`, and `rootn` take an `i64` exponent or degree.
+They return `PowerResult(T) { value: T, ok: bool }`.
+The root generics and all suffix variants use this result shape.
+The accepted integer range is `-64` through `+64`, inclusive.
+When `n` is below `-64` or above `+64`, the range check precedes all input-value rules.
+The `value` field is then the format's positive canonical quiet NaN, and `ok=false`.
+Every call with `-64 <= n` and `n <= 64` sets `ok=true`.
+The `value` field then holds the specified result, including an in-range domain or NaN result.
+Thus, `ok` reports only whether `n` is in the accepted range.
 
-The C23 `compoundn(x, n)` operation computes `(1 + x)^n`. A CORE-MATH `compound` source with a floating exponent is not a direct implementation of this operation.
+The C23 `compoundn(x, n)` operation computes `(1 + x)^n`.
+A CORE-MATH `compound` source with a floating exponent is not a direct implementation of this operation.
+The power families use the ordered IEC 60559 and glibc value precedence below.
+An earlier rule wins.
+For the three `PowerResult` families, each result below describes `value` when `ok=true`.
+This project adopts the return values, but it does not adopt `fenv` or `errno` effects.
+
+For `pow`, signaling-NaN quieting precedes an identity that would otherwise hide that signaling NaN.
+Quiet NaNs do not override `pow(x, +/-0)=+1` or `pow(+1, y)=+1`.
+`pow(-1, +/-infinity)` is `+1`.
+After these identities, the first remaining NaN in `(x, y)` parameter order wins.
+For an infinite exponent, `abs(x)` relative to one selects `+0` or `+infinity`.
+For a zero or infinite base and a finite nonzero exponent, the exponent sign selects zero or infinity.
+Such a result is negative only when the base is negative and the exponent is an odd integer.
+A finite negative base with a finite noninteger exponent returns the positive canonical quiet NaN.
+
+For `pown`, a signaling NaN is quieted before the `n=0` identity.
+Then `n=0` returns `+1`, including for a quiet NaN base.
+A remaining NaN is quieted.
+Zero and infinity results use the exponent sign, and a negative sign occurs only for an odd `n`.
+
+For `powr`, four domain cases precede ordinary NaN selection.
+They are a negative non-NaN base, `0^0`, `1^infinity`, and `infinity^0`.
+Each domain case returns the positive canonical quiet NaN.
+After these cases, the first NaN in `(x, y)` parameter order wins.
+
+For `compoundn`, a signaling NaN is quieted first.
+A non-NaN `x < -1` then returns the positive canonical quiet NaN.
+Next, `n=0` returns `+1`, including for a quiet NaN.
+A remaining NaN is quieted.
+For `x=-1`, a positive `n` returns `+0`, and a negative `n` returns `+infinity`.
+For `x=+infinity`, a positive `n` returns `+infinity`, and a negative `n` returns `+0`.
+
+For `rootn`, `n=0` returns the positive canonical quiet NaN before NaN selection.
+A remaining NaN is quieted.
+A negative nonzero value with an even `n` returns the positive canonical quiet NaN.
+Zero and infinity results preserve a negative sign only for odd `n`.
+The sign of `n` selects the zero or infinity magnitude.
+
+Each finite direct result from a power, root, or pi-scaled family must be correctly rounded in `nearest_even`.
+For a result-container function, this rule applies to a finite `float` only when its status field is true.
+For `pown`, `compoundn`, and `rootn`, the rule applies only when `-64 <= n` and `n <= 64`.
+A false status supplies no mathematical result and makes no accuracy claim for its sentinel `float`.
+This requirement does not claim that a current implementation satisfies it.
+A composition of separately rounded operations is not final evidence.
+This includes post-scaling by an approximation of `1/pi`, reciprocal-exponent power, and target-format power-by-squaring.
 
 #### Error and gamma
 
@@ -295,9 +394,22 @@ The C23 `compoundn(x, n)` operation computes `(1 + x)^n`. A CORE-MATH `compound`
 | `lgamma` | `lgamma{h,f,d}` |
 | `tgamma` | `tgamma{h,f,d}` |
 
-`lgamma` returns `LgammaResult(T) { value: T, sign: i2 }`. The sign field is `-1`, `0`, or `1`.
-The root generic returns the same result shape for its input type.
+`lgamma` returns `LgammaResult(T) { value: T, sign: i2 }`.
+The root generic and all suffix variants use this result shape.
+For a finite non-pole input, `value` is the rounded value of `log(abs(Gamma(x)))`.
+The `sign` field is the sign of `Gamma(x)` and is either `-1` or `+1`.
+No public result uses `sign=0`.
 
+At each finite negative-integer pole and at either zero, `value` is `+infinity`.
+The `sign` field is `-1` at each finite negative-integer pole and at `-0`.
+It is `+1` at `+0`, either infinity, and every NaN.
+For either infinity, `value` is `+infinity`.
+For a NaN, `value` follows the common same-width NaN policy.
+
+`lgamma` follows the pure-value and caller-RNE profile.
+It returns only `value` and `sign` and exposes no `errno` or floating-point exception status.
+It does not inspect, clear, report, set, or restore floating-point exception flags.
+Incidental processor flags remain outside this contract.
 The API has no global `signgam` value and no hidden mutable gamma-sign state.
 
 #### Remainder, decomposition, and scaling
@@ -316,7 +428,39 @@ The API has no global `signgam` value and no hidden mutable gamma-sign state.
 | `scalbn` | `scalbn{h,f,d}` |
 | `scalbln` | `scalbln{h,f,d}` |
 
-`frexp`, `modf`, and `remquo` keep their C23 decomposition semantics. Their target Zig result containers replace C output-pointer syntax.
+`frexp` returns `FrexpResult(T) { fraction: T, exponent: i32 }`.
+`modf` returns `ModfResult(T) { fractional: T, integral: T }`.
+`remquo` returns `RemquoResult(T) { value: T, quotient: i32 }`.
+These structs replace C output pointers.
+
+`remquo` uses the nearest integer quotient, with ties to even.
+Let `n` be that quotient.
+Its quotient field is `sign(x/y) * (abs(n) mod 8)`.
+Thus, the contract exposes exactly three low quotient bits.
+A selected NaN, an infinite dividend, or a zero divisor sets `quotient=0`.
+The NaN result follows the common NaN policy.
+An infinite dividend or zero divisor without a NaN returns the positive canonical quiet NaN.
+A zero dividend with a nonzero divisor, or a finite dividend with an infinite divisor, returns the dividend and `quotient=0`.
+
+`frexp` returns `exponent=0` for zero, infinity, and NaN.
+Its fraction preserves a zero or infinity bit pattern.
+For a NaN, its fraction preserves the sign and payload and sets the quiet bit.
+
+`modf` returns the input zero in both fields.
+For a finite value with magnitude below one, the integral field is a zero with the input sign.
+For an integral finite value, the fractional field is a zero with the input sign.
+For infinity, the fractional field is a zero with the input sign, and the integral field is the input infinity.
+For a NaN, both fields contain the same sign-preserving, payload-preserving quiet NaN.
+
+`ilogb` returns `minInt(i32)` for either zero and `maxInt(i32)` for infinity or NaN.
+`llogb` uses the corresponding `i64` limits.
+`logb` returns `-infinity` for either zero, `+infinity` for either infinity, and a quieted input NaN for NaN.
+
+The `ldexp`, `scalbn`, and `scalbln` families preserve a NaN sign and payload.
+A quiet NaN is bit-identical.
+A signaling NaN sets only the format quiet bit.
+These rules freeze the current deterministic remquo and decomposition outputs.
+They are not delegated to host library behavior.
 
 #### Fused operation, difference, maximum, and minimum
 
@@ -335,6 +479,12 @@ The API has no global `signgam` value and no hidden mutable gamma-sign state.
 | `fmaximum_mag_num` | `fmaximum_mag_num{h,f,d}` |
 | `fminimum_mag_num` | `fminimum_mag_num{h,f,d}` |
 
+The legacy `fmax` and `fmin` families use a deterministic local policy.
+This policy is a zmath contract, not a portable C guarantee.
+With exactly one NaN operand, they return the numeric operand.
+With two NaN operands, they return the first operand after preserving its sign and payload and setting its quiet bit.
+For an opposite signed-zero tie, `fmax` returns `+0` and `fmin` returns `-0`.
+
 #### Narrowing operations
 
 Narrowing operations are the exception to one-operation-name dispatch. C23 encodes the source and destination format in each IEC 60559 symbol.
@@ -350,13 +500,15 @@ pub fn ffma(x: f64, y: f64, z: f64) f32;
 pub fn fsqrt(x: f64) f32;
 ```
 
-The target also includes the C23 Annex F `_FloatM` forms for the supported public formats:
+The target also includes the C23 Annex H `_FloatM` forms for the supported public formats:
 
 | Destination | Source | Add | Subtract | Multiply | Divide | Fused multiply-add | Square root |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `f16` | `f32` | `f16addf32(x: f32, y: f32) f16` | `f16subf32(x: f32, y: f32) f16` | `f16mulf32(x: f32, y: f32) f16` | `f16divf32(x: f32, y: f32) f16` | `f16fmaf32(x: f32, y: f32, z: f32) f16` | `f16sqrtf32(x: f32) f16` |
 | `f16` | `f64` | `f16addf64(x: f64, y: f64) f16` | `f16subf64(x: f64, y: f64) f16` | `f16mulf64(x: f64, y: f64) f16` | `f16divf64(x: f64, y: f64) f16` | `f16fmaf64(x: f64, y: f64, z: f64) f16` | `f16sqrtf64(x: f64) f16` |
 | `f32` | `f64` | `f32addf64(x: f64, y: f64) f32` | `f32subf64(x: f64, y: f64) f32` | `f32mulf64(x: f64, y: f64) f32` | `f32divf64(x: f64, y: f64) f32` | `f32fmaf64(x: f64, y: f64, z: f64) f32` | `f32sqrtf64(x: f64) f32` |
+
+These format-pair declarations are Annex H forms. They are not Annex F declarations.
 
 These names are target scalar implementation names. They are not aliases for a same-type operation.
 The target has no `f128`, `q`, bfloat16, decimal, or long-double source or destination form.
@@ -365,6 +517,13 @@ The legacy `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, and `fsqrt` forms are root-le
 The format-pair forms are available from `zmath.scalar` and use the exact names in the table.
 
 Each narrowing operation computes as if to infinite precision and rounds once to the declared destination type.
+The implementation must form the exact intermediate in portable software and round only at the destination.
+Target-dependent extended precision, contraction, or a direct narrowing shortcut is not final correctness evidence.
+
+For every cross-width narrowing operation, the first NaN in parameter order selects the result.
+The result preserves its sign and the high-order diagnostic payload bits that fit the destination.
+It discards lower payload bits and then sets the destination quiet bit.
+
 
 ### C23 operations owned by `zmath.ieee`
 
@@ -378,10 +537,37 @@ nextAfter{h,f,d}
 nextToward{h,f,d}
 nextUp{h,f,d}
 nextDown{h,f,d}
-totalOrder{h,f,d}
 ```
 
-Classification predicates, signaling tests, ordered comparisons, bit conversion, and total order also remain in `zmath.ieee`.
+For input type `T`, `canonicalize{h,f,d}(value: T)` returns `CanonicalizeResult(T) { value: T, ok: bool }`.
+This value-returning local adaptation replaces the C output pointer and integer success result.
+Each supported `h`, `f`, or `d` input returns `ok=true`.
+A non-NaN `value` is bit-identical to the input, including zero and infinity.
+A quiet NaN is bit-identical to the input.
+A signaling NaN preserves its sign and diagnostic payload and sets only the format quiet bit.
+The supported fixed formats never return `ok=false`.
+No supported fixed-format call can produce a failure result, so no fixed-format failure value exists.
+That status is reserved for a future representation which the API cannot canonicalize.
+
+The `nan` family has the target signature `nan{h,f,d}(tag: []const u8) T`.
+The tag grammar is one or more ASCII hexadecimal digits: `[0-9A-Fa-f]+`.
+The parser accepts no sign, `0x` prefix, separator, whitespace, empty tag, or non-ASCII byte.
+It interprets the tag as an unsigned diagnostic-payload integer.
+The value must fit 9 bits for `h`, 22 bits for `f`, or 51 bits for `d`.
+A valid tag produces a positive quiet NaN with that diagnostic payload.
+An invalid, empty, or out-of-range tag produces the positive canonical quiet NaN.
+
+The `nextToward` family has the target signature `nextToward{h,f,d}(value: T, toward: f64) T`.
+Its comparator is `f64` because `f64` is the widest public format.
+
+C leaves this cross-format NaN mapping implementation-defined.
+When `toward` is an `f64` NaN, `nextTowardh` and `nextTowardf` preserve its sign.
+They retain the high-order diagnostic payload bits that fit the target, discard lower bits, and set the target quiet bit.
+For `f64` to `f16`, source payload bits 50 through 42 become destination payload bits 8 through 0.
+For `f64` to `f32`, source payload bits 50 through 29 become destination payload bits 21 through 0.
+This mapping is a zmath contract, not a portable C guarantee.
+
+Classification predicates, signaling tests, ordered comparisons, and bit conversion also remain in `zmath.ieee`.
 
 ### Optional IEC 60559 extension family
 
@@ -389,12 +575,34 @@ C23 Annex F defines these optional IEC 60559 operations. They are target names, 
 
 | Root generic | `zmath.ieee` implementation family |
 | --- | --- |
+| `totalOrder` | `totalOrder{h,f,d}` |
 | `totalOrderMag` | `totalOrderMag{h,f,d}` |
 | `getPayload` | `getPayload{h,f,d}` |
 | `setPayload` | `setPayload{h,f,d}` |
 | `setPayloadSig` | `setPayloadSig{h,f,d}` |
 
-No symbol in this optional family is currently implemented or manifest-accepted.
+`setPayload` and `setPayloadSig` return `PayloadResult(T) { value: T, ok: bool }`.
+This struct replaces the C result pointer with a value and success flag.
+These optional operations remain a by-value API fixed to the `h`, `f`, and `d` formats.
+They do not expose C output pointers or a dynamic format parameter.
+
+C leaves the accepted NaN payload range implementation-defined.
+This project accepts a fixed-format floating argument only when it represents an allowed numeric integer payload.
+For `setPayload`, both signed zeros represent `q=0`.
+The exact success ranges and result bits are:
+
+| Format | Accepted `q` | `setPayload` result bits | Accepted `s` | `setPayloadSig` result bits |
+| --- | --- | --- | --- | --- |
+| `h` | `0` through `511` | `0x7e00 OR q` | `1` through `511` | `0x7c00 OR s` |
+| `f` | `0` through `4,194,303` | `0x7fc00000 OR q` | `1` through `4,194,303` | `0x7f800000 OR s` |
+| `d` | `0` through `2,251,799,813,685,247` | `0x7ff8000000000000 OR q` | `1` through `2,251,799,813,685,247` | `0x7ff0000000000000 OR s` |
+
+Each successful `setPayload` call returns the exact positive quiet NaN in the table with `ok=true`.
+Each successful `setPayloadSig` call returns the exact positive signaling NaN in the table with `ok=true`.
+Zero, including `-0`, is invalid for `setPayloadSig` because it would encode infinity.
+A negative nonzero, fractional, subnormal, infinite, NaN, or out-of-range argument is invalid for either setter.
+Each failure returns the exact `PayloadResult(T) { value=+0, ok=false }`.
+This policy is a zmath contract, not a portable C guarantee.
 
 ### Exact special-value policy
 
@@ -408,15 +616,23 @@ The format encodings are:
 | `f` | `00000000` | `80000000` | `3f800000` | `7f800000` | `ff800000` | `7fc00000` |
 | `d` | `0000000000000000` | `8000000000000000` | `3ff0000000000000` | `7ff0000000000000` | `fff0000000000000` | `7ff8000000000000` |
 
-For a NaN input, preserve the sign and payload and set the format quiet bit.
+When an operation returns a same-width input NaN, it preserves the sign and diagnostic payload.
+It then sets the format quiet bit.
 The quiet-bit masks are `0200`, `00400000`, and `0008000000000000` for `h`, `f`, and `d`.
-A quiet NaN remains unchanged. A signaling NaN becomes a quiet NaN.
+A quiet NaN remains unchanged.
+A signaling NaN becomes a quiet NaN.
 
-Unless an operation has a stricter C23 rule, the first NaN argument in parameter order selects the result.
+When an operation returns a narrower NaN, let `S` and `D` be the source and destination diagnostic-payload widths.
+The destination payload is `source_payload >> (S - D)`.
+The operation preserves the sign and then sets the destination quiet bit.
+
+Unless an operation has a stricter rule, the first NaN argument in parameter order selects the result.
 An invalid non-NaN input returns the positive canonical quiet NaN for its format.
-An operation-specific C23 rule takes precedence. This includes the number-preferring maximum and minimum families.
+An operation-specific documented rule takes precedence.
+This includes the local `fmax` and `fmin` policy and the C23 number-preferring variants.
 
-Signed-zero and infinity results follow the operation-specific C23 and IEC 60559 rules.
+Signed-zero and infinity results follow each operation's documented policy.
+That policy can be local, C23, or IEC 60559.
 Implementations must not replace those results with a host-library choice.
 
 The manifest must record every operation-specific exception before acceptance.
@@ -427,20 +643,51 @@ Target status or source availability cannot substitute for this evidence.
 Before a manifest-gated scalar pair becomes accepted, the repository adds or updates a versioned contract at `spec/core-math-<date>.md`.
 
 The machine-readable manifest pins one CORE-MATH commit. It lists each accepted or unsupported function-format pair separately for `f16`, `f32`, and `f64`.
-At this contract revision, the schema version 1 manifest has nine `exp`, `log`, and `sin` rows.
-All nine rows have status `unsupported`. Other target pairs have no manifest acceptance in schema version 1.
+The current manifest uses schema version 2 and contains 315 typed function rows: five `correct` rows and 310 `unsupported` rows.
+The five accepted rows are the only rows with an accuracy claim. An `unsupported` row does not state that an implementation is absent.
 
-Each entry defines the zmath symbol, domain, special values, supported rounding policy, and accuracy class.
+Each entry defines the zmath operation, provenance, status, arity, typed inputs, typed result, oracle capability, special-value policy, and maximum ULP bound.
+Scalar results use `float:<format>`, `integer:<type>`, or `bool`.
+Structure results use `struct:<kind>:<format>`.
+The status-container kinds are:
 
-A manifest entry is one of:
+- `struct:atan2:h`, `struct:atan2:f`, and `struct:atan2:d` for `Atan2Result(T)`, with `value:T` and `resolved:bool` fields.
+- `struct:power:h`, `struct:power:f`, and `struct:power:d` for `PowerResult(T)`, with `value:T` and `ok:bool` fields.
+- `struct:integer:h`, `struct:integer:f`, and `struct:integer:d` for `IntegerResult`, with `value:i64` and `ok:bool` fields.
+
+All 27 status-container rows remain `unsupported` with `oracle = "none"` and `max_ulp = 0`. The descriptor records the public return shape; it does not grant implementation or manifest acceptance.
+
+An entry is one of:
 
 - `correct`: the result is correctly rounded in `nearest_even`.
 - `bounded`: the result has a stated maximum ULP error in `nearest_even`.
 - `unsupported`: the manifest has no accepted accuracy claim for the pair. It does not state that an implementation is absent.
 
 A ULP comparison applies only to finite results of the same sign. Special-value rows require exact expected bit patterns.
-
 CORE-MATH source availability does not prove API implementation or manifest acceptance. Each format requires independent implementation and oracle evidence.
+
+The correct-rounding requirement for finite power, root, and pi-scaled results is a target requirement.
+It is not an implementation-status or manifest-acceptance claim.
+
+A future `correct` claim for an unsupported pair requires a new schema revision and two independent forms of evidence.
+First, reviewers must accept a complete rounding proof or an unchanged pinned upstream proof that applies to the exact implementation.
+Second, every finite oracle candidate must use MPFR at 512 bits with `MPFR_RNDN`.
+An Arb interval at 512 bits must round uniquely to the same target bits.
+The producer must fail on an ambiguous interval or an MPFR and Arb disagreement.
+Binary16 evidence is operation-specific and covers complete ordered public-input tuples.
+A unary operation with one `f16` argument has `65,536` encoded tuples.
+A binary operation must declare its ordered `(x, y)` tuple domain and each domain or special-value rule.
+It has `4,294,967,296` ordered encoded tuples when both arguments use `f16`.
+A ternary operation must declare its ordered `(x, y, z)` tuple domain and each domain or special-value rule.
+It has `281,474,976,710,656` ordered encoded tuples when all arguments use `f16`.
+These tuple domains include every zero, finite value, infinity, and NaN encoding in each argument position.
+An integer-parameter operation must declare its accepted integer set and its rejected complement.
+Correct-rounding enumeration pairs every floating tuple with every accepted integer value.
+For H `pown`, `compoundn`, and `rootn`, this is `65,536 * 129 = 8,454,144` accepted tuples.
+Separate proof must cover the exact false-status result and its precedence for every rejected `i64` value.
+Reviewers may accept reduced enumeration only with a proof that covers every omitted ordered tuple and domain rule.
+Coverage of only `65,536` values never proves a binary, ternary, or integer-parameter operation.
+A finite corpus alone is not a proof of correct rounding.
 
 ## Complex API
 
