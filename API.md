@@ -4,7 +4,9 @@
 
 This document defines the target API and identifies the currently implemented public subset.
 
-The current public root exports `ieee`, `scalar`, their shared result types, the generic IEEE/C23 scalar families defined below, the six C23 narrowing functions, `add`, and `printAnotherMessage`. Other module paths below remain planned.
+The current public root exports the `zmath.ieee` and `zmath.scalar` modules, their shared result types, and the C23 source surface defined in `spec/core-math-2026-08-22.md`.
+It also exports `add` and `printAnotherMessage`.
+Other module paths below remain planned.
 
 ## Scope
 
@@ -67,72 +69,17 @@ This contract uses three independent status terms:
 
 A target symbol is not necessarily implemented. An implemented symbol is not necessarily manifest-accepted.
 
-The current root exports the `zmath.ieee` and `zmath.scalar` modules. A target `zmath.<op>` generic is a separate root export and is implemented only when it appears in an implementation-source snapshot.
+The implemented C23 inventory is the `Implemented-source snapshot` in `spec/core-math-2026-08-22.md`.
+This document does not maintain a second exhaustive implemented-export list.
 
-The implemented `zmath.ieee` exports are:
+The current source exports the `zmath.ieee` and `zmath.scalar` families described in that contract, their shared result types, and the corresponding generic root operations.
+`src/c23_public_surface_test.zig` validates those module and root signatures for `f16`, `f32`, and `f64`.
 
-```zig
-pub const RoundMode = enum { nearest_even, toward_zero, toward_positive, toward_negative };
-pub const Class = enum { zero, subnormal, normal, infinity, quiet_nan, signaling_nan };
-pub fn toBitsh(value: f16) u16;
-pub fn fromBitsh(bits: u16) f16;
-pub fn classifyh(value: f16) Class;
-pub fn classifyf(value: f32) Class;
-pub fn classifyd(value: f64) Class;
-pub fn copySignh(value: f16, sign: f16) f16;
-pub fn copySignf(value: f32, sign: f32) f32;
-pub fn copySignd(value: f64, sign: f64) f64;
-pub fn nextUph(value: f16) f16;
-pub fn nextDownh(value: f16) f16;
-pub fn nextAfterh(from: f16, to: f16) f16;
-pub fn nextAfterf(from: f32, to: f32) f32;
-pub fn nextAfterd(from: f64, to: f64) f64;
-pub fn scaleBh(mode: RoundMode, value: f16, exponent: i32) f16;
-pub fn roundIntegralh(mode: RoundMode, value: f16) f16;
-pub fn totalOrderh(left: f16, right: f16) bool;
-pub fn totalOrderf(left: f32, right: f32) bool;
-pub fn totalOrderd(left: f64, right: f64) bool;
-```
-
-The implemented `zmath.scalar` exports are:
-
-```zig
-pub const logd = logd_impl.logd;
-pub const sind = @import("scalar_sind.zig").sind;
-pub const cosd = @import("scalar_sind.zig").cosd;
-pub fn exph(value: f16) f16;
-pub fn logh(value: f16) f16;
-pub fn sinh(value: f16) f16;
-pub fn cosh(value: f16) f16;
-pub fn logf(value: f32) f32;
-pub fn absh(value: f16) f16;
-pub fn absf(value: f32) f32;
-pub fn absd(value: f64) f64;
-pub fn ulpDistanceh(a: f16, b: f16) u16;
-pub fn ulpDistancef(a: f32, b: f32) u32;
-pub fn ulpDistanced(a: f64, b: f64) u64;
-pub fn expf(value: f32) f32;
-pub fn expd(value: f64) f64;
-pub fn sinf(value: f32) f32;
-pub fn cosf(value: f32) f32;
-```
-
-These are source exports. They do not imply a target generic root export or manifest acceptance.
-
-The implemented target scalar families are:
-
-```text
-abs{h,f,d}
-ulpDistance{h,f,d}
-exp{h,f,d}
-log{h,f,d}
-sin{h,f,d}
-cos{h,f,d}
-```
+The source also exports the six C23 root narrowing operations (`fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, and `fsqrt`) and the Annex H format-pair forms from `zmath.scalar`.
+These source exports do not imply manifest acceptance.
+The versioned corpus manifest is the only acceptance authority.
 
 `ulpDistance` is a zmath extension. It is not a C23 scalar operation.
-
-This implemented-symbol list does not grant manifest acceptance. The versioned corpus manifest is the only acceptance authority.
 
 `nextAfterh`, `nextAfterf`, and `nextAfterd` choose the first NaN operand.
 If it is signaling, they set its quiet bit and preserve its sign and payload.
@@ -643,10 +590,19 @@ Target status or source availability cannot substitute for this evidence.
 Before a manifest-gated scalar pair becomes accepted, the repository adds or updates a versioned contract at `spec/core-math-<date>.md`.
 
 The machine-readable manifest pins one CORE-MATH commit. It lists each accepted or unsupported function-format pair separately for `f16`, `f32`, and `f64`.
-The current manifest uses schema version 2 and contains 315 typed function rows: five `correct` rows and 310 `unsupported` rows.
-The five accepted rows are the only rows with an accuracy claim. An `unsupported` row does not state that an implementation is absent.
+The current schema-v2 manifest contains 315 typed function rows.
+The initial manifest sets every row to `status = "unsupported"`, `oracle = "none"`, and `max_ulp = 0`.
+The root `special_policy` must equal `"zmath_c23_v1"`.
+Every schema-v2 function row must set `special_policy = "zmath_c23_v1"`.
+This exact row token must match the root token. No other special-policy token is valid.
 
 Each entry defines the zmath operation, provenance, status, arity, typed inputs, typed result, oracle capability, special-value policy, and maximum ULP bound.
+The root field `operation_spelling` must equal `"c23_hfd_lowercase_v1"`.
+For standard H/F/D families, `op` stores the unsuffixed C23 operation base. The typed descriptors select the format, and this spelling convention derives the public scalar symbol by appending lowercase `h`, `f`, or `d`.
+This rule does not change the case or spelling of the operation base. Dedicated encoded operations, including the narrowing names, remain exact and are not transformed.
+The provenance vocabulary is exactly `["zmath", "core_math"]`.
+Each row uses one nonempty ordered subset of that vocabulary. The valid arrays are exactly `["zmath"]`, `["core_math"]`, and `["zmath", "core_math"]`.
+The parser rejects all other operation-spelling values and provenance arrays.
 Scalar results use `float:<format>`, `integer:<type>`, or `bool`.
 Structure results use `struct:<kind>:<format>`.
 The status-container kinds are:
@@ -669,7 +625,14 @@ CORE-MATH source availability does not prove API implementation or manifest acce
 The correct-rounding requirement for finite power, root, and pi-scaled results is a target requirement.
 It is not an implementation-status or manifest-acceptance claim.
 
-A future `correct` claim for an unsupported pair requires a new schema revision and two independent forms of evidence.
+A future `correct` or `bounded` claim for an unsupported pair requires a manifest update and two independent forms of evidence.
+Within schema version 2, that row transition can change `status`, `oracle`, and `max_ulp` together.
+The resulting row must satisfy the existing schema-v2 relations.
+An `unsupported` row uses `oracle = "none"` and `max_ulp = 0`.
+A `correct` or `bounded` row uses `oracle = "mpfr_arb"`.
+A `correct` row uses `max_ulp = 0`. A `bounded` row uses a non-negative `max_ulp` value.
+These value changes use existing fields and do not require a `schema_version` bump.
+A schema change requires a `schema_version` bump, including a change to fields, allowed values, field order, or validation semantics.
 First, reviewers must accept a complete rounding proof or an unchanged pinned upstream proof that applies to the exact implementation.
 Second, every finite oracle candidate must use MPFR at 512 bits with `MPFR_RNDN`.
 An Arb interval at 512 bits must round uniquely to the same target bits.
