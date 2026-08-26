@@ -6,29 +6,28 @@ const std = @import("std");
 // for defining build steps and express dependencies between them, allowing the
 // build runner to parallelize the build automatically (and the cache system to
 // know when a step doesn't need to be re-run).
-fn erfcTargetSupportsFma(target: std.Build.ResolvedTarget) bool {
-    return switch (target.result.cpu.arch) {
-        .x86, .x86_64 => target.result.cpu.has(.x86, .fma),
-        .aarch64, .aarch64_be => true,
-        else => false,
-    };
-}
-
-fn requireErfcTargetFma(target: std.Build.ResolvedTarget) void {
-    if (!erfcTargetSupportsFma(target)) {
-        @panic(
-            "zmath Erfc kernels require scalar fused multiply-add; use x86/x86_64 with FMA or aarch64",
-        );
+fn requireCKernelTarget(target: std.Build.ResolvedTarget) void {
+    switch (target.result.cpu.arch) {
+        .x86, .x86_64 => {
+            if (!target.result.cpu.has(.x86, .fma)) {
+                @panic(
+                    "zmath C kernels require target feature +fma on x86/x86_64",
+                );
+            }
+        },
+        .aarch64 => {},
+        else => @panic(
+            "zmath C kernels support only x86/x86_64 with +fma and little-endian aarch64",
+        ),
     }
 }
 
 pub fn build(b: *std.Build) void {
-    // Standard target options allow the person running `zig build` to choose
-    // what target to build for. Here we do not override the defaults, which
-    // means any target is allowed, and the default is native. Other options
-    // for restricting supported target set are available.
+    // The C kernels have target-specific ABI and FMA assumptions. Reject an
+    // unsupported target before constructing artifacts so every build step
+    // uses the same deterministic policy.
     const target = b.standardTargetOptions(.{});
-    requireErfcTargetFma(target);
+    requireCKernelTarget(target);
     // Standard optimization options allow the person running `zig build` to select
     // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
     // set a preferred release mode, allowing the user to decide how to optimize.
@@ -62,6 +61,118 @@ pub fn build(b: *std.Build) void {
         "-fno-math-errno",
         "-ffp-contract=off",
     };
+    const c_kernel_abi_guard = b.addWriteFiles().add("c_kernel_abi_guard.c",
+        \\#include <stdint.h>
+        \\#if !defined(__FLT16_MANT_DIG__)
+        \\#error "zmath C kernels require compiler support for _Float16"
+        \\#else
+        \\_Static_assert(sizeof(_Float16) == 2, "zmath C kernels require 16-bit _Float16");
+        \\_Static_assert(__FLT16_MANT_DIG__ == 11, "zmath C kernels require IEEE-754 binary16 precision");
+        \\_Static_assert(__FLT16_MAX_EXP__ == 16, "zmath C kernels require IEEE-754 binary16 exponent range");
+        \\#endif
+        \\
+        \\#if !defined(__SIZEOF_INT128__)
+        \\#error "zmath C kernels require compiler support for 128-bit integers"
+        \\#else
+        \\_Static_assert(sizeof(__int128) == 16, "zmath C kernels require signed 128-bit integers");
+        \\_Static_assert(sizeof(unsigned __int128) == 16, "zmath C kernels require unsigned 128-bit integers");
+        \\#endif
+        \\
+        \\#if !defined(__BYTE_ORDER__) || !defined(__ORDER_LITTLE_ENDIAN__)
+        \\#error "zmath C kernels require compiler byte-order macros"
+        \\#else
+        \\_Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "zmath C kernels require little-endian targets");
+        \\#endif
+        \\
+        \\extern _Float16 cr_atan2f16(_Float16, _Float16);
+        \\extern float cr_atan2f(float, float);
+        \\extern int zmath_core_atan2d_checked(double, double, double *);
+        \\extern int zmath_core_atan2d_forced_ambiguity(double, double, double *);
+        \\extern void zmath_core_atan2d_test_subtract_two_limbs(uint64_t *, uint64_t *, uint64_t *);
+        \\extern _Float16 cr_cospif16(_Float16);
+        \\extern float cr_cospif(float);
+        \\extern double cr_cospi(double);
+        \\extern _Float16 cr_erfcf16(_Float16);
+        \\extern float cr_erfcf(float);
+        \\extern double cr_erfc(double);
+        \\extern _Float16 zmath_core_lgammah(_Float16, int *);
+        \\extern float zmath_core_lgammaf(float, int *);
+        \\extern double zmath_core_lgammad(double, int *);
+        \\extern _Float16 cr_log10p1f16(_Float16);
+        \\extern float cr_log10p1f(float);
+        \\extern double cr_log10p1(double);
+        \\extern _Float16 cr_log2p1f16(_Float16);
+        \\extern float cr_log2p1f(float);
+        \\extern double cr_log2p1(double);
+        \\extern _Float16 zmath_core_asinpih(_Float16);
+        \\extern float zmath_core_asinpif(float);
+        \\extern double zmath_core_asinpid(double);
+        \\extern _Float16 zmath_core_acospih(_Float16);
+        \\extern float zmath_core_acospif(float);
+        \\extern double zmath_core_acospid(double);
+        \\extern _Float16 zmath_core_atanpih(_Float16);
+        \\extern float zmath_core_atanpif(float);
+        \\extern double zmath_core_atanpid(double);
+        \\extern _Float16 zmath_core_atan2pih(_Float16, _Float16);
+        \\extern float zmath_core_atan2pif(float, float);
+        \\extern int zmath_core_atan2pid_checked(double, double, double *);
+        \\extern int zmath_core_atan2pid_forced_ambiguity(double, double, double *);
+        \\extern _Float16 cr_powf16(_Float16, _Float16);
+        \\extern float cr_powf(float, float);
+        \\extern double cr_pow(double, double);
+        \\extern _Float16 cr_tgammaf16(_Float16);
+        \\extern float cr_tgammaf(float);
+        \\extern double cr_tgamma(double);
+        \\
+        \\typedef void (*zmath_c_kernel_symbol)(void);
+        \\__attribute__((used, retain))
+        \\static zmath_c_kernel_symbol const zmath_c_kernel_symbols[] = {
+        \\    (zmath_c_kernel_symbol)cr_atan2f16,
+        \\    (zmath_c_kernel_symbol)cr_atan2f,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2d_checked,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2d_forced_ambiguity,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2d_test_subtract_two_limbs,
+        \\    (zmath_c_kernel_symbol)cr_cospif16,
+        \\    (zmath_c_kernel_symbol)cr_cospif,
+        \\    (zmath_c_kernel_symbol)cr_cospi,
+        \\    (zmath_c_kernel_symbol)cr_erfcf16,
+        \\    (zmath_c_kernel_symbol)cr_erfcf,
+        \\    (zmath_c_kernel_symbol)cr_erfc,
+        \\    (zmath_c_kernel_symbol)zmath_core_lgammah,
+        \\    (zmath_c_kernel_symbol)zmath_core_lgammaf,
+        \\    (zmath_c_kernel_symbol)zmath_core_lgammad,
+        \\    (zmath_c_kernel_symbol)cr_log10p1f16,
+        \\    (zmath_c_kernel_symbol)cr_log10p1f,
+        \\    (zmath_c_kernel_symbol)cr_log10p1,
+        \\    (zmath_c_kernel_symbol)cr_log2p1f16,
+        \\    (zmath_c_kernel_symbol)cr_log2p1f,
+        \\    (zmath_c_kernel_symbol)cr_log2p1,
+        \\    (zmath_c_kernel_symbol)zmath_core_asinpih,
+        \\    (zmath_c_kernel_symbol)zmath_core_asinpif,
+        \\    (zmath_c_kernel_symbol)zmath_core_asinpid,
+        \\    (zmath_c_kernel_symbol)zmath_core_acospih,
+        \\    (zmath_c_kernel_symbol)zmath_core_acospif,
+        \\    (zmath_c_kernel_symbol)zmath_core_acospid,
+        \\    (zmath_c_kernel_symbol)zmath_core_atanpih,
+        \\    (zmath_c_kernel_symbol)zmath_core_atanpif,
+        \\    (zmath_c_kernel_symbol)zmath_core_atanpid,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2pih,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2pif,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2pid_checked,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2pid_forced_ambiguity,
+        \\    (zmath_c_kernel_symbol)cr_powf16,
+        \\    (zmath_c_kernel_symbol)cr_powf,
+        \\    (zmath_c_kernel_symbol)cr_pow,
+        \\    (zmath_c_kernel_symbol)cr_tgammaf16,
+        \\    (zmath_c_kernel_symbol)cr_tgammaf,
+        \\    (zmath_c_kernel_symbol)cr_tgamma,
+        \\};
+        \\
+    );
+    mod.addCSourceFile(.{
+        .file = c_kernel_abi_guard,
+        .flags = core_math_erfc_flags,
+    });
     mod.addCSourceFile(.{
         .file = b.path("src/coremath_erfch.c"),
         .flags = core_math_erfc_flags,
