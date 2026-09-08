@@ -255,3 +255,54 @@ test "rootn preserves exceptional values and exact degree bound" {
     try std.testing.expect(!d_invalid.ok);
     try std.testing.expectEqual(@as(u64, 0x7ff8_0000_0000_0000), common.D.toBits(d_invalid.value));
 }
+
+test "binary16 power families preserve minimum subnormal boundaries at degree limits" {
+    try expectPownH(0x0001, 64, 0x0000);
+    try expectPownH(0x0001, -64, 0x7c00);
+    try expectPownH(0x0002, 64, 0x0000);
+    try expectPownH(0x0002, -64, 0x7c00);
+
+    try expectCompoundH(0x0001, 64, 0x3c00);
+    try expectCompoundH(0x0001, -64, 0x3c00);
+    try expectCompoundH(0x0002, 64, 0x3c00);
+    try expectCompoundH(0x0002, -64, 0x3c00);
+
+    try expectRootH(0x0001, -64, 0x3d30);
+    try expectRootH(0x0001, 64, 0x3a2b);
+    try expectRootH(0x0002, -64, 0x3d22);
+    try expectRootH(0x0002, 64, 0x3a3c);
+}
+
+test "binary32 power families preserve minimum subnormal boundaries at degree limits" {
+    try expectPownF(0x0000_0001, 64, 0x0000_0000);
+    try expectPownF(0x0000_0001, -64, 0x7f80_0000);
+    try expectPownF(0x0000_0002, 64, 0x0000_0000);
+    try expectPownF(0x0000_0002, -64, 0x7f80_0000);
+
+    try expectCompoundF(0x0000_0001, 64, 0x3f80_0000);
+    try expectCompoundF(0x0000_0001, -64, 0x3f80_0000);
+    try expectCompoundF(0x0000_0002, 64, 0x3f80_0000);
+    try expectCompoundF(0x0000_0002, -64, 0x3f80_0000);
+
+    try expectRootF(0x0000_0001, -64, 0x40a0_b051);
+    try expectRootF(0x0000_0001, 64, 0x3e4b_ec15);
+    try expectRootF(0x0000_0002, -64, 0x409e_f532);
+    try expectRootF(0x0000_0002, 64, 0x3e4e_248c);
+}
+
+test "binary64 power families preserve minimum subnormal boundaries at degree limits" {
+    try expectPownD(0x0000_0000_0000_0001, 64, 0x0000_0000_0000_0000);
+    try expectPownD(0x0000_0000_0000_0001, -64, 0x7ff0_0000_0000_0000);
+    try expectPownD(0x0000_0000_0000_0002, 64, 0x0000_0000_0000_0000);
+    try expectPownD(0x0000_0000_0000_0002, -64, 0x7ff0_0000_0000_0000);
+
+    try expectCompoundD(0x0000_0000_0000_0001, 64, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0x0000_0000_0000_0001, -64, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0x0000_0000_0000_0002, 64, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0x0000_0000_0000_0002, -64, 0x3ff0_0000_0000_0000);
+
+    try expectRootD(0x0000_0000_0000_0001, -64, 0x40fb_7f76_f2fb_5e47);
+    try expectRootD(0x0000_0000_0000_0001, 64, 0x3ee2_9e9d_f51f_dee1);
+    try expectRootD(0x0000_0000_0000_0002, -64, 0x40fb_33a2_b84f_15fb);
+    try expectRootD(0x0000_0000_0000_0002, 64, 0x3ee2_d285_a6e4_030b);
+}

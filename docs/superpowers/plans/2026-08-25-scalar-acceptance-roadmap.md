@@ -27,8 +27,8 @@ The source, strict schema-v2 manifest, corpus loader, deterministic replay lane,
 and benchmark metadata for the six accepted pairs are integrated.
 This roadmap now records re-verification of that work.
 It does not invent historical red runs or retroactive failure evidence.
-Verification and exact-power resource tasks remain open until measured evidence is
-recorded.
+All six roadmap tasks now have execution evidence, recorded below.
+Exact-power measurements remain observations, not full-domain resource bounds.
 
 The broad C23 campaign and evaluator branch remains preserved at the
 `preserve-c23-campaigns` bookmark.
@@ -55,17 +55,18 @@ The current `lgamma` contract governs zero and finite negative-integer poles.
 
 - [x] **Step 1: Write contract regression tests**
   - Integrated strict rejection tests for the old schema-v1 layout, missing `operation_spelling`, unknown provenance, and invalid `correct` row relations.
-- [ ] **Step 2: Reverify the infrastructure test**
+- [x] **Step 2: Reverify the infrastructure test**
   - Run `zig build test` in `~/projects/zmath-testing`.
-  - This roadmap records no historical red result. Reverification remains open.
+  - Reverification passed. No historical red result is inferred.
 - [x] **Step 3: Make the specification unambiguous**
   - Reconcile the current six accepted rows, the 309 unsupported rows, exact `operation_spelling`, provenance, target profile, and evidence boundaries.
 - [x] **Step 4: Use the checked-in sorted schema-v2 manifest**
   - Keep all 315 descriptors in deterministic order.
   - Keep the six accepted rows at `status = "correct"`, `oracle = "mpfr_arb"`, and `max_ulp = 0`.
   - Keep the remaining 309 rows at `status = "unsupported"`, `oracle = "none"`, and `max_ulp = 0`.
-- [ ] **Step 5: Verify the contract gate**
+- [x] **Step 5: Verify the contract gate**
   - Run `zig build test` in `~/projects/zmath-testing`.
+
 ### Task 2: Re-verify strict schema-v2 parsing and artifact loading
 
 
@@ -77,38 +78,24 @@ The current `lgamma` contract governs zero and finite negative-integer poles.
 - Create: `~/projects/zmath-testing/test/corpus/exp_f.tsv`
 
 **Interfaces:**
-```zig
-pub const FunctionStatus = enum { unsupported, correct, bounded };
-pub const CorpusRow = struct {
-    op: Operation,
-    format: Format,
-    input_bits: u64,
-    output_bits: u64,
-    output_class: OutputClass,
-    max_ulp: u64,
-};
-pub const TargetMode = struct {
-    target: []const u8,
-    cpu: []const u8,
-    optimize: []const u8,
-};
-pub fn parseEmbeddedManifest() ManifestError!Manifest;
-pub fn loadEmbeddedCorpus(comptime path: []const u8) CorpusError![]const CorpusRow;
-```
+- `corpus.TargetMode` carries `target`, `cpu`, and `mode`.
+- `corpus.parseEmbeddedManifest()` returns a validated manifest.
+- `corpus.loadEmbeddedArtifact()` validates the manifest binding, source, metadata, and active target mode.
+- `Artifact.rows()` returns a bounded row iterator. Replay does not allocate a row array.
 
 - [x] **Step 1: Write strict parser tests**
   - Test missing, unknown, duplicate, out-of-order, and duplicate function keys.
   - Test every descriptor form used by the 315 rows and reject unsupported formats, malformed widths, non-lowercase hexadecimal, duplicate corpus tuples, and bounded rows without a declared non-negative bound.
-- [ ] **Step 2: Reverify the infrastructure test**
+- [x] **Step 2: Reverify the infrastructure test**
   - Run `zig build test` in `~/projects/zmath-testing`.
-  - This roadmap records no historical red result. Reverification remains open.
+  - Reverification passed. No historical red result is inferred.
 - [x] **Step 3: Replace fixed schema-v1 capacities and operation tables**
   - Parse the manifest into bounded fixed arrays sized for the checked-in 315 rows.
   - Keep parser work allocation-free or use explicit test-only allocation with bounded input size.
 - [x] **Step 4: Embed immutable artifacts through the build graph**
   - Extend the `addWriteFiles` corpus package to copy every referenced TSV artifact.
   - Make missing artifacts a build failure.
-- [ ] **Step 5: Verify parser and artifact integrity**
+- [x] **Step 5: Verify parser and artifact integrity**
   - Run `zig build test` in `~/projects/zmath-testing`.
   - Confirm that the manifest and every embedded corpus parse, have deterministic counts, and bind to exactly one manifest row.
 
@@ -122,20 +109,15 @@ pub fn loadEmbeddedCorpus(comptime path: []const u8) CorpusError![]const CorpusR
 - Modify: `~/projects/zmath-testing/test/corpus/README.md`
 
 **Interfaces:**
-```zig
-pub fn runCorpusRow(row: corpus.CorpusRow) DifferentialError!void;
-pub fn runAcceptedCorpus(
-    manifest: corpus.Manifest,
-    target: TargetMode,
-) DifferentialError!void;
-```
+- `corpus_runner.runAccepted(active_target_mode)` replays all embedded accepted artifacts.
+- Each row must match runtime bits, stored bits, the MPFR candidate, and the Arb proof or exact special-value rule.
 
 - [x] **Step 1: Write deterministic-runner tests**
-  - Integrated checks require runtime bits, stored corpus bits, MPFR candidate bits, and Arb proof bits to agree for every finite row.
+  - Require a bridge proof for every row, including finite-input overflow. Only exact nonfinite-input and domain-special rules bypass interval evaluation.
   - Integrated checks require special-value rows to use stored exact target bits and reject an Arb ambiguity, MPFR disagreement, wrong target/mode, or wrong ULP limit.
-- [ ] **Step 2: Reverify the oracle lane**
+- [x] **Step 2: Reverify the oracle lane**
   - Run `zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe` in `~/projects/zmath-testing`.
-  - This roadmap records no historical red result. Reverification remains open.
+  - The new finite-overflow regression failed before the bridge repair; the repaired oracle lane passed 25/25.
 - [x] **Step 3: Remove random acceptance sampling**
   - Replace random acceptance inputs with checked-in corpus rows.
   - Keep fuzzing as a separate explicitly seeded exploratory lane. It must not alter acceptance status.
@@ -144,7 +126,7 @@ pub fn runAcceptedCorpus(
   - Do not add C23 binary, ternary, or integer-parameter bridge operations in this task.
 - [x] **Step 5: Record corpus provenance**
   - Document the qualified producer and replay commands, pinned inputs, output class policy, tuple selection, counts, and target profile in `test/corpus/README.md`.
-- [ ] **Step 6: Reverify reproducibility**
+- [x] **Step 6: Reverify reproducibility**
   - Run the qualified oracle command twice with target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`.
   - Confirm identical row count, selected corpus, and pass/fail result.
 
@@ -165,7 +147,7 @@ pub fn runAcceptedCorpus(
   - Enumerate all 65,536 H inputs for `exp/h`, `log/h`, and `sin/h`.
   - Add deterministic F/D `exp` hard-case rows and the selected `log/f` rows with exact bits.
   - Treat F/D artifacts as evidence for stored inputs, not exhaustive whole-domain proof.
-- [ ] **Step 2: Reverify each accepted corpus**
+- [x] **Step 2: Reverify each accepted corpus**
   - Run the qualified MPFR and Arb replay for each accepted pair.
   - Keep any disputed row unsupported until its stored row, MPFR result, and Arb enclosure agree.
   - This roadmap records no historical red result.
@@ -173,7 +155,7 @@ pub fn runAcceptedCorpus(
   - Touch only the exact kernel or wrapper owning a checked-in mismatch. Preserve pure-value behavior and caller-RNE requirements.
 - [x] **Step 4: Keep one manifest status per accepted proof**
   - The current manifest accepts all six pairs independently. Do not change adjacent statuses when a future pair changes.
-- [ ] **Step 5: Verify the accepted corpus matrix**
+- [x] **Step 5: Verify the accepted corpus matrix**
   - Run `zig build test` in `zmath`.
   - Run `zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe` in `zmath-testing`.
   - Confirm exact zero-ULP evidence for all six accepted rows and `unsupported` status for the remaining 309 rows.
@@ -195,9 +177,9 @@ pub fn logf(value: f32) f32;
 
 - [x] **Step 1: Add the immutable `log/f` corpus**
   - Include signed zero, subnormal-normal boundaries, `-1`, the domain interval below zero, infinities, signaling and quiet NaNs, adjacent values around one, rounding midpoints, and existing CORE-MATH fallback vectors.
-- [ ] **Step 2: Reverify the `log/f` oracle lane**
+- [x] **Step 2: Reverify the `log/f` oracle lane**
   - Run `zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe` in `~/projects/zmath-testing`.
-  - This roadmap records no historical red result. Reverification remains open.
+  - Reverification passed. No historical red result is inferred.
 - [x] **Step 3: Add `log/f` corpus dispatch**
   - Route only `Operation.log` plus `Format.f` to `zmath.scalar.logf`.
   - Compare runtime, stored, MPFR, and Arb results. Reject any mismatch.
@@ -206,7 +188,7 @@ pub fn logf(value: f32) f32;
   - Add the exact regression input to `src/scalar_log_test.zig` before changing the kernel.
 - [x] **Step 5: Keep exactly one accepted row**
   - The current manifest sets only `log/f` in this pair's transition to `correct`, `mpfr_arb`, and zero ULP.
-- [ ] **Step 6: Verify no adjacent status changed**
+- [x] **Step 6: Verify no adjacent status changed**
   - Run `zig build test` in `zmath`.
   - Run `zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe` in `zmath-testing`.
   - Confirm `log/f` is accepted. Confirm `log/d`, `sin/f`, and `sin/d` stay unsupported.
@@ -229,22 +211,66 @@ zig build run-bench -Dbench-target=scalar-log-f -Dtarget=x86_64-linux-gnu.2.38 -
 - [x] **Step 1: Write target-policy tests**
   - Reject targets outside the explicit C-kernel ABI allowlist.
   - Reject a benchmark target without a corpus ID, checked-in corpus path, operation count, checksum, target triple, sorted feature set, and optimize mode.
-- [ ] **Step 2: Reverify benchmark target parsing**
+- [x] **Step 2: Reverify benchmark target parsing**
   - Run `zig build bench -Dbench-target=scalar-log-f -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe` in `~/projects/zmath-testing`.
-  - This roadmap records no historical red result. Reverification remains open.
+  - All six targets built and ran; unknown targets and altered profiles were rejected.
 - [x] **Step 3: Make target restrictions explicit**
   - Enforce exactly target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe` for the accepted corpus profile.
   - Do not claim support for another target, CPU, or optimize mode.
-- [x] **Step 4: Add deterministic `scalar-log-f` benchmarking**
-  - Use the immutable `log_f.tsv` corpus, fixed iteration count, checksum, and no MPFR/Arb linkage.
-  - Print corpus ID, input count, target triple, resolved CPU features, optimize mode, and checksum.
-- [ ] **Step 5: Measure exact-power resource bounds separately**
+- [x] **Step 4: Add deterministic scalar benchmarking**
+  - Cover `scalar-exp-h`, `scalar-exp-f`, `scalar-exp-d`, `scalar-log-h`, `scalar-log-f`, and `scalar-sin-h`.
+  - Validate each immutable corpus and SHA-256 before timing. Use a fixed operation count and per-call input barriers.
+  - Print corpus ID, input count, target triple, resolved CPU features, optimize mode, elapsed time, and checksum.
+- [x] **Step 5: Measure exact-power resource use separately**
   - Add ReleaseSafe and ReleaseFast tests around minimum-subnormal inputs and degree ±64 for `pown`, `compoundn`, and `rootn`.
-  - Record stack and latency evidence before accepting any power family.
-  - Do not claim a resource bound or benchmark result before measurement.
-- [ ] **Step 6: Verify target-qualified release lanes**
+  - Record observed stack and native batch latency before accepting any power family.
+  - State measurement scope. A sampled peak is not a full-domain resource bound.
+- [x] **Step 6: Verify target-qualified release lanes**
   - Run local tests, the qualified oracle command, and the qualified scalar benchmark.
   - Confirm runtime remains dependency-free. Confirm external numerical libraries link only into oracle artifacts.
+
+## Recorded verification
+
+Toolchain: Zig 0.16.0. Accepted corpus profile:
+`x86_64-linux-gnu.2.38`, exact populated `haswell` features, `ReleaseSafe`.
+
+| Check | Result |
+| --- | --- |
+| Library tests, native Debug | 520/520 |
+| Library tests, qualified target/CPU, ReleaseSafe | 520/520 |
+| Library tests, same target/CPU, ReleaseFast | 520/520; not an additional corpus profile |
+| Harness tests, native Debug | 42/42 |
+| Harness `test oracle oracle-fuzz`, qualified profile | 68/68: 42 ordinary, 25 oracle, 1 exploratory smoke |
+| Repeated repaired oracle replay | 25/25 on both runs |
+| Six-corpus regeneration with full Arb proof | All six SHA-256 values unchanged; 196,883 rows |
+| Manifest after regeneration | 315 rows: six `correct`, 309 `unsupported` |
+| Six scalar benchmark targets | Built and executed with fixed counts, hashes, and checksums |
+| Bounded Exp fuzz, seed `0x7a6d6174`, requested budget 100 | 112 runs; no crash |
+| Producer wrong libc, altered Haswell features, or ReleaseFast | Rejected before artifact replacement |
+| Library without FMA; unknown benchmark; unqualified benchmark/oracle | Rejected |
+| Formatting and library build | Passed |
+
+New red-to-green evidence:
+
+- Missing embedded-global metadata was accepted before its guard was restored.
+- The finite-input overflow regression failed with `UNCERTAIN`; the repaired
+  bridge proves the exact overflow rounding interval at 512 bits.
+- A forced `fclose` failure exposed a second close attempt. The repaired
+  producer reports `FileWriteFailed` and leaves no temporary or final artifact.
+- The exploratory target first failed to link, then exposed incompatible C/Zig
+  coverage tables. Its Exp-only Zig campaign now runs with a separately linked,
+  uninstrumented oracle bridge. It makes no C-kernel coverage claim.
+
+Power measurements cover 36 subnormal/degree-±64 scenarios in each release mode.
+Outputs and checksums agree. Massif observed whole-program stack peaks of
+362,832 bytes in ReleaseSafe and 362,976 bytes in ReleaseFast, with zero heap
+bytes. Native four-call `compoundn` batches reached 14.678 seconds and 3.233
+seconds respectively on a shared host. These are samples, not latency bounds
+or a controlled comparison between modes. Power rows remain unsupported.
+
+Detailed commands, benchmark samples, counts, and measurement caveats are in
+`zmath-testing/test/corpus/README.md`. The eight measured runtime executables
+had no dynamic section and no MPFR/GMP/Arb/FLINT symbols.
 
 ## Deferred Scope
 
