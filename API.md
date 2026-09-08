@@ -61,13 +61,18 @@ Geometry and algebra do not depend on each other.
 
 ### Status terms
 
-This contract uses three independent status terms:
+These are independent status terms:
 
 - **Target** names a planned public symbol.
 - **Implemented** means that the current `zmath` root or module exports the symbol.
 - **Manifest-accepted** means that a `correct` or `bounded` manifest row accepts one operation-format pair.
+- **Corpus-evidenced** means that immutable rows for one pair passed the stated oracle checks.
+- **Whole-domain-proved** means that exhaustive evidence or a separate proof covers every input in the operation-format domain.
 
-A target symbol is not necessarily implemented. An implemented symbol is not necessarily manifest-accepted.
+Implementation, manifest acceptance, corpus coverage, and proof scope are separate facts.
+Export presence does not change manifest status.
+Manifest status does not widen a corpus beyond its stored inputs.
+Sampled corpus evidence does not establish whole-domain proof.
 
 The implemented C23 inventory is the `Implemented-source snapshot` in `spec/core-math-2026-08-22.md`.
 This document does not maintain a second exhaustive implemented-export list.
@@ -590,8 +595,10 @@ Target status or source availability cannot substitute for this evidence.
 Before a manifest-gated scalar pair becomes accepted, the repository adds or updates a versioned contract at `spec/core-math-<date>.md`.
 
 The machine-readable manifest pins one CORE-MATH commit. It lists each accepted or unsupported function-format pair separately for `f16`, `f32`, and `f64`.
-The current schema-v2 manifest contains 315 typed function rows.
-The initial manifest sets every row to `status = "unsupported"`, `oracle = "none"`, and `max_ulp = 0`.
+The current schema-v2 manifest contains 315 sorted typed function rows.
+It accepts exactly six pairs: `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, and `sin/h`.
+Each accepted row uses `status = "correct"`, `oracle = "mpfr_arb"`, and `max_ulp = 0`.
+The remaining 309 rows use `status = "unsupported"`, `oracle = "none"`, and `max_ulp = 0`.
 The root `special_policy` must equal `"zmath_c23_v1"`.
 Every schema-v2 function row must set `special_policy = "zmath_c23_v1"`.
 This exact row token must match the root token. No other special-policy token is valid.
@@ -637,6 +644,13 @@ First, reviewers must accept a complete rounding proof or an unchanged pinned up
 Second, every finite oracle candidate must use MPFR at 512 bits with `MPFR_RNDN`.
 An Arb interval at 512 bits must round uniquely to the same target bits.
 The producer must fail on an ambiguous interval or an MPFR and Arb disagreement.
+
+The accepted corpus profile is exactly target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`.
+No other target, CPU, or optimization mode is manifest-qualified.
+The current H artifacts for `exp`, `log`, and `sin` enumerate all 65,536 binary16 inputs.
+The `exp/f`, `exp/d`, and `log/f` artifacts contain deterministic selected cases.
+Those F and D samples provide corpus evidence only for their stored inputs.
+They are not exhaustive whole-domain proofs.
 Binary16 evidence is operation-specific and covers complete ordered public-input tuples.
 A unary operation with one `f16` argument has `65,536` encoded tuples.
 A binary operation must declare its ordered `(x, y)` tuple domain and each domain or special-value rule.
@@ -810,8 +824,19 @@ No public `Algebra(p, q, r, T)`, generic vector, generic quaternion, or `anytype
 
 `zmath` has no MPFR, GMP, FLINT, Arb, BLIS, Eigen, or C++ runtime dependency.
 
-`~/projects/zmath-testing` owns integration tests, oracle tests, and benchmarks. The current oracle confirms its zmath import and external-library environment only. It is not a numerical differential test.
+`~/projects/zmath-testing` owns integration tests, oracle tests, corpus production, and benchmarks.
+The current scalar acceptance commands run only for target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`:
 
-A numerical oracle test is added with each public scalar, complex, matrix, geometry, or algebra contract. It names the exact zmath symbol, type, manifest entry, input corpus, expected result, and acceptance rule.
+```text
+zig build generate-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build bench -Dbench-target=scalar-log-f -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build run-bench -Dbench-target=scalar-log-f -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+```
 
-An external differential test or benchmark names and explicitly configures its baseline library, version, build options, scalar type, dimensions, and operation. The current scaffold has no configured external baseline.
+The oracle command replays immutable corpus rows.
+The F and D sample rows do not establish whole-domain proof.
+The benchmark commands measure performance only and do not change manifest acceptance.
+
+A numerical oracle test names the exact zmath symbol, type, manifest entry, input corpus, expected result, and acceptance rule.
+An external differential test or benchmark names its baseline library, version, build options, scalar type, dimensions, and operation.
