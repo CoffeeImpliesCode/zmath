@@ -55,6 +55,7 @@ pub fn build(b: *std.Build) void {
         // Later on we'll use this module as the root module of a test executable
         // which requires us to specify a target.
         .target = target,
+        .optimize = optimize,
     });
     const core_math_erfc_flags = &.{
         "-ffreestanding",

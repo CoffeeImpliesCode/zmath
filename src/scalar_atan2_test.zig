@@ -81,6 +81,33 @@ test "Atan2 binary64 signed-zero quadrants" {
     try expectAtan2dBits(0x8000_0000_0000_0000, 0x8000_0000_0000_0000, 0xc009_21fb_5444_2d18);
 }
 
+test "Atan2 binary16 finite axes" {
+    try expectAtan2hBits(0x0000, 0x3c00, 0x0000);
+    try expectAtan2hBits(0x8000, 0x3c00, 0x8000);
+    try expectAtan2hBits(0x0000, 0xbc00, 0x4248);
+    try expectAtan2hBits(0x8000, 0xbc00, 0xc248);
+    try expectAtan2hBits(0x3c00, 0x0000, 0x3e48);
+    try expectAtan2hBits(0xbc00, 0x0000, 0xbe48);
+}
+
+test "Atan2 binary32 finite axes" {
+    try expectAtan2fBits(0x0000_0000, 0x3f80_0000, 0x0000_0000);
+    try expectAtan2fBits(0x8000_0000, 0x3f80_0000, 0x8000_0000);
+    try expectAtan2fBits(0x0000_0000, 0xbf80_0000, 0x4049_0fdb);
+    try expectAtan2fBits(0x8000_0000, 0xbf80_0000, 0xc049_0fdb);
+    try expectAtan2fBits(0x3f80_0000, 0x0000_0000, 0x3fc9_0fdb);
+    try expectAtan2fBits(0xbf80_0000, 0x0000_0000, 0xbfc9_0fdb);
+}
+
+test "Atan2 binary64 finite axes" {
+    try expectAtan2dBits(0x0000_0000_0000_0000, 0x3ff0_0000_0000_0000, 0x0000_0000_0000_0000);
+    try expectAtan2dBits(0x8000_0000_0000_0000, 0x3ff0_0000_0000_0000, 0x8000_0000_0000_0000);
+    try expectAtan2dBits(0x0000_0000_0000_0000, 0xbff0_0000_0000_0000, 0x4009_21fb_5444_2d18);
+    try expectAtan2dBits(0x8000_0000_0000_0000, 0xbff0_0000_0000_0000, 0xc009_21fb_5444_2d18);
+    try expectAtan2dBits(0x3ff0_0000_0000_0000, 0x0000_0000_0000_0000, 0x3ff9_21fb_5444_2d18);
+    try expectAtan2dBits(0xbff0_0000_0000_0000, 0x0000_0000_0000_0000, 0xbff9_21fb_5444_2d18);
+}
+
 test "Atan2 binary16 double-infinity quadrants" {
     try expectAtan2hBits(0x7c00, 0x7c00, 0x3a48);
     try expectAtan2hBits(0x7c00, 0xfc00, 0x40b6);

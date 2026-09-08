@@ -44,14 +44,18 @@ test "lgamma preserves signed-zero pole signs" {
 
 test "lgamma returns exact finite positive and negative values" {
     try expectLgammaH(0x3800, 0x3894, 1);
+    try expectLgammaH(0x3c00, 0x0000, 1);
     try expectLgammaH(0xb800, 0x3d10, -1);
     try expectLgammaH(0xbe00, 0x3ae1, 1);
 
     try expectLgammaF(0x3f00_0000, 0x3f12_8682, 1);
+    try expectLgammaF(0x4000_0000, 0x0000_0000, 1);
     try expectLgammaF(0xbf00_0000, 0x3fa1_fc4d, -1);
     try expectLgammaF(0xbfc0_0000, 0x3f5c_2c0b, 1);
 
     try expectLgammaD(0x3fe0_0000_0000_0000, 0x3fe2_50d0_48e7_a1bd, 1);
+    try expectLgammaD(0x3ff0_0000_0000_0000, 0x0000_0000_0000_0000, 1);
+    try expectLgammaD(0x4008_0000_0000_0000, 0x3fe6_2e42_fefa_39ef, 1);
     try expectLgammaD(0xbfe0_0000_0000_0000, 0x3ff4_3f89_a3f0_edd6, -1);
     try expectLgammaD(0xbff8_0000_0000_0000, 0x3feb_8581_5182_0f86, 1);
 }
