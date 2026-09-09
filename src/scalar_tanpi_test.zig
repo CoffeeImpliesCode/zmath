@@ -1,8 +1,8 @@
 const std = @import("std");
 const tanpi = @import("scalar_tanpi.zig");
 
-fn expectBits(comptime T: type, expected: std.meta.Int(.unsigned, @bitSizeOf(T)), actual: T) !void {
-    try std.testing.expectEqual(expected, @as(std.meta.Int(.unsigned, @bitSizeOf(T)), @bitCast(actual)));
+fn expectBits(comptime T: type, expected: @Int(.unsigned, @bitSizeOf(T)), actual: T) !void {
+    try std.testing.expectEqual(expected, @as(@Int(.unsigned, @bitSizeOf(T)), @bitCast(actual)));
 }
 
 test "Tanpi H preserves exact C23 special values" {
@@ -75,5 +75,45 @@ test "Tanpi D reflects the large-argument correction-table index" {
         f64,
         0x4034_5aff_ed20_1b55,
         tanpi.tanpid(@bitCast(@as(u64, 0xc2d0_0000_0000_0021))),
+    );
+}
+
+test "Tanpi preserves exact quarter and half boundaries at wide exponents" {
+    try expectBits(f32, 0xff80_0000, tanpi.tanpif(@bitCast(@as(u32, 0x4a00_0006))));
+    try expectBits(f32, 0x7f80_0000, tanpi.tanpif(@bitCast(@as(u32, 0xca00_0006))));
+    try expectBits(f32, 0x3f80_0000, tanpi.tanpif(@bitCast(@as(u32, 0x4a00_0001))));
+    try expectBits(f32, 0xbf80_0000, tanpi.tanpif(@bitCast(@as(u32, 0xca00_0001))));
+
+    try expectBits(f64, 0x0000_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0x42d0_0000_0000_0000))));
+    try expectBits(f64, 0x3ff0_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0x42d0_0000_0000_0010))));
+    try expectBits(f64, 0x7ff0_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0x42d0_0000_0000_0020))));
+    try expectBits(f64, 0xbff0_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0x42d0_0000_0000_0030))));
+    try expectBits(f64, 0x8000_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0x42d0_0000_0000_0040))));
+    try expectBits(f64, 0xbff0_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0xc2d0_0000_0000_0010))));
+    try expectBits(f64, 0xfff0_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0xc2d0_0000_0000_0020))));
+    try expectBits(f64, 0x3ff0_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0xc2d0_0000_0000_0030))));
+    try expectBits(f64, 0x0000_0000_0000_0000, tanpi.tanpid(@bitCast(@as(u64, 0xc2d0_0000_0000_0040))));
+}
+
+test "Tanpi preserves the tiny binary64 product boundaries" {
+    try expectBits(
+        f64,
+        0x0000_0000_0000_0003,
+        tanpi.tanpid(@bitCast(@as(u64, 0x0000_0000_0000_0001))),
+    );
+    try expectBits(
+        f64,
+        0x8000_0000_0000_0003,
+        tanpi.tanpid(@bitCast(@as(u64, 0x8000_0000_0000_0001))),
+    );
+    try expectBits(
+        f64,
+        0x0029_21fb_5444_2d18,
+        tanpi.tanpid(@bitCast(@as(u64, 0x0010_0000_0000_0000))),
+    );
+    try expectBits(
+        f64,
+        0x8029_21fb_5444_2d18,
+        tanpi.tanpid(@bitCast(@as(u64, 0x8010_0000_0000_0000))),
     );
 }

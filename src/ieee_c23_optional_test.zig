@@ -25,7 +25,7 @@ fn expectHPayload(expected: u16, actual: f16) !void {
 }
 
 fn expectFPayload(expected: u32, actual: f32) !void {
-    try std.testing.expectEqual(@as(f32, @floatFromInt(expected)), actual);
+    try std.testing.expectEqual(@as(f64, @floatFromInt(expected)), @as(f64, actual));
 }
 
 fn expectDPayload(expected: u64, actual: f64) !void {

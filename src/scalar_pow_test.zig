@@ -126,3 +126,49 @@ test "pow applies first-NaN payload and C23 identity precedence" {
     try expectPowdBits(0x3ff0_0000_0000_0000, 0x7ff8_1234_5678_9abc, 0x3ff0_0000_0000_0000);
     try expectPowdBits(0x3ff0_0000_0000_0000, 0x7ff0_1234_5678_9abc, 0x7ff8_1234_5678_9abc);
 }
+
+test "pow rounds proven tiny-exponent domains to one" {
+    const tiny_positive_f: u32 = 0x2f00_0000;
+    const tiny_negative_f: u32 = 0xaf00_0000;
+    try expectPowfBits(0x0000_0001, tiny_positive_f, 0x3f80_0000);
+    try expectPowfBits(0x7f7f_ffff, tiny_negative_f, 0x3f80_0000);
+    try expectPowfBits(0x3f80_0001, tiny_positive_f, 0x3f80_0000);
+    try expectPowfBits(0x3f7f_ffff, tiny_negative_f, 0x3f80_0000);
+
+    const tiny_positive_d: u64 = 0x3be0_0000_0000_0000;
+    const tiny_negative_d: u64 = 0xbbe0_0000_0000_0000;
+    try expectPowdBits(0x0000_0000_0000_0001, tiny_positive_d, 0x3ff0_0000_0000_0000);
+    try expectPowdBits(0x7fef_ffff_ffff_ffff, tiny_negative_d, 0x3ff0_0000_0000_0000);
+    try expectPowdBits(0x3ff0_0000_0000_0001, tiny_positive_d, 0x3ff0_0000_0000_0000);
+    try expectPowdBits(0x3fef_ffff_ffff_ffff, tiny_negative_d, 0x3ff0_0000_0000_0000);
+}
+
+test "pow saturates proven huge-exponent domains around one" {
+    const huge_positive_f: u32 = 0x5f00_0000;
+    const huge_negative_f: u32 = 0xdf00_0000;
+    try expectPowfBits(0x3f7f_ffff, huge_positive_f, 0x0000_0000);
+    try expectPowfBits(0x3f7f_ffff, huge_negative_f, 0x7f80_0000);
+    try expectPowfBits(0x3f80_0001, huge_positive_f, 0x7f80_0000);
+    try expectPowfBits(0x3f80_0001, huge_negative_f, 0x0000_0000);
+    try expectPowfBits(0xbf80_0001, huge_positive_f, 0x7f80_0000);
+    try expectPowfBits(0xbf80_0001, huge_negative_f, 0x0000_0000);
+
+    const huge_positive_d: u64 = 0x47f0_0000_0000_0000;
+    const huge_negative_d: u64 = 0xc7f0_0000_0000_0000;
+    try expectPowdBits(0x3fef_ffff_ffff_ffff, huge_positive_d, 0x0000_0000_0000_0000);
+    try expectPowdBits(0x3fef_ffff_ffff_ffff, huge_negative_d, 0x7ff0_0000_0000_0000);
+    try expectPowdBits(0x3ff0_0000_0000_0001, huge_positive_d, 0x7ff0_0000_0000_0000);
+    try expectPowdBits(0x3ff0_0000_0000_0001, huge_negative_d, 0x0000_0000_0000_0000);
+    try expectPowdBits(0xbff0_0000_0000_0001, huge_positive_d, 0x7ff0_0000_0000_0000);
+    try expectPowdBits(0xbff0_0000_0000_0001, huge_negative_d, 0x0000_0000_0000_0000);
+}
+
+test "pow keeps domain and NaN precedence before exponent shortcuts" {
+    try expectPowfBits(0xc000_0000, 0x2f00_0000, 0x7fc0_0000);
+    try expectPowfBits(0x7f81_2345, 0x2f00_0000, 0x7fc1_2345);
+    try expectPowfBits(0x8000_0000, 0x5f00_0000, 0x0000_0000);
+
+    try expectPowdBits(0xc000_0000_0000_0000, 0x3be0_0000_0000_0000, 0x7ff8_0000_0000_0000);
+    try expectPowdBits(0x7ff0_1234_5678_9abc, 0x3be0_0000_0000_0000, 0x7ff8_1234_5678_9abc);
+    try expectPowdBits(0x8000_0000_0000_0000, 0x47f0_0000_0000_0000, 0x0000_0000_0000_0000);
+}

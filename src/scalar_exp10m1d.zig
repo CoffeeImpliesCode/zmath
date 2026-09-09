@@ -29,6 +29,7 @@
 // SOFTWARE.
 
 const data = @import("scalar_exp10m1d_data.zig");
+const tiny_scale = @import("scalar_tiny.zig");
 
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
 const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
@@ -37,17 +38,21 @@ const ln10_high: f64 = 0x1.26bb1bbb55516p+1;
 const ln10_low: f64 = -0x1.f48ad494ea3e9p-53;
 
 const DoubleDouble = struct { high: f64, low: f64 };
-const FastResult = struct { value: DoubleDouble, error_bound: f64 };
 
-fn roundEvenFinite(value: f64) f64 {
+const Rounded = struct { value: f64, integer: i64 };
+
+fn roundEvenFinite(value: f64) Rounded {
     @setFloatMode(.strict);
-    const truncated: i64 = @intFromFloat(value);
-    const tv: f64 = @floatFromInt(truncated);
-    const fraction = value - tv;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) return @floatFromInt(truncated + 1);
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) return @floatFromInt(truncated - 1);
-    return tv;
+
+    // All callers bound |value| below 2^24. The biased encoding gives both
+    // the rounded value and its exact signed integer without a checked cast.
+    const rounding_constant: f64 = 0x1.8p52;
+    const biased = value + rounding_constant;
+    const biased_bits: u64 = @bitCast(biased);
+    return .{
+        .value = biased - rounding_constant,
+        .integer = @bitCast(biased_bits -% 0x4338_0000_0000_0000),
+    };
 }
 
 fn aMul(a: f64, b: f64) DoubleDouble {
@@ -88,43 +93,76 @@ fn mulAddDd(x: f64, value: DoubleDouble, ch: f64, cl: f64) DoubleDouble {
     r.low += sum.low + cl;
     return r;
 }
-fn copySign(magnitude: f64, source: f64) f64 {
-    const mb: u64 = @bitCast(magnitude);
-    const sb = @as(u64, @bitCast(source)) & ~magnitude_mask;
-    return @bitCast((mb & magnitude_mask) | sb);
-}
 
-fn q1(zh: f64, zl: f64) DoubleDouble {
+fn exp10m1Fast(x: f64) f64 {
     @setFloatMode(.strict);
-    const z = zh + zl;
-    var q = @mulAdd(f64, data.q1[4], zh, data.q1[3]);
-    q = @mulAdd(f64, q, z, data.q1[2]);
-    const sum = fastTwoSum(data.q1[1], q * z);
-    const product = dMul(zh, zl, sum.high, sum.low);
-    return fastSum(data.q1[0], product.high, product.low);
-}
-fn exp1(xh: f64, xl: f64) DoubleDouble {
-    @setFloatMode(.strict);
-    const k = roundEvenFinite(xh * 0x1.71547652b82fep+12);
-    const kl = sMul(k, 0x1.62e42fefa39efp-13, 0x1.abc9e3b39803fp-68);
-    var y = fastTwoSum(xh - kl.high, xl);
-    y.low -= kl.low;
-    const ki: i64 = @intFromFloat(k);
-    var m = (ki >> 12) + 0x3ff;
+    // Reduce on the base-10 grid used by exp2. In the fast range,
+    // |k| <= 2^22 and the split constants represent
+    // log(2) / (log(10) * 2^12). The leading FMA is exact, and the
+    // 30-bit middle product is exact; this is the proven exp2 reduction
+    // order, with |base10_residual.high| < 2^-13.5.
+    const reduction = roundEvenFinite(x * 0x1.a934f0979a371p+13);
+    const k = reduction.value;
+    var base10_residual = fastTwoSum(
+        @mulAdd(f64, -k, 0x1.34413509f79ffp-14, x),
+        -k * -0x1.9dc1da98p-71,
+    );
+    base10_residual.low = @mulAdd(
+        f64,
+        -k,
+        -0x1.4fd20dba1f655p-103,
+        base10_residual.low,
+    );
+    var reduced = sMul(base10_residual.high, ln10_high, ln10_low);
+    reduced.low = @mulAdd(f64, base10_residual.low, ln10_high, reduced.low);
+
+    const ki = reduction.integer;
+    var exponent = (ki >> 12) + 0x3ff;
     const table_index_2: usize = @intCast((ki >> 6) & 0x3f);
     const table_index_1: usize = @intCast(ki & 0x3f);
-    var r = dMul(data.t2[table_index_1][0], data.t2[table_index_1][1], data.t1[table_index_2][0], data.t1[table_index_2][1]);
-    const poly = q1(y.high, y.low);
-    r = dMul(r.high, r.low, poly.high, poly.low);
-    if (m == 0x7ff) {
-        r.high *= 2.0;
-        r.low *= 2.0;
-        m -= 1;
+    var result = dMul(
+        data.t2[table_index_1][0],
+        data.t2[table_index_1][1],
+        data.t1[table_index_2][0],
+        data.t1[table_index_2][1],
+    );
+    // |r| < 2^-13.5. The degree-four Taylor remainder, paired table
+    // product, and compensated evaluation total less than 2^-73
+    // relative error before subtracting one.
+    const r = reduced.high;
+    const square = r * r;
+    const polynomial = @mulAdd(f64, @mulAdd(f64, 0x1.5555555555555p-5, r, 0x1.5555555555555p-3), r, 0.5);
+    const nonlinear = square * polynomial;
+    const linear = aMul(result.high, r);
+    const correction = @mulAdd(f64, result.high, reduced.low + nonlinear, linear.low);
+    const tail = @mulAdd(f64, result.low, r, result.low) + correction;
+    const exponential = fastTwoSum(result.high, linear.high);
+    result = .{ .high = exponential.high, .low = exponential.low + tail };
+    if (exponent == 0x7ff) {
+        @branchHint(.unlikely);
+        result.high *= 2.0;
+        result.low *= 2.0;
+        exponent -= 1;
     }
-    const scale: f64 = @bitCast(@as(u64, @intCast(m)) << 52);
-    r.high *= scale;
-    r.low *= scale;
-    return r;
+    const scale: f64 = @bitCast(@as(u64, @intCast(exponent)) << 52);
+    result.high *= scale;
+    result.low *= scale;
+
+    const sum = if (x >= 0.0)
+        fastTwoSum(result.high, -1.0)
+    else
+        fastTwoSum(-1.0, result.high);
+    const low = result.low + sum.low;
+    // Positive cancellation is worst at x -> 2^-4+: 10^x/(10^x - 1)
+    // < 7.461, so retain a conservative bound for both signs.
+    const error_bound = 0x1p-69 * sum.high;
+    const left = sum.high + (low - error_bound);
+    const right = sum.high + (low + error_bound);
+    if (left != right) {
+        @branchHint(.unlikely);
+        return exp10m1Accurate(x);
+    }
+    return left;
 }
 
 fn q2(zh: f64, zl: f64) DoubleDouble {
@@ -153,8 +191,13 @@ fn q2(zh: f64, zl: f64) DoubleDouble {
 }
 fn exp2(value: f64) DoubleDouble {
     @setFloatMode(.strict);
-    var k = roundEvenFinite(value * 0x1.a934f0979a371p+13);
-    if (k == 4194304.0) k = 4194303.0;
+    const reduction = roundEvenFinite(value * 0x1.a934f0979a371p+13);
+    var k = reduction.value;
+    var ki = reduction.integer;
+    if (k == 4194304.0) {
+        k = 4194303.0;
+        ki -= 1;
+    }
     var yh = @mulAdd(f64, -k, 0x1.34413509f79ffp-14, value);
     var y = fastTwoSum(yh, -k * -0x1.9dc1da98p-71);
     yh = y.high;
@@ -162,11 +205,15 @@ fn exp2(value: f64) DoubleDouble {
     const e = sMul(yh, ln10_high, ln10_low);
     y.high = e.high;
     y.low = @mulAdd(f64, y.low, ln10_high, e.low);
-    const ki: i64 = @intFromFloat(k);
     var m = (ki >> 12) + 0x3ff;
     const table_index_2: usize = @intCast((ki >> 6) & 0x3f);
     const table_index_1: usize = @intCast(ki & 0x3f);
-    var r = dMul(data.t2[table_index_1][0], data.t2[table_index_1][1], data.t1[table_index_2][0], data.t1[table_index_2][1]);
+    var r = dMul(
+        data.t2[table_index_1][0],
+        data.t2[table_index_1][1],
+        data.t1[table_index_2][0],
+        data.t1[table_index_2][1],
+    );
     const poly = q2(y.high, y.low);
     r = dMul(r.high, r.low, poly.high, poly.low);
     if (m == 0x7ff) {
@@ -180,7 +227,7 @@ fn exp2(value: f64) DoubleDouble {
     return r;
 }
 
-fn exp10m1FastTiny(x: f64) FastResult {
+fn exp10m1FastTiny(x: f64) f64 {
     @setFloatMode(.strict);
     const x2 = x * x;
     const x4 = x2 * x2;
@@ -190,32 +237,30 @@ fn exp10m1FastTiny(x: f64) FastResult {
     c9 = @mulAdd(f64, data.p_fast[13], x2, c9);
     c5 = @mulAdd(f64, c7, x2, c5);
     c5 = @mulAdd(f64, c9, x4, c5);
-    var r = aMul(c5, x);
-    const sum = fastTwoSum(data.p_fast[6], r.high);
-    r.high = sum.high;
-    r.low += sum.low;
-    r = mulAddDd(x, r, data.p_fast[4], data.p_fast[5]);
-    r = mulAddDd(x, r, data.p_fast[2], data.p_fast[3]);
-    r = mulAddDd(x, r, data.p_fast[0], data.p_fast[1]);
-    r = sMul(x, r.high, r.low);
-    return .{ .value = r, .error_bound = 0x1.0ap-68 * r.high };
-}
-fn exp10m1Fast(x: f64, tiny: bool) FastResult {
-    @setFloatMode(.strict);
-    if (tiny) return exp10m1FastTiny(x);
-    const logarithm = sMul(x, ln10_high, ln10_low);
-    var r = exp1(logarithm.high, logarithm.low);
-    const sum = if (x >= 0.0) fastTwoSum(r.high, -1.0) else fastTwoSum(-1.0, r.high);
-    r.high = sum.high;
-    r.low += sum.low;
-    return .{ .value = r, .error_bound = 0x1.7ap-72 * r.high };
+    var result = aMul(c5, x);
+    const sum = fastTwoSum(data.p_fast[6], result.high);
+    result.high = sum.high;
+    result.low += sum.low;
+    result = mulAddDd(x, result, data.p_fast[4], data.p_fast[5]);
+    result = mulAddDd(x, result, data.p_fast[2], data.p_fast[3]);
+    result = mulAddDd(x, result, data.p_fast[0], data.p_fast[1]);
+    result = sMul(x, result.high, result.low);
+
+    const error_bound = 0x1.0ap-68 * result.high;
+    const left = result.high + (result.low - error_bound);
+    const right = result.high + (result.low + error_bound);
+    if (left != right) {
+        @branchHint(.unlikely);
+        return exp10m1Accurate(x);
+    }
+    return left;
 }
 fn exceptionLookup(comptime n: usize, x: f64, table: *const [n][3]f64) ?f64 {
     @setFloatMode(.strict);
     var a: usize = 0;
     var b: usize = n;
     while (a + 1 != b) {
-        const c = (a + b) / 2;
+        const c = a + (b - a) / 2;
         if (table[c][0] <= x) a = c else b = c;
     }
     if (x == table[a][0]) return table[a][1] + table[a][2];
@@ -243,7 +288,7 @@ fn exp10m1AccurateTiny(x: f64) f64 {
     r = sMul(x, r.high, r.low);
     return r.high + r.low;
 }
-fn exp10m1Accurate(x: f64) f64 {
+noinline fn exp10m1Accurate(x: f64) f64 {
     @setFloatMode(.strict);
     const ax = @as(u64, @bitCast(x)) & magnitude_mask;
     if (ax <= 0x3fb0_0000_0000_0000) return exp10m1AccurateTiny(x);
@@ -271,12 +316,16 @@ pub fn exp10m1d(value: f64) f64 {
         return 0x1.fffffffffffffp+1023 * value;
     } else if (ax <= 0x3c90_0000_0000_0000) {
         if (ax <= 0x3970_0000_0000_0000) {
-            if (value == 0.0) return value;
-            const absolute: f64 = @bitCast(ax);
-            if (absolute == 0x0.086c73059343cp-1022)
-                return @mulAdd(f64, -copySign(0x1.001p-537, value), 0x1p-538, copySign(0x1.36568740cb56p-1026, value));
-            if (absolute == 0x0.13a7b70d0248cp-1022)
-                return @mulAdd(f64, copySign(0x0.fffp-537, value), 0x1p-538, copySign(0x1.6a0f9dcb97e38p-1025, value));
+            if (ax -% 0x0360_0000_0000_0000 <= 0x3950_0000_0000_0000 - 0x0360_0000_0000_0000) {
+                // For 2^-969 <= |x| <= 2^-106, ln10_low*x is normal.
+                // The adjacent fractions 41289067906310253/8965807177319597
+                // and 227480160645689/49396689255444 enclose both twice the
+                // effective FMA coefficient and 2*exp10m1(x)/x. Their
+                // denominator sum exceeds 2^53, excluding all product
+                // midpoints. The nonlinear coefficient error is < 3*|x|.
+                return @mulAdd(f64, ln10_high, value, ln10_low * value);
+            }
+            if (ax < tiny_scale.magnitude_limit) return tiny_scale.scale(.ln10, value);
             const sx = value * 0x1p106;
             var v = aMul(ln10_high, sx);
             v.low = @mulAdd(f64, ln10_low, sx, v.low);
@@ -291,14 +340,9 @@ pub fn exp10m1d(value: f64) f64 {
         v.low = @mulAdd(f64, 0x1.53524c73cea69p+1 * value, value, v.low);
         return v.high + v.low;
     }
-    if (ux << 15 == 0) {
-        const integer: i32 = @intFromFloat(value);
-        if (value == @as(f64, @floatFromInt(integer)) and integer >= 1 and integer <= 15)
-            return data.exact_powers[@intCast(integer)];
+    if (ax <= 0x3fb0_0000_0000_0000) {
+        @branchHint(.unlikely);
+        return exp10m1FastTiny(value);
     }
-    const fast = exp10m1Fast(value, ax <= 0x3fb0_0000_0000_0000);
-    const left = fast.value.high + (fast.value.low - fast.error_bound);
-    const right = fast.value.high + (fast.value.low + fast.error_bound);
-    if (left == right) return left;
-    return exp10m1Accurate(value);
+    return exp10m1Fast(value);
 }

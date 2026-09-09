@@ -3,16 +3,6 @@ const magnitude_mask: u32 = 0x7fff_ffff;
 const infinity_bits: u32 = 0x7f80_0000;
 const quiet_nan_bit: u32 = 0x0040_0000;
 
-fn roundEvenFinite(value: f64) i64 {
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_float: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_float;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) return truncated + 1;
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) return truncated - 1;
-    return truncated;
-}
-
 /// Correctly-rounded hyperbolic sine function for binary32 values.
 ///
 /// Copyright (c) 2022-2025 Alexei Sibidanov.
@@ -86,9 +76,8 @@ pub fn sinhf(value: f32) f32 {
     if (shifted_bits < 0x7c00_0000) {
         if (shifted_bits <= 0x7425_0bfe) {
             if (shifted_bits < 0x6600_0000) {
-                if ((input_bits & magnitude_mask) == 0) return value;
-                const absolute_value: f32 = @bitCast(input_bits & magnitude_mask);
-                return @mulAdd(f32, value, absolute_value, value);
+                // The cubic correction is below half an ulp of value in this branch.
+                return value;
             }
             if (shifted_bits == 0x7425_0bfe) {
                 const sign: f32 = if ((input_bits & sign_mask) == 0) 1.0 else -1.0;
@@ -113,13 +102,14 @@ pub fn sinhf(value: f32) f32 {
     const z: f64 = value;
     const inverse_ln2: f64 = 0x1.71547652b82fep+5;
     const scaled = inverse_ln2 * z;
-    const rounded_integer = roundEvenFinite(scaled);
+    const rounding_constant: f64 = 0x1.8p+52;
+    // The finite path bounds scaled to less than 2^23, so the bias has unit spacing.
+    const biased_bits: u64 = @bitCast(scaled + rounding_constant);
+    const rounded_integer: i64 = @bitCast(biased_bits -% 0x4338_0000_0000_0000);
     const rounded: f64 = @floatFromInt(rounded_integer);
     const h = scaled - rounded;
     const h_squared = h * h;
-    const rounding_constant: f64 = 0x1.8p+52;
-    const ja_bits: u64 = @bitCast(rounded + rounding_constant);
-    const positive_index: i64 = @bitCast(ja_bits);
+    const positive_index: i64 = @bitCast(biased_bits);
     const negative_index = -positive_index;
     const positive_index_bits: u64 = @bitCast(positive_index);
     const negative_index_bits: u64 = @bitCast(negative_index);

@@ -14,6 +14,7 @@ const canonical_nan_bits_f: u32 = 0x7fc0_0000;
 
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;
 const magnitude_mask_d: u64 = 0x7fff_ffff_ffff_ffff;
+const fraction_mask_d: u64 = 0x000f_ffff_ffff_ffff;
 const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
 const quiet_nan_bit_d: u64 = 0x0008_0000_0000_0000;
 const canonical_nan_bits_d: u64 = 0x7ff8_0000_0000_0000;
@@ -94,20 +95,23 @@ pub fn rsqrth(value: f16) f16 {
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-/// Computes the correctly rounded reciprocal square root of a binary32 value.
-/// Callers must keep IEEE round-to-nearest, ties-to-even active.
-pub fn rsqrtf(value: f32) f32 {
-    @setFloatMode(.strict);
-    const bits: u32 = @bitCast(value);
+noinline fn rsqrtfSpecial(bits: u32) f32 {
     const magnitude = bits & magnitude_mask_f;
-
     if (magnitude > infinity_bits_f) return @bitCast(bits | quiet_nan_bit_f);
     if ((bits & sign_mask_f) != 0) {
         if (magnitude == 0) return @bitCast(@as(u32, 0xff80_0000));
         return @bitCast(canonical_nan_bits_f);
     }
-    if (magnitude == infinity_bits_f) return @bitCast(@as(u32, 0x0000_0000));
-    if (magnitude == 0) return @bitCast(@as(u32, 0x7f80_0000));
+    if (magnitude == infinity_bits_f) return 0.0;
+    return @bitCast(infinity_bits_f);
+}
+
+/// Computes the correctly rounded reciprocal square root of a binary32 value.
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn rsqrtf(value: f32) f32 {
+    @setFloatMode(.strict);
+    const bits: u32 = @bitCast(value);
+    if (bits -% 1 >= infinity_bits_f - 1) return rsqrtfSpecial(bits);
 
     const shifted_bits = bits << 8;
     if (bits == 0x002f_7e2a or shifted_bits == 0xbd_f8a800 or
@@ -157,18 +161,11 @@ pub fn rsqrtf(value: f32) f32 {
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-fn rsqrtdRefine(initial: f64, input: f64) f64 {
+noinline fn rsqrtdRefine(initial: f64, input: f64) f64 {
     @setFloatMode(.strict);
     var result_bits: u64 = @bitCast(initial);
-    var input_bits: u64 = @bitCast(input);
+    const input_bits: u64 = @bitCast(input);
 
-    if (input_bits < (1 << 52)) {
-        const leading_zeroes: u32 = @clz(input_bits);
-        input_bits <<= @intCast(leading_zeroes - 11);
-        input_bits &= ~@as(u64, 0) >> 12;
-        const exponent: u64 = @intCast(leading_zeroes - 12);
-        input_bits |= exponent << 52;
-    }
     if ((input_bits << 11) == (1 << 63)) return initial;
 
     const exponent_bit: u64 = (input_bits >> 52) & 1;
@@ -192,16 +189,22 @@ fn rsqrtdRefine(initial: f64, input: f64) f64 {
     var input_mantissa_negated: u64 = -%input_mantissa;
     const input_mantissa_double = input_mantissa << 1;
     var previous_remainder: u128 = 0;
-    // This preserves CORE-MATH's unbounded do/while sign-change termination.
-    // Do not impose a local iteration cap on this recurrence.
-    while (true) {
+    // The compensated pair has relative error below 2^-100 before the
+    // final rounding. The candidate is at most two encodings from the root;
+    // this recurrence moves one encoding toward the root per step.
+    var crossed_root = false;
+    for (0..3) |_| {
         result_bits -%= direction;
         previous_remainder = remainder_product;
         input_mantissa_negated +%= input_mantissa_double;
         const difference = signed_remainder -% input_mantissa_negated;
         remainder_product -%= difference;
-        if (((previous_remainder ^ remainder_product) >> 127) != 0) break;
+        if (((previous_remainder ^ remainder_product) >> 127) != 0) {
+            crossed_root = true;
+            break;
+        }
     }
+    if (!crossed_root) unreachable;
 
     if ((remainder_product >> 127) == 0) result_bits +%= direction;
     if ((remainder_product >> 127) == 0) remainder_product = previous_remainder;
@@ -214,46 +217,79 @@ fn rsqrtdRefine(initial: f64, input: f64) f64 {
     return @bitCast(result_bits);
 }
 
-/// Computes the correctly rounded reciprocal square root of a binary64 value.
-/// Callers must keep IEEE round-to-nearest, ties-to-even active.
-pub fn rsqrtd(value: f64) f64 {
+inline fn rsqrtdFinite(value: f64) f64 {
     @setFloatMode(.strict);
-    const bits: u64 = @bitCast(value);
-    const magnitude = bits & magnitude_mask_d;
+    const reciprocal = 1.0 / value;
+    const estimate = @sqrt(value) * reciprocal;
+    const negative_half = -0.5 * value;
+    const sigma = @mulAdd(f64, negative_half, reciprocal, 0.5);
+    const tau = @mulAdd(f64, estimate, estimate, -reciprocal);
+    const nu = @mulAdd(f64, negative_half, tau, sigma);
+    const refined = @mulAdd(f64, estimate, nu, estimate);
+    const correction = @mulAdd(f64, estimate, nu, estimate - refined);
 
-    if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
-    if ((bits & sign_mask_d) != 0) {
-        if (magnitude == 0) return @bitCast(@as(u64, 0xfff0_0000_0000_0000));
-        return @bitCast(canonical_nan_bits_d);
-    }
-    if (magnitude == infinity_bits_d) return @bitCast(@as(u64, 0x0000_0000_0000_0000));
-    if (magnitude == 0) return @bitCast(@as(u64, 0x7ff0_0000_0000_0000));
-
-    var result: f64 = 0.0;
-    if (bits < (1 << 52)) {
-        result = @sqrt(value) / value;
-    } else if (bits > 0x7fd0_0000_0000_0000) {
-        result = (4.0 / value) * (0.25 * @sqrt(value));
-    } else {
-        result = (1.0 / value) * @sqrt(value);
-    }
-
-    const product = result * value;
-    const product_error = @mulAdd(f64, result, value, -product);
-    const residual = @mulAdd(f64, result, product, -1.0) + result * product_error;
-    var correction = (result * 0.5) * residual;
-    const refined = result - correction;
-    correction -= result - refined;
-
-    const correction_bits: u64 = @bitCast(correction);
-    const refined_bits: u64 = @bitCast(refined);
-    const absolute_correction = (correction_bits & magnitude_mask_d) -%
-        (refined_bits & infinity_bits_d) +% 0x3fe0_0000_0000_0000;
-    const midpoint = (absolute_correction -% 0x3c90_0000_0000_0000 +% 16) >> 5;
-    if (midpoint == 0 or absolute_correction < 0x39b0_0000_0000_0000 or
-        absolute_correction > 0x3c9f_ffff_ffff_ff80)
-    {
+    // With u=2^-53, the seed error is below (3+4u)u and nu approximates
+    // (1-value*estimate^2)/2 with absolute error below 8u^2. The Newton
+    // remainder and all rounding terms total less than 32u^2=2^-101
+    // relative. The fused residual contributes less than 2u^2.
+    // Rounding cells are symmetric except below powers of two. Input
+    // spacing excludes a root below a power when refined equals that
+    // power, so one outward endpoint certifies both directions.
+    const outside = refined + @mulAdd(f64, refined, 0x1p-100, @abs(correction));
+    if (outside != refined) {
+        @branchHint(.unlikely);
         return rsqrtdRefine(refined, value);
     }
     return refined;
+}
+
+noinline fn rsqrtdScaled(bits: u64) f64 {
+    @setFloatMode(.strict);
+    if (bits -% 1 >= infinity_bits_d - 1) {
+        const magnitude = bits & magnitude_mask_d;
+        if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
+        if ((bits & sign_mask_d) != 0) {
+            if (magnitude == 0) return @bitCast(@as(u64, 0xfff0_0000_0000_0000));
+            return @bitCast(canonical_nan_bits_d);
+        }
+        if (magnitude == infinity_bits_d) return 0.0;
+        return @bitCast(infinity_bits_d);
+    }
+
+    var normalized_bits: u64 = undefined;
+    var scale_exponent: i16 = undefined;
+    const exponent_bits = bits >> 52;
+    if (exponent_bits == 0) {
+        const leading_zeroes: i32 = @intCast(@clz(bits));
+        const highest_bit = 63 - leading_zeroes;
+        const parity = highest_bit & 1;
+        const normalization_shift: u6 = @intCast(52 - highest_bit);
+        normalized_bits = ((bits << normalization_shift) & fraction_mask_d) |
+            (@as(u64, @intCast(0x3ff + parity)) << 52);
+        scale_exponent = @intCast(@divExact(1074 + parity - highest_bit, 2));
+    } else {
+        const exponent: i32 = @intCast(exponent_bits);
+        const parity = (exponent + 1) & 1;
+        normalized_bits = (bits & fraction_mask_d) |
+            (@as(u64, @intCast(0x3ff + parity)) << 52);
+        scale_exponent = @intCast(@divExact(0x3ff + parity - exponent, 2));
+    }
+
+    // Scaling into [1,4) keeps every residual normal. Every finite input
+    // has a normal reciprocal root, so restoring the exponent is exact.
+    const normalized: f64 = @bitCast(normalized_bits);
+    const result = rsqrtdFinite(normalized);
+    const exponent_adjustment = @as(u64, @bitCast(@as(i64, scale_exponent))) << 52;
+    return @bitCast(@as(u64, @bitCast(result)) +% exponent_adjustment);
+}
+
+/// Computes the correctly rounded reciprocal square root of a binary64 value.
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
+pub fn rsqrtd(value: f64) f64 {
+    const bits: u64 = @bitCast(value);
+    // The reciprocal and value/2 stay normal. For value <= 2^970, a
+    // subnormal square residual is an exact multiple of 2^-1074.
+    if (bits -% 0x0020_0000_0000_0000 <= 0x7c90_0000_0000_0000 - 0x0020_0000_0000_0000)
+        return rsqrtdFinite(value);
+    return rsqrtdScaled(bits);
 }

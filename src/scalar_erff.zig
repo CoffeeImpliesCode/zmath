@@ -24,18 +24,7 @@
 //! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //! SOFTWARE.
 
-const b32u32_u = extern union {
-    f: f32,
-    u: u32,
-};
-
-fn my_copysignf(x: f32, y: f32) f32 {
-    const x_bits: u32 = @bitCast(x);
-    const y_bits: u32 = @bitCast(y);
-    return @bitCast((x_bits & 0x7fff_ffff) | (y_bits & 0x8000_0000));
-}
-
-fn my_copysign(x: f64, y: f64) f64 {
+fn myCopysign(x: f64, y: f64) f64 {
     const x_bits: u64 = @bitCast(x);
     const y_bits: u64 = @bitCast(y);
     return @bitCast((x_bits & 0x7fff_ffff_ffff_ffff) | (y_bits & 0x8000_0000_0000_0000));
@@ -47,10 +36,18 @@ fn my_copysign(x: f64, y: f64) f64 {
 pub fn erff(arg_x: f32) f32 {
     @setFloatMode(.strict);
     const input_bits: u32 = @bitCast(arg_x);
+    const magnitude_bits = input_bits & 0x7fff_ffff;
+    if (magnitude_bits == 0) return arg_x;
+    if (magnitude_bits > 0x407a_d444) {
+        const signed_one: f32 = @bitCast((input_bits & 0x8000_0000) | 0x3f80_0000);
+        if (magnitude_bits > 0x7f80_0000) return @bitCast(input_bits | 0x0040_0000);
+        if (magnitude_bits == 0x7f80_0000) return signed_one;
+        return signed_one - (0x1p-25 * signed_one);
+    }
     var x = arg_x;
     _ = &x;
-    const static_local_C = struct {
-        const C: [56][8]f64 = [56][8]f64{
+    const static_local_table = struct {
+        const coefficients: [56][8]f64 = [56][8]f64{
             [8]f64{
                 0.4926134732179379,
                 0.905793136775116,
@@ -613,31 +610,11 @@ pub fn erff(arg_x: f32) f32 {
             },
         };
     };
-    _ = &static_local_C;
-    var ax: f32 = @abs(@as(f32, x));
-    _ = &ax;
-    var t: b32u32_u = b32u32_u{
-        .f = ax,
-    };
-    _ = &t;
-    var ux: u32 = t.u;
-    _ = &ux;
+    _ = &static_local_table;
     var s: f64 = @floatCast(x);
     _ = &s;
-    var z: f64 = @floatCast(ax);
-    _ = &z;
-    if (ux > 0x407a_d444) {
-        var os: f32 = my_copysignf(1.0, x);
-        _ = &os;
-        if (ux > 0x7f80_0000) return @bitCast(input_bits | 0x0040_0000);
-        if (ux == 0x7f80_0000) return os;
-        return os - (0x1p-25 * os);
-    }
-    var v: f64 = @floor(@as(f64, @as(f64, 16.0) * z));
-    _ = &v;
-    var i: u32 = @intFromFloat(@as(f32, 16.0) * ax);
-    _ = &i;
-    if (ux < 0x3ee0_0000) {
+    if (magnitude_bits < 0x3200_0000) return @floatCast(s * 1.1283791670955126);
+    if (magnitude_bits < 0x3ee0_0000) {
         const static_local_c = struct {
             const c: [8]f64 = [8]f64{
                 1.1283791670955126,
@@ -670,8 +647,17 @@ pub fn erff(arg_x: f32) f32 {
         c0 += z8 * c4;
         return @floatCast(s * c0);
     }
+    var ax: f32 = @abs(@as(f32, x));
+    _ = &ax;
+    var z: f64 = @floatCast(ax);
+    _ = &z;
+    // The index truncates toward zero on a non-negative input, so it is also
+    // the floor of the range reduction. It converts back to f64 exactly, so the
+    // second scaling and its rounding disappear.
+    const i: u32 = @intFromFloat(@as(f32, 16.0) * ax);
+    const v: f64 = @floatFromInt(i);
     z = (z - @as(f64, 0.03125)) - (@as(f64, 0.0625) * v);
-    var c: [*c]const f64 = @ptrCast(@alignCast(&static_local_C.C[i -% @as(u32, 7)]));
+    var c: [*c]const f64 = @ptrCast(@alignCast(&static_local_table.coefficients[i -% @as(u32, 7)]));
     _ = &c;
     var z2: f64 = z * z;
     _ = &z2;
@@ -688,5 +674,5 @@ pub fn erff(arg_x: f32) f32 {
     c0 += z2 * c2;
     c4 += z2 * c6;
     c0 += z4 * c4;
-    return @floatCast(my_copysign(c0, s));
+    return @floatCast(myCopysign(c0, s));
 }

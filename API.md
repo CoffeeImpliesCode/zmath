@@ -874,6 +874,7 @@ These build steps install the typed tools:
 zig build oracle-generator -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
 zig build corpus-replay -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
 zig build bench-scalar -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build bench-helpers -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
 ```
 
 The installed executables are:
@@ -882,12 +883,20 @@ The installed executables are:
 zig-out/bin/zmath-testing-corpus-producer
 zig-out/bin/zmath-corpus-replay
 zig-out/bin/zmath-scalar-matrix
+zig-out/bin/zmath-public-helpers
 ```
 
-Each executable accepts an optional first positional corpus root.
-The default root is `test/corpus`.
-Each also accepts `--operation=<manifest-op>` and `--format=h|f|d`.
-The filters can be used independently or together.
+`zmath-public-helpers` measures the public evaluators that no corpus descriptor
+covers: `classify`, `ulpDistance`, all four `scaleB` rounding modes, all four
+`roundIntegral` rounding modes, and integer `add`. It takes no corpus root and
+no operation filter, and accepts only `--repetitions=1..100`. The typed
+benchmark accepts `--repetitions=1..1024` and `--with-zig`, which times
+same-input Zig intrinsic references beside zmath.
+
+The corpus producer, corpus replay, and scalar-matrix executables accept an
+optional first positional corpus root. The default root is `test/corpus`.
+These three executables also accept `--operation=<manifest-op>` and
+`--format=h|f|d`. The filters can be used independently or together.
 
 The standard full-publication commands are:
 

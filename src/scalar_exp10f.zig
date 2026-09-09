@@ -29,37 +29,23 @@
 const data = @import("scalar_exp10f_data.zig");
 
 const sign_mask: u32 = 0x8000_0000;
-const magnitude_mask: u32 = 0x7fff_ffff;
 const infinity_bits: u32 = 0x7f80_0000;
 const quiet_nan_bit: u32 = 0x0040_0000;
 
-const exact_powers = [_]f32{
-    10.0,
-    100.0,
-    1000.0,
-    10000.0,
-    100000.0,
-    1000000.0,
-    10000000.0,
-    100000000.0,
-    1000000000.0,
-    10000000000.0,
-};
+const Rounded = struct { value: f64, integer: i64 };
 
-fn roundEvenFinite(value: f64) f64 {
+fn roundEvenFinite(value: f64) Rounded {
     @setFloatMode(.strict);
 
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_value: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_value;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) {
-        return @floatFromInt(truncated + 1);
-    }
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) {
-        return @floatFromInt(truncated - 1);
-    }
-    return truncated_value;
+    // All callers bound |value| below 2^24. The biased encoding gives both
+    // the rounded value and its exact signed integer without a checked cast.
+    const rounding_constant: f64 = 0x1.8p52;
+    const biased = value + rounding_constant;
+    const biased_bits: u64 = @bitCast(biased);
+    return .{
+        .value = biased - rounding_constant,
+        .integer = @bitCast(biased_bits -% 0x4338_0000_0000_0000),
+    };
 }
 
 fn exp10fSpecial(value: f32, bits: u32) f32 {
@@ -102,33 +88,18 @@ fn exp10fFinite(value: f32, bits: u32) f32 {
         if ((bits & sign_mask) == 0) return @bitCast(infinity_bits);
     }
 
-    if ((bits << 12) == 0) {
-        const exponent = bits >> 20;
-        if (exponent >= 1016) {
-            const shift_value = exponent - 1016;
-            if (shift_value <= 26) {
-                const shift: u5 = @intCast(shift_value);
-                const table_bit: u32 = @as(u32, 1) << shift;
-                const mask: u32 = 0x0755_1101;
-                if ((table_bit & mask) != 0) {
-                    const index: usize = @intCast(@popCount(mask & (table_bit - 1)));
-                    return exact_powers[index];
-                }
-            }
-        }
-    }
-
     const value_wide: f64 = value;
     const iln102: f64 = 0x1.a934f0979a371p+6;
     const iln102h: f64 = 0x1.a934f09p+1;
     const iln102l: f64 = 0x1.e68dc57f2496p-29;
     const scaled = iln102 * value_wide;
-    const rounded = roundEvenFinite(scaled);
+    const reduction = roundEvenFinite(scaled);
+    const rounded = reduction.value;
     const reduced = scaled - rounded;
-    const rounded_integer: i64 = @intFromFloat(rounded);
-    const table_index: usize = @intCast(rounded_integer & 0x1f);
+    const rounded_integer = reduction.integer;
+    const table_index: u5 = @truncate(@as(u64, @bitCast(rounded_integer)));
     const table_scale_bits = data.table[table_index];
-    const exponent_bits = @as(u64, @bitCast(rounded_integer >> 5)) << 52;
+    const exponent_bits = (@as(u64, @bitCast(rounded_integer >> 5))) << 52;
     const scale: f64 = @bitCast(table_scale_bits +% exponent_bits);
     const reduced_squared = reduced * reduced;
     const fast_coefficients = [_]f64{
@@ -161,14 +132,6 @@ fn exp10fFinite(value: f32, bits: u32) f32 {
 
 /// Computes 10^value in binary32 with caller-supplied nearest-even rounding.
 pub fn exp10f(value: f32) f32 {
-    @setFloatMode(.strict);
-
     const bits: u32 = @bitCast(value);
-    const magnitude = bits & magnitude_mask;
-    if (magnitude > infinity_bits) return @bitCast(bits | quiet_nan_bit);
-    if (magnitude == infinity_bits) {
-        if ((bits & sign_mask) != 0) return 0.0;
-        return @bitCast(infinity_bits);
-    }
     return exp10fFinite(value, bits);
 }

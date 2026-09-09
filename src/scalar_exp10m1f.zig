@@ -246,13 +246,16 @@ pub fn exp10m1f(value: f32) f32 {
     const scaled = log2_10_high * value_wide;
     const integral = @floor(scaled);
     const remainder = @mulAdd(f64, log2_10_low, value_wide, scaled - integral);
-    const integral_integer: i64 = @intFromFloat(integral);
-    const table_index: usize = @intCast(integral_integer & 0xf);
-    const exponent_unscaled = integral_integer - @as(i64, @intCast(table_index));
-    const exponent = @divExact(exponent_unscaled, 16);
-    const scale_power_bits: u64 = @intCast(exponent + 0x3ff);
-    const scale_power: f64 = @bitCast(scale_power_bits << 52);
-    const scale = table[table_index] * scale_power;
+    // The finite guards bound integral to [-400, 2047]. The bias sum is exact,
+    // and its low 32 encoding bits hold the signed integer in two's complement.
+    const integral_bits: u64 = @bitCast(integral + 0x1.8p52);
+    const integral_integer: i64 = @as(i32, @bitCast(@as(u32, @truncate(integral_bits))));
+    const table_index: u4 = @truncate(@as(u64, @bitCast(integral_integer)));
+    const table_bits: u64 = @bitCast(table[table_index]);
+    // Each table value is in [1, 2), and the exponent is in [-25, 127].
+    // Adjusting its exponent is the same exact normal scaling as multiplication.
+    const exponent_bits = @as(u64, @bitCast(integral_integer >> 4)) << 52;
+    const scale: f64 = @bitCast(table_bits +% exponent_bits);
 
     const remainder_squared = remainder * remainder;
     const c0 = @mulAdd(f64, remainder, coefficients[1], coefficients[0]);

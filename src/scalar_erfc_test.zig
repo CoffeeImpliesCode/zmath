@@ -64,6 +64,13 @@ test "Erfc family rounds representative finite values" {
     try expectErfcdBits(0x403b_0000_0000_0000, 0x0000_0000_0001_9e0f);
 }
 
+test "Erfcd preserves exact tiny and saturation cutovers" {
+    try expectErfcdBits(0x3c8c_5bf8_91b4_ef6a, 0x3ff0_0000_0000_0000);
+    try expectErfcdBits(0xbc9c_5bf8_91b4_ef6a, 0x3ff0_0000_0000_0000);
+    try expectErfcdBits(0x403b_39dc_41e4_8bfd, 0x0000_0000_0000_0000);
+    try expectErfcdBits(0xc017_744f_8f74_e94b, 0x4000_0000_0000_0000);
+}
+
 test "Erfc wrappers quiet NaNs and preserve payload and sign" {
     try expectErfchBits(0x7c01, 0x7e01);
     try expectErfchBits(0xfe55, 0xfe55);

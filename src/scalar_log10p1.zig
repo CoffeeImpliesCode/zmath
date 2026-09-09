@@ -5,9 +5,11 @@
 // The wrappers construct exceptional results from target-format bits so that
 // NaN payloads, signs, domains, and poles do not depend on host conventions.
 
+const tiny = @import("scalar_tiny.zig");
+
 extern fn cr_log10p1f16(value: f16) callconv(.c) f16;
-extern fn cr_log10p1f(value: f32) callconv(.c) f32;
-extern fn cr_log10p1(value: f64) callconv(.c) f64;
+extern fn zmath_core_log10p1f_finite(value: f32) callconv(.c) f32;
+extern fn zmath_core_log10p1_finite(value: f64) callconv(.c) f64;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
@@ -63,7 +65,7 @@ pub fn log10p1f(value: f32) f32 {
         return @bitCast(canonical_nan_bits_f);
     }
     if (magnitude == 0) return value;
-    return cr_log10p1f(value);
+    return zmath_core_log10p1f_finite(value);
 }
 
 /// Computes the correctly rounded base-10 logarithm of one plus a binary64 value.
@@ -72,15 +74,13 @@ pub fn log10p1d(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);
     const magnitude = bits & magnitude_mask_d;
-    if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
-    if (magnitude == infinity_bits_d) {
-        if ((bits & sign_mask_d) != 0) return @bitCast(canonical_nan_bits_d);
+    if (magnitude >= infinity_bits_d or bits >= negative_one_bits_d) {
+        @branchHint(.unlikely);
+        if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
+        if (bits == negative_one_bits_d) return @bitCast(@as(u64, 0xfff0_0000_0000_0000));
+        if (bits > negative_one_bits_d) return @bitCast(canonical_nan_bits_d);
         return value;
     }
-    if (bits == negative_one_bits_d) return @bitCast(@as(u64, 0xfff0_0000_0000_0000));
-    if ((bits & sign_mask_d) != 0 and bits > negative_one_bits_d) {
-        return @bitCast(canonical_nan_bits_d);
-    }
-    if (magnitude == 0) return value;
-    return cr_log10p1(value);
+    if (magnitude < tiny.magnitude_limit) return tiny.scale(.inv_ln10, value);
+    return zmath_core_log10p1_finite(value);
 }

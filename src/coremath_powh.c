@@ -25,19 +25,6 @@ SOFTWARE.
 */
 
 #include <stdint.h>
-#define FLAG_T uint32_t
-
-/*
- * zmath has a caller-round-to-nearest contract.  The CORE-MATH kernel's
- * exception-flag save/restore path is therefore intentionally inert.
- */
-static FLAG_T get_flag(void) {
-  return 0;
-}
-
-static void set_flag(FLAG_T flag) {
-  (void)flag;
-}
 
 typedef union {_Float16 f; uint16_t u;} b16u16_u;
 typedef union {double f; uint64_t u;} b64u64_u;
@@ -47,14 +34,17 @@ static const b16u16_u one = {.u = 0x3c00};
 static const b16u16_u neginf = {.u = 0xfc00};
 static const b16u16_u posinf = {.u = 0x7c00};
 
-static inline int isint(b16u16_u v) {
-	if (v.f == 0.0f) return 1;
-	return (v.u & 0x7fff) >> 10 >= 25 - __builtin_ctz(0x400 | v.u);
-}
-
-static inline int isodd(b16u16_u v) {
-	if (v.f == 0.0f) return 0;
-	return (v.u & 0x7fff) >> 10 == 25 - __builtin_ctz(0x400 | v.u);
+static inline int integer_class(b16u16_u v) {
+	uint16_t magnitude = v.u & 0x7fff;
+	if (!magnitude) return 2;
+	unsigned exponent = magnitude >> 10;
+	if (exponent < 15) return 0;
+	if (exponent > 25) return 2;
+	uint16_t significand = 0x400 | (magnitude & 0x3ff);
+	unsigned shift = 25 - exponent;
+	uint16_t truncated_mask = (1u << shift) - 1;
+	if (significand & truncated_mask) return 0;
+	return ((significand >> shift) & 1) ? 1 : 2;
 }
 
 // return non-zero if x^y might be representable with 11 precision bits
@@ -194,13 +184,13 @@ static inline double exp_in_pow(double x) {
 }
 
 _Float16 cr_powf16(_Float16 x, _Float16 y){
-  volatile FLAG_T flag = get_flag ();
 	b16u16_u vx = {.f = x}, vy = {.f = y};
 	uint64_t sign = 0;
 	if ((vx.u & 0x7fff) == 0x3c00) { // |x| = 1
 		if (vx.u >> 15) { // x = -1
 			if ((vy.u & 0x7fff) > 0x7c00) return y + y; // y = NaN
-			if (isint(vy)) return (isodd(vy)) ? vx.f : -vx.f;
+			int y_class = integer_class(vy);
+			if (y_class) return (y_class == 1) ? vx.f : -vx.f;
 #ifdef CORE_MATH_SUPPORT_ERRNO
 			errno = EDOM;
 #endif
@@ -224,32 +214,34 @@ _Float16 cr_powf16(_Float16 x, _Float16 y){
 		return y + y; // y = NaN
 	}
 	if (!(vx.u & 0x7fff)) { // if x = 0
+		int y_class = integer_class(vy);
 		if (vy.u >> 15) { // y < 0
 #ifdef CORE_MATH_SUPPORT_ERRNO
 			errno = ERANGE;
 #endif
-			if (isodd(vy) && vx.u >> 1) return neginf.f;
+			if (y_class == 1 && vx.u >> 1) return neginf.f;
 			else return posinf.f;
 		} else { // y > 0
-			if (isodd(vy) && vx.u >> 1) return negzero.f;
+			if (y_class == 1 && vx.u >> 1) return negzero.f;
 			else return poszero.f;
 		}
 	}
 	if (vx.u >= 0x7c00) { // x = Inf or x = NaN or x <= 0
+		int y_class = integer_class(vy);
 		if ((vx.u & 0x7fff) == 0x7c00) { // x = +/-Inf
-			if (!isodd(vy)) vx.u &= 0x7fff; // y even -> ret will be positive
+			if (y_class != 1) vx.u &= 0x7fff; // y even -> ret will be positive
 			if (vy.u >> 15) vx.u &= 0x8000; // y < 0 -> ret will be +/-0
 			return vx.f;
 		}
 		if ((vx.u & 0x7fff) > 0x7c00) return x + x; // x is NaN
 		// x < 0
-		if (!isint(vy)) {
+		if (y_class == 0) {
 #ifdef CORE_MATH_SUPPORT_ERRNO
 			errno = EDOM;
 #endif
 			return 0.0f / 0.0f;
 		} 
-		else if (isodd(vy)) sign = 1ull << 63;
+		else if (y_class == 1) sign = 1ull << 63;
 		vx.u &= 0x7fff;
 	}
 	// some wrong cases
@@ -278,7 +270,6 @@ _Float16 cr_powf16(_Float16 x, _Float16 y){
 		test_exact2.f = fast_pow(test_exact2.f, isex & 0xf);
 		if (test_exact1.u == test_exact2.u) {
 			ret.u = (ret.u + (1ull << 40)) & (0xfffffeull << 40);
-			set_flag(flag); // resetting inexact (if inexact -> raise in return)
 		}
 	}
 	else ret.f = exp_in_pow(log_in_pow(vx.f) * (double) vy.f);

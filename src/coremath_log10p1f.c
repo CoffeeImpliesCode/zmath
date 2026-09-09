@@ -38,26 +38,9 @@ SOFTWARE.
 typedef union {float f; uint32_t u;} b32u32_u;
 typedef union {double f; uint64_t u;} b64u64_u;
 
-static __attribute__((noinline)) float as_special(float x){
-  b32u32_u t = {.f = x};
-  if(t.u==0xbf800000u){// -1.0
-#ifdef CORE_MATH_SUPPORT_ERRNO
-    errno = ERANGE;
-#endif
-    t.u = 0x1ffu<<23;
-    return t.f;
-  }
-  if(t.u == 0x7f800000u) return x; // +inf
-  uint32_t ax = t.u<<1;
-  if(ax > 0xff000000u) return x + x; // nan
-#ifdef CORE_MATH_SUPPORT_ERRNO
-  errno = EDOM;
-#endif
-  t.u = 0x1ff8u<<19;
-  return t.f; // x<0
-}
 
-float cr_log10p1f(float x){
+/* The Zig wrapper has checked that x is finite and x > -1. */
+float zmath_core_log10p1f_finite (float x){
   static const struct {b32u32_u x; float f, df;} tb[] = {
     {{.f = 0x1.34f8p-12}, 0x1.0c53cap-13, 0x1p-38},
     {{.f =-0x1.a3c2e6p-31}, -0x1.6c999ep-32, 0x1p-57},
@@ -108,8 +91,6 @@ float cr_log10p1f(float x){
   double z = x;
   b32u32_u t = {.f = x};
   uint32_t ux = t.u;
-  if(__builtin_expect(ux >= 0xbf800000u, 0)) return as_special(x); // x <= -1, -inf, -nan
-  if(__builtin_expect((int32_t)ux >= 0x7f800000, 0)) return as_special(x); // +inf, +nan
   if(__builtin_expect(ux == st[(ux>>24)&0xf].u, 0)) {
     int ie = ux;
     ie >>= 23;
@@ -156,3 +137,4 @@ float cr_log10p1f(float x){
   }
   return ub;
 }
+

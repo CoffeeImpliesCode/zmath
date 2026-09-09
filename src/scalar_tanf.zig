@@ -28,14 +28,14 @@ const magnitude_mask: u32 = 0x7fff_ffff;
 const infinity_bits: u32 = 0x7f80_0000;
 const quiet_nan_bit: u32 = 0x0040_0000;
 
-fn roundEvenFinite(value: f64) i64 {
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_value: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_value;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) return truncated + 1;
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) return truncated - 1;
-    return truncated;
+fn roundEvenFinite(value: f64, integer: *i64) f64 {
+    @setFloatMode(.strict);
+    // reduceSmall gives |value| < 2^28. The bias has unit spacing at this range.
+    const rounded = value + 0x1.8p52;
+    const rounded_bits: u64 = @bitCast(rounded);
+    const integer_low: i32 = @bitCast(@as(u32, @truncate(rounded_bits)));
+    integer.* = @as(i64, integer_low);
+    return rounded - 0x1.8p52;
 }
 
 // For |z| < 2^28, return r such that 2/pi*x = q + r.
@@ -44,9 +44,8 @@ fn reduceSmall(value: f32, quotient: *i64) f64 {
     const x: f64 = @floatCast(value);
     const low = -0x1.b1bbead603d8bp-32 * x;
     const high = 0x1.45f306ep-1 * x;
-    const integral = roundEvenFinite(high);
-    quotient.* = integral;
-    return (high - @as(f64, @floatFromInt(integral))) + low;
+    const integral = roundEvenFinite(high, quotient);
+    return (high - integral) + low;
 }
 
 // For |x| >= 2^28, return r such that 2/pi*x = q + r.

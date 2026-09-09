@@ -6,28 +6,39 @@
 
 #include <stdint.h>
 
-/* The finite inputs passed to this helper are bounded by the overflow check. */
-static inline double roundeven_finite(double x)
+/* __builtin_roundeven was introduced in gcc 10:
+   https://gcc.gnu.org/gcc-10/changes.html,
+   and in clang 17. */
+#if ((defined(__GNUC__) && __GNUC__ >= 10) || (defined(__clang__) && __clang_major__ >= 17)) && !defined(_MSC_VER) && (defined(__aarch64__) || defined(__x86_64__) || defined(__i386__))
+# define roundeven_finite(x) __builtin_roundeven (x)
+#else
+/* Round x to nearest integer, breaking ties to even. */
+static double
+roundeven_finite (double x)
 {
-  int64_t truncated = (int64_t)x;
-  double truncated_value = (double)truncated;
-  double fraction = x - truncated_value;
-  if (fraction > 0.5 || (fraction == 0.5 && (truncated & 1) != 0))
-    return truncated_value + 1.0;
-  if (fraction < -0.5 || (fraction == -0.5 && (truncated & 1) != 0))
-    return truncated_value - 1.0;
-  return truncated_value;
+  double ix;
+# if (defined(__GNUC__) || defined(__clang__)) && (defined(__AVX__) || defined(__SSE4_1__) || (__ARM_ARCH >= 8))
+#  if defined __AVX__
+  __asm__("vroundsd $0x8,%1,%1,%0":"=x"(ix):"x"(x));
+#  elif __ARM_ARCH >= 8
+  __asm__ ("frintn %d0, %d1":"=w"(ix):"w"(x));
+#  else
+  __asm__("roundsd $0x8,%1,%0":"=x"(ix):"x"(x));
+#  endif
+# else
+  ix = __builtin_round (x);
+  if (__builtin_fabs (ix - x) == 0.5)
+  {
+    union { double f; uint64_t n; } u, v;
+    u.f = ix;
+    v.f = ix - __builtin_copysign (1.0, x);
+    if (__builtin_ctz (v.n) > __builtin_ctz (u.n))
+      ix = v.f;
+  }
+# endif
+  return ix;
 }
-
-static inline float floor_finite(float x)
-{
-  if (x >= 0x1p31f || x <= -0x1p31f)
-    return x;
-  int32_t truncated = (int32_t)x;
-  if ((float)truncated > x)
-    --truncated;
-  return (float)truncated;
-}
+#endif
 
 typedef union {
   float f;
@@ -62,11 +73,18 @@ float cr_tgammaf(float x)
   uint32_t ax = t.u << 1;
   if (__builtin_expect(ax >= (0xffu << 24), 0)) {
     if (ax == (0xffu << 24)) {
-      if (t.u >> 31)
-        return x / x;
+      if (t.u >> 31) {
+        b32u32_u result = {.u = 0x7fc00000u};
+        return result.f;
+      }
       return x;
     }
-    return x + x;
+    b32u32_u result = {.u = t.u | 0x00400000u};
+    return result.f;
+  }
+  if (__builtin_expect(ax == 0, 0)) {
+    b32u32_u result = {.u = (t.u & 0x80000000u) | 0x7f800000u};
+    return result.f;
   }
 
   double z = x;
@@ -85,7 +103,7 @@ float cr_tgammaf(float x)
     return r;
   }
 
-  float fx = floor_finite(x);
+  float fx = __builtin_floorf(x);
   if (__builtin_expect(x >= 0x1.18522p+5f, 0))
     return 0x1p127f * 0x1p127f;
 
@@ -96,10 +114,10 @@ float cr_tgammaf(float x)
     k = fx;
 
   if (__builtin_expect(fx == x, 0)) {
-    if (x == 0.0f)
-      return 1.0f / x;
-    if (x < 0.0f)
-      return 0.0f / 0.0f;
+    if (x < 0.0f) {
+      b32u32_u result = {.u = 0x7fc00000u};
+      return result.f;
+    }
     double t0 = 1, x0 = 1;
     for (int32_t i = 1; i < k; i++, x0 += 1.0)
       t0 *= x0;

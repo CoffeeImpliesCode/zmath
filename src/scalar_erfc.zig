@@ -6,7 +6,8 @@
 
 extern fn cr_erfcf16(value: f16) callconv(.c) f16;
 extern fn cr_erfcf(value: f32) callconv(.c) f32;
-extern fn cr_erfc(value: f64) callconv(.c) f64;
+extern fn zmath_core_erfcd_negative(value: f64) callconv(.c) f64;
+extern fn zmath_core_erfcd_positive(value: f64) callconv(.c) f64;
 
 const magnitude_mask_h: u16 = 0x7fff;
 const magnitude_mask_f: u32 = 0x7fff_ffff;
@@ -17,6 +18,10 @@ const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
 const quiet_nan_bit_h: u16 = 0x0200;
 const quiet_nan_bit_f: u32 = 0x0040_0000;
 const quiet_nan_bit_d: u64 = 0x0008_0000_0000_0000;
+const erfc_neg_tiny_d: u64 = 0x3c9c_5bf8_91b4_ef6a;
+const erfc_pos_tiny_d: u64 = 0x3c8c_5bf8_91b4_ef6a;
+const erfc_neg_saturation_d: u64 = 0x4017_744f_8f74_e94b;
+const erfc_pos_saturation_d: u64 = 0x403b_39dc_41e4_8bfd;
 
 /// Correctly rounded complementary error function for binary16 values.
 pub fn erfch(value: f16) f16 {
@@ -38,6 +43,19 @@ pub fn erfcf(value: f32) f32 {
 pub fn erfcd(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);
-    if ((bits & magnitude_mask_d) > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
-    return cr_erfc(value);
+    const magnitude = bits & magnitude_mask_d;
+    if ((bits & 0x8000_0000_0000_0000) != 0) {
+        if (magnitude >= erfc_neg_saturation_d) {
+            if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
+            return 2.0;
+        }
+        if (magnitude <= erfc_neg_tiny_d) return 1.0;
+        return zmath_core_erfcd_negative(value);
+    }
+    if (magnitude >= erfc_pos_saturation_d) {
+        if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
+        return 0.0;
+    }
+    if (magnitude <= erfc_pos_tiny_d) return 1.0;
+    return zmath_core_erfcd_positive(value);
 }

@@ -39,13 +39,15 @@ const table: [32]f64 = .{
 };
 
 fn roundEvenFinite(value: f64) i64 {
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_float: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_float;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) return truncated + 1;
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) return truncated - 1;
-    return truncated;
+    @setFloatMode(.strict);
+
+    // The reduction bounds |value| below 2^13. Under RNE, this bias
+    // rounds to nearest-even and its fixed-exponent bit delta is exact.
+    const rounding_constant: f64 = 0x1.8p52;
+    const biased = value + rounding_constant;
+    const biased_bits: u64 = @bitCast(biased);
+    const rounding_bits: u64 = @bitCast(rounding_constant);
+    return @bitCast(biased_bits -% rounding_bits);
 }
 
 /// Correctly-rounded exponential function biased by one for binary32 values.
@@ -91,9 +93,7 @@ pub fn expm1f(value: f32) f32 {
     const value_wide: f64 = value;
     if (absolute_bits < 0x3e20_0000) {
         if (absolute_bits < 0x33b5_04f4) {
-            if (absolute_bits == 0) return value;
-            const absolute_value: f32 = @bitCast(absolute_bits);
-            return @mulAdd(f32, absolute_value, 0x1p-25, value);
+            return value;
         }
         const z_squared = value_wide * value_wide;
         const z_fourth = z_squared * z_squared;

@@ -10,22 +10,14 @@ fn invalidResult() c23.IntegerResult {
     return .{ .value = 0, .ok = false };
 }
 
-fn isFiniteInI64Range(comptime T: type, value: T) bool {
-    const value_wide: f64 = @floatCast(value);
-    if (value_wide != value_wide) return false;
-
-    const infinity = std.math.inf(f64);
-    if (value_wide == infinity) return false;
-    if (value_wide == -infinity) return false;
-
-    if (value_wide >= 0x1p63) return false;
-    if (value_wide < -0x1p63) return false;
-    return true;
+fn isFiniteInI64Range(value: f64) bool {
+    return value >= -0x1p63 and value < 0x1p63;
 }
 
 fn roundNearestEven(comptime T: type, value: T) c23.IntegerResult {
     @setFloatMode(.strict);
-    if (!isFiniteInI64Range(T, value)) return invalidResult();
+    const value_wide: f64 = @floatCast(value);
+    if (!isFiniteInI64Range(value_wide)) return invalidResult();
 
     const truncated: i64 = @intFromFloat(value);
     const truncated_value: T = @floatFromInt(truncated);
@@ -45,21 +37,11 @@ fn roundNearestEven(comptime T: type, value: T) c23.IntegerResult {
 
 fn roundTiesAway(comptime T: type, value: T) c23.IntegerResult {
     @setFloatMode(.strict);
-    if (!isFiniteInI64Range(T, value)) return invalidResult();
+    const value_wide: f64 = @floatCast(value);
+    if (!isFiniteInI64Range(value_wide)) return invalidResult();
 
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_value: T = @floatFromInt(truncated);
-    const fraction = value - truncated_value;
-
-    if (fraction >= 0.5) {
-        if (truncated == std.math.maxInt(i64)) return invalidResult();
-        return .{ .value = truncated + 1, .ok = true };
-    }
-    if (fraction <= -0.5) {
-        if (truncated == std.math.minInt(i64)) return invalidResult();
-        return .{ .value = truncated - 1, .ok = true };
-    }
-    return .{ .value = truncated, .ok = true };
+    // At the i64 limits, every representable input is integral, so rounding stays in range.
+    return .{ .value = @intFromFloat(@round(value_wide)), .ok = true };
 }
 
 pub fn lrinth(value: f16) c23.IntegerResult {

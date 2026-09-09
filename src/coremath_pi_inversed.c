@@ -365,7 +365,10 @@ static double zmath_pi_asinpid_small (double x)
   return hh + ll;
 }
 
-double zmath_core_asinpid(double x){
+/* The Zig wrapper already handles NaN, zero, infinity, and |x| >= 1.
+   Passing the decoded bits avoids repeating that classification in this
+   finite interior kernel. */
+double zmath_core_asinpid_finite_bits(double x, uint64_t bits){
   /* For 0 <= i <= 64, s[i]=floor(sin(pi/2*i/64)*2^63), except for i=64
      where s[i]=2^63-1.
      Thus s[i]/2^63 approximates sin(pi/2*i/64)=cos(pi/2*(64-i)/64).
@@ -423,25 +426,16 @@ double zmath_core_asinpid(double x){
      approximation of 64*acos(x) for 0 <= x <= 1, with error less than 0.056 */
   static const double ch[] = {0x1.ffb77e06e54aap+5, -0x1.3b200d87cc0fep+5, 0x1.79457faf679e3p+4, -0x1.dc7d5a91dfb7ep+2};
   const unsigned rm = zmath_pi_asinpid_get_rounding_mode ();
-  zmath_pi_asinpid_b64u64_u t = {.f = x};
-  int e = ((t.u>>52)&0x7ff)-0x3ff;
+  int e = ((bits>>52)&0x7ff)-0x3ff;
   /* x = 2^e*y with 1 <= |y| < 2 */
-  zmath_pi_asinpid_i64 xsign = t.u&((zmath_pi_asinpid_u64)1<<63);
+  zmath_pi_asinpid_i64 xsign = bits&((zmath_pi_asinpid_u64)1<<63);
   /* xsign=0 for x > 0, xsign=1 for x < 0 */
-  zmath_pi_asinpid_u64 sm = (t.u<<11)|(zmath_pi_asinpid_u64)1<<63;
+  zmath_pi_asinpid_u64 sm = (bits<<11)|(zmath_pi_asinpid_u64)1<<63;
   /* sm contains in its high 53 bits: the implicit leading bit, and the
      the 52 explicit bits from the significand, thus |x| = 2^(e+1)*sm/2^64
      where 2^63 <= sm < 2^64 */
   zmath_pi_asinpid_u128_u fi;
-  if(__builtin_expect (e>=0,0)){ /* |x| >= 1 */
-    zmath_pi_asinpid_u64 m = t.u<<12; /* m contains the 52 explicit bits from the significand */
-    if (e==0 && m==0) /* case x = 1 or -1: asinpi(1)=1/2, asin(-1)=-1/2 */
-      /* h=0x1.921fb54442d18p+0 is pi/2 rounded to nearest,
-         and 0x1.1a62633145c07p-54 is pi/2-h rounded to nearest */
-      return x * 0.5; // asinpi_specific
-    if (e==0x400 && m) return x + x; // nan
-return __builtin_nan ("");
-  } else if (__builtin_expect(e < -6,0)){ /* |x| < 2^-6 */
+  if (__builtin_expect(e < -6,0)){ /* |x| < 2^-6 */
     if (__builtin_expect (e < -26,0)) /* |x| < 2^-26 */
       {
         // asinpi_begin
@@ -544,10 +538,9 @@ return __builtin_nan ("");
     double c0 = ch[0] + ax*ch[1];
     double c2 = ch[2] + ax*ch[3];
     c0 += x2*c2;
-    /* FIXME: use FMA here: c0 = fma (c0, c.f, 64) */
-    c0 *= c.f;
-    c0 += 64;
-    /* now c0 approximates 64+64*acos(x)/(pi/2), which lies in [64,128] */
+    /* The pinned source marks this pair for FMA: the exact real expression
+       is unchanged, while one rounding replaces the old multiply and add. */
+    c0 = __builtin_fma (c0, c.f, 64.0);
     zmath_pi_asinpid_b64u64_u ic = {.f = c0};
     int indx = ((ic.u&(~0ull>>12)) + (1ll<<(52-7))) >> (52-6);
     /* indx = round(c0)-64. We have indx < 64 since c0 is decreasing with
@@ -704,7 +697,8 @@ return __builtin_nan ("");
   } else {
     rnd = 0;
   }
-  t.u = ((fi.bh>>(11-nz))+((zmath_pi_asinpid_u64)(e-nz)<<52|rnd))|xsign;
+  zmath_pi_asinpid_b64u64_u t = {.u = ((fi.bh>>(11-nz))+
+      ((zmath_pi_asinpid_u64)(e-nz)<<52|rnd))|xsign};
   return t.f;
 }
 
@@ -1633,6 +1627,7 @@ zmath_pi_acospid_accurate_path (double x)
   }
 }
 
+/* The scalar wrapper handles |x| < 0x1.921fbp-54. */
 double
 zmath_core_acospid (double x)
 {
@@ -1643,11 +1638,6 @@ zmath_core_acospid (double x)
   double absx = u.x;
   k = u.i[ZMATH_PI_ACOSPID_HIGH];
   if (k < 0x3fe80000) { /* |x| < 0.75 */
-    // avoid spurious underflow:
-    // for |x| <= 0x1.921fb54442d18p-54, acospi(x) rounds to 0.5 to nearest
-    if (__builtin_expect (k < 0x3c9921fb, 0))
-      // acospi(x) ~ 1/2 - x/pi
-      return __builtin_fma (-0x1p-55, x, 0.5);
     /* approximate acos(x) by p(x-xmid), where [0,0.75) is split
        into 192 sub-intervals */
     v.x = 1.0 + absx; /* 1 <= v.x < 2 */
@@ -2262,6 +2252,24 @@ double zmath_core_atanpid (double x){
 }
 
 typedef union { double f; uint64_t u; } zmath_pi_atan2pid_d64u64;
+#define ZMATH_PI_ATAN2PID_UNRESOLVED_BITS 0x7ff8000000000000ull
+
+static inline double
+zmath_pi_atan2pid_unresolved(void)
+{
+  zmath_pi_atan2pid_d64u64 value = {
+    .u = ZMATH_PI_ATAN2PID_UNRESOLVED_BITS
+  };
+  return value.f;
+}
+
+static inline int
+zmath_pi_atan2pid_is_unresolved(double value)
+{
+  zmath_pi_atan2pid_d64u64 bits = {.f = value};
+  return bits.u == ZMATH_PI_ATAN2PID_UNRESOLVED_BITS;
+}
+
 
 /* Return 2^exponent as an exact normal binary64 value.
    The caller must pass -1022 <= exponent <= 1023. */
@@ -2665,7 +2673,9 @@ zmath_pi_atan2pid_tint_tod (const zmath_pi_atan2pid_tint_t *a, uint64_t err, dou
   if (ex <= -1022) // subnormal case
   {
     int sh = -1021 - ex; // 1 <= sh <= 52
+    uint64_t sticky = (ll << (64 - sh)) != 0;
     ll = (mm << (64 - sh)) | (ll >> sh);
+    ll |= sticky;
     mm = (hh << (64 - sh)) | (mm >> sh);
     hh = hh >> sh;
     low = hh & 0x7ff;
@@ -2793,6 +2803,127 @@ static inline void zmath_pi_atan2pid_div_tint_d (zmath_pi_atan2pid_tint_t *r, do
   zmath_pi_atan2pid_tint_fromd (B, b);
   zmath_pi_atan2pid_div_tint (r, B, A);
 }
+
+/* Fast self-certifying approximation defined below the pinned polynomial table. */
+static inline double __attribute__((always_inline))
+zmath_pi_atan2pid_fast(double y, double x,
+                       uint64_t y_bits, uint64_t x_bits);
+
+/* Normalize a finite pair by one exact power of two and use the double-double
+   path when the ratio and final result remain normal.  The common scaling
+   preserves y/x exactly, so no rounded quotient is fed to atan2pi. */
+static inline int
+zmath_pi_atan2pid_fast_scaled(double y, double x, double *result)
+{
+  zmath_pi_atan2pid_d64u64 uy = {.f = y}, ux = {.f = x};
+  uint64_t ay = uy.u & 0x7fffffffffffffffull;
+  uint64_t ax = ux.u & 0x7fffffffffffffffull;
+  int ey = ay >> 52;
+  int ex = ax >> 52;
+  if (ay == 0 || ax == 0 || ey == 0x7ff || ex == 0x7ff)
+    return 0;
+  int scale_exp = 0;
+  if (ey == 0 || ex == 0) {
+    int normal_exp = ey == 0 ? ex : ey;
+    if (normal_exp > 969)
+      return 0;
+    scale_exp = 1022;
+  } else {
+    int input_gap = ey - ex;
+    /* Keep the original fast_div proof: common scaling does not change
+       the exponent gap, and the endpoint error bound relies on it. */
+    if (input_gap < -341 || input_gap > 341)
+      return 0;
+    int min_exp = ey < ex ? ey : ex;
+    int max_exp = ey > ex ? ey : ex;
+    if (min_exp < 54)
+      scale_exp = 54 - min_exp;
+    else if (max_exp > 2044)
+      scale_exp = 2044 - max_exp;
+  }
+
+  double sy = y;
+  double sx = x;
+  if (scale_exp != 0) {
+    double scale = zmath_pi_atan2pid_pow2_normal(scale_exp);
+    sy *= scale;
+    sx *= scale;
+  }
+  zmath_pi_atan2pid_d64u64 sy_bits = {.f = sy}, sx_bits = {.f = sx};
+  uint64_t sy_abs = sy_bits.u & 0x7fffffffffffffffull;
+  uint64_t sx_abs = sx_bits.u & 0x7fffffffffffffffull;
+  int sy_exp = sy_abs >> 52;
+  int sx_exp = sx_abs >> 52;
+  if (sy_exp < 54 || sy_exp > 2044 ||
+      sx_exp < 54 || sx_exp > 2044)
+    return 0;
+
+  /* The significands lie in [1,2), so this gap bounds the ratio by
+     2^-342 <= |y/x| < 2^342.  The lower bound keeps atan(ratio)/pi
+     normal, so the endpoint error multiplication cannot underflow. */
+  int scaled_gap = sy_exp - sx_exp;
+  if (scaled_gap < -341 || scaled_gap > 341)
+    return 0;
+
+  /* The fast bound encloses the exact result; equal endpoint roundings
+     therefore certify RNE without converting an intermediate quotient. */
+  double candidate = zmath_pi_atan2pid_fast(sy, sx,
+                                            sy_bits.u, sx_bits.u);
+  if (zmath_pi_atan2pid_is_unresolved(candidate))
+    return 0;
+  *result = candidate;
+  return 1;
+}
+
+static inline int
+zmath_pi_atan2pid_sub_error(zmath_pi_atan2pid_tint_t *a, uint64_t error)
+{
+  uint64_t low = a->l;
+  a->l -= error;
+  a->_h -= low < error;
+  return (a->h >> 63) != 0;
+}
+
+static inline int
+zmath_pi_atan2pid_add_error(zmath_pi_atan2pid_tint_t *a, uint64_t error)
+{
+  uint64_t low = a->l;
+  a->l += error;
+  uint64_t carry = a->l < low;
+  zmath_pi_atan2pid_u128 high = a->_h;
+  a->_h += carry;
+  return !carry || a->_h >= high;
+}
+
+static inline int
+zmath_pi_atan2pid_wide_normal(double y, double x, double *result);
+
+/* Certify a normal result or signed zero before the 192-bit subnormal path. */
+static int __attribute__((noinline))
+zmath_pi_atan2pid_wide_small(double y, double x, double *result)
+{
+  if (zmath_pi_atan2pid_wide_normal(y, x, result))
+    return 1;
+
+  zmath_pi_atan2pid_tint_t value[1], lower[1], upper[1];
+  zmath_pi_atan2pid_div_tint_d(value, y, x);
+  zmath_pi_atan2pid_mul_tint(value, value,
+                             &zmath_pi_atan2pid_ONE_OVER_PI);
+  zmath_pi_atan2pid_cp_tint(lower, value);
+  zmath_pi_atan2pid_cp_tint (upper, value);
+  if (!zmath_pi_atan2pid_sub_error(lower, 112) ||
+      !zmath_pi_atan2pid_add_error(upper, 112))
+    return 0;
+
+  double lo = zmath_pi_atan2pid_tint_tod(lower, 1, y, x);
+  double hi = zmath_pi_atan2pid_tint_tod(upper, 1, y, x);
+  zmath_pi_atan2pid_d64u64 blo = {.f = lo}, bhi = {.f = hi};
+  if (blo.u != bhi.u)
+    return 0;
+  *result = lo;
+  return 1;
+}
+
 
 /* Pinned CORE-MATH source: revision 3bafed75e3c22399531857d63a3fa0e24bfb42fa, src/binary64/atan2pi/atan2pi.c. */
 /* Correctly-rounded atan2pi function for two binary64 values.
@@ -3363,25 +3494,70 @@ static inline void zmath_pi_atan2pid_d_mul(double *hi, double *lo, double ah, do
   *lo = __builtin_fma(ah, bl, t);
 }
 
-/* Fast path: return err such that |h + l - atan2pi(y,x)| < err*h.
-   Assumes 2^-969 < |x|, |y| <= 2^1022 and 2^-969 <= |y/x| <= 2^969
-   (conditions needed for fast_div). */
-static double zmath_pi_atan2pid_fast (double *h, double *l, double y, double x)
+/* Requires finite nonzero operands, x > 0, and raw exponent gap <= -97.
+   Normalize before division: fast_div has absolute error < 2^-99.41 on
+   [1,2) operands. Its low part is < 2^-48.999. Multiplication by the split
+   1/pi adds < 2^-102 from the two low-part FMAs, omitted low*low product,
+   and constant error. The combined absolute error is < 2^-100.
+   The normalized atan correction is < 2^(2*gap+3)/(3*pi) < 2^-194.
+   Thus 2^-96 also covers rounding in both interval endpoints. */
+static inline int
+zmath_pi_atan2pid_wide_normal(double y, double x, double *result)
 {
-  zmath_pi_atan2pid_d64u64 vy = {.f = y}, vx = {.f = x};
-  uint64_t ay = vy.u << 1, ax = vx.u << 1;
-  int inv = ay > ax, negx = vx.u >> 63, negz = (vy.u ^ vx.u) >> 63;
+  zmath_pi_atan2pid_d64u64 uy = {.f = y}, ux = {.f = x};
+  uint64_t ay = uy.u & ZMATH_PI_ATAN2PID_MASK;
+  int ey = ay >> 52, ex = ux.u >> 52;
+  int gap = ey - ex;
+  if (ey == 0) {
+    int shift = __builtin_clzll(ay) - 11;
+    ay <<= shift;
+    gap = 1 - ex - shift;
+  }
+  if (gap <= -1075) {
+    /* |atan(y/x)/pi| < (2/pi)*2^gap < 2^-1075. */
+    uy.u &= 0x8000000000000000ull;
+    *result = uy.f;
+    return 1;
+  }
+  zmath_pi_atan2pid_d64u64 my = {
+    .u = (ay & 0xfffffffffffffull) | 0x3ff0000000000000ull
+  }, mx = {
+    .u = (ux.u & 0xfffffffffffffull) | 0x3ff0000000000000ull
+  };
+  double h, l;
+  zmath_pi_atan2pid_fast_div(&h, &l, my.f, mx.f);
+  zmath_pi_atan2pid_d_mul(&h, &l, h, l,
+                         ZMATH_PI_ATAN2PID_ONE_OVER_PI_H,
+                         ZMATH_PI_ATAN2PID_ONE_OVER_PI_L);
+  double left = h + (l - 0x1p-96);
+  double right = h + (l + 0x1p-96);
+  if (left != right)
+    return 0;
+  zmath_pi_atan2pid_d64u64 rounded = {.f = left};
+  int exponent = (int)(rounded.u >> 52) + gap;
+  if (exponent <= 0)
+    return 0;
+  /* Exact power-of-two scaling preserves RNE for normal outputs. At the
+     minimum normal the target rounding cell only grows toward zero. */
+  rounded.u = (rounded.u & 0xfffffffffffffull) |
+              ((uint64_t)exponent << 52) |
+              (uy.u & 0x8000000000000000ull);
+  *result = rounded.f;
+  return 1;
+}
+
+/* Keep the double-double state local through certification. Inlining avoids
+   an extra normal-path call without changing the interval or fallback. */
+static inline double __attribute__((always_inline))
+zmath_pi_atan2pid_fast(double y, double x,
+                       uint64_t y_bits, uint64_t x_bits)
+{
+  double h, l;
+  uint64_t ay = y_bits << 1, ax = x_bits << 1;
+  int inv = ay > ax, negx = x_bits >> 63, negz = (y_bits ^ x_bits) >> 63;
   if (inv) { double t = y; y = x; x = t; }
   // now |y| <= |x|
   double zh, zl;
-  if (__builtin_expect (ax == ay, 0)) { // avoid spurious inexact
-    if (y == x)
-      *h = (x > 0) ? 0.25 : -0.75;
-    else
-      *h = (x > 0) ? -0.25 : 0.75;
-    *l = 0;
-    return 0; // exact
-  }
   zmath_pi_atan2pid_fast_div (&zh, &zl, y, x);
   // for |zh| < 2^e, we have |zl| < 2^(e-48.999)
   /* since |y| <= |x| and fast_div ensures |zl| < 2^-47.999 with relative
@@ -3399,18 +3575,18 @@ static double zmath_pi_atan2pid_fast (double *h, double *l, double y, double x)
   zh -= zmath_pi_atan2pid_Xfast[i];
 #define ZMATH_PI_ATAN2PID_P9 0x1.c6e5d41706f0dp-4 // degree-9 coefficient for i=0
   double z = zh + zl, t;
-  *h = (i == 0) ? __builtin_fma (ZMATH_PI_ATAN2PID_P9, z * z, p[9]) : p[9];
+  h = (i == 0) ? __builtin_fma (ZMATH_PI_ATAN2PID_P9, z * z, p[9]) : p[9];
   for (int j = 6; j >= 2; j--)
-    *h = __builtin_fma (*h, z, p[2+j]); // degree j
+    h = __builtin_fma (h, z, p[2+j]); // degree j
   // degree 1: h + l <- h * (zh + zl) + p[2] + p[3]
-  zmath_pi_atan2pid_s_mul (h, l, *h, zh, zl);
-  zmath_pi_atan2pid_fast_two_sum (h, &t, p[2], *h);
-  *l += t + p[3];
+  zmath_pi_atan2pid_s_mul (&h, &l, h, zh, zl);
+  zmath_pi_atan2pid_fast_two_sum (&h, &t, p[2], h);
+  l += t + p[3];
   // degree 0: h + l <- (h + l) * (zh + zl) + p[0] + p[1]
-  zmath_pi_atan2pid_d_mul (h, l, *h, *l, zh, zl);
+  zmath_pi_atan2pid_d_mul (&h, &l, h, l, zh, zl);
   // for i=0 we have p[0]=0, but fast_two_sum works in that case
-  zmath_pi_atan2pid_fast_two_sum (h, &t, p[0], *h);
-  *l += t + p[1];
+  zmath_pi_atan2pid_fast_two_sum (&h, &t, p[0], h);
+  l += t + p[1];
 
   /* Special error analysis for i=0 (0 < z < 2^-6):
      (1) the routine Err_poly0(71.798,e0=-34,K=8) in atan2.sage shows
@@ -3476,7 +3652,7 @@ static double zmath_pi_atan2pid_fast (double *h, double *l, double y, double x)
 
   // atan2pi_begin
   // divide by pi
-  zmath_pi_atan2pid_d_mul (h, l, *h, *l, ZMATH_PI_ATAN2PID_ONE_OVER_PI_H, ZMATH_PI_ATAN2PID_ONE_OVER_PI_L);
+  zmath_pi_atan2pid_d_mul (&h, &l, h, l, ZMATH_PI_ATAN2PID_ONE_OVER_PI_H, ZMATH_PI_ATAN2PID_ONE_OVER_PI_L);
   /* We had h_in + l_in = atan(y/x) * (1 + eps) with |eps| < eps[i].
      ONE_OVER_PI_H+ONE_OVER_PI_L = 1/pi * (1 + eps2) with |eps2| < 2^-107.871.
      For i=0 we have |l_in| < 2^(e-48.7) [see max_l() in atan2.sage]
@@ -3517,42 +3693,49 @@ static double zmath_pi_atan2pid_fast (double *h, double *l, double y, double x)
   // atan2pi_end
 
   // restore sign
-  *h *= sz;
-  *l *= sz;
+  h *= sz;
+  l *= sz;
 
   // atan2pi_begin
   // now -1/4 < h+l < 1/4
   if (inv)
   {
-    if (!negz)
+    /* For inv && negx, combine the two quadrant translations into
+       c - atan2pi(y/x), where c is -1/2 for !negz and +1/2 for negz.
+       The result has magnitude > 1/2, so this single dd_sum1 stays
+       within the existing 2^-98.912 quadrant error budget. */
+    if (negx)
+      zmath_pi_atan2pid_dd_sum1 (&h, &l, negz ? 0.5 : -0.5, -h, -l);
+    else if (!negz)
       /* if y/x > 0 thus atanpi(y/x) > 0 we apply 1/2 - atanpi(y/x)
          and the result will be in (1/4, 1/2) */
-      zmath_pi_atan2pid_dd_sum1 (h, l, 0.5, -*h, -*l);
-    /* Assume the relative error on h_in+l_in is bounded by eps'[i].
-       Since |h_in+l_in| < 1/4 the absolute error is bounded by eps'[i]/4.
-       Since 0 - l_in is exact, the error on dd_sum1() is bounded by
-       2^-105*|h_out| + ulp(l_out).
-       Now |l_out| < ulp(h_out) + |l_in| <= ulp(h_out) + 2^-47.607*|h_in|
-       [see above] <= ulp(1/2) + 2^-47.607*1/4 < 2^-49.4,
-       thus ulp(l_out) <= 2^-102, and 2^-105*|h_out| < 2^-106.
-       The absolute error is thus bounded by:
-       eps'[i]*1/4 + 2^-106 + 2^-102.
-       Since h_out+l_out>=1/4, the relative error is bounded by:
-       eps'[i] + (2^-106 + 2^-102)/(1/4) < eps'[i] + 2^-99.912. */
+      zmath_pi_atan2pid_dd_sum1 (&h, &l, 0.5, -h, -l);
+    /* The input approximation has |h_in+l_in| < 1/4 and relative error
+       bounded by eps'[i]. Every inv output here has magnitude at least
+       1/4 (the combined inv&&negx output has magnitude > 1/2). Since
+       negating the low part is exact, the dd_sum1 error is bounded by
+       2^-105*|h_out| + ulp(l_out). Now |h_out| < 1 and
+       |l_out| < ulp(h_out) + |l_in| <= ulp(1/2) + 2^-47.607*1/4
+       < 2^-49.4, thus ulp(l_out) <= 2^-102. The absolute error is
+       bounded by eps'[i]/4 + 2^-105 + 2^-102. Since
+       |h_out+l_out| >= 1/4, the relative error is bounded by:
+       eps'[i] + 4 * (2^-105 + 2^-102)
+              < eps'[i] + 2^-99.8 < eps'[i] + 2^-98.912. */
     else
       /* if y/x < 0 thus atanpi(y/x) < 0 we apply -1/2 - atanpi(y/x)
          and the result will be in (-1/2,-1/4) */
       // the same error analysis as above applies: the relative error is
       // bounded by eps'[i] + 2^-99.912
-      zmath_pi_atan2pid_dd_sum1 (h, l, -0.5, -*h, -*l);
+      zmath_pi_atan2pid_dd_sum1 (&h, &l, -0.5, -h, -l);
   }
-  // now -1/2 <= h+l <= 1/2 with error bounded by eps'[i] + 2^-99.912
-  if (negx)
+  // Except for the combined inv&&negx path above, now -1/2 <= h+l <= 1/2
+  // with error bounded by eps'[i] + 2^-99.912
+  if (negx && !inv)
   {
     if (!negz)
       /* 1st quadrant -> 3rd quadrant (subtract 1), and the result
          will be in (-1,-1/2) */
-      zmath_pi_atan2pid_dd_sum1 (h, l, -1.0, *h, *l);
+      zmath_pi_atan2pid_dd_sum1 (&h, &l, -1.0, h, l);
     /* The relative error on h_in+l_in is bounded by eps'[i] + 2^-99.912.
        Since |h_in+l_in| < 1/2 the absolute error is bounded by
        (eps'[i] + 2^-99.912)/2.
@@ -3572,10 +3755,15 @@ static double zmath_pi_atan2pid_fast (double *h, double *l, double y, double x)
          in (1/2,1) */
       // the same error analysis as above applies: the relative error is
       // bounded by eps[i] + 2^-98.912
-      zmath_pi_atan2pid_dd_sum1 (h, l, 1.0, *h, *l);
+      zmath_pi_atan2pid_dd_sum1 (&h, &l, 1.0, h, l);
   }
   // atan2pi_end
-  return zmath_pi_atan2pid_err_fast[i];
+  double err = zmath_pi_atan2pid_err_fast[i];
+  double left = h + __builtin_fma(h, -err, l);
+  double right = h + __builtin_fma(h, +err, l);
+  if (__builtin_expect(left == right, 1))
+    return left;
+  return zmath_pi_atan2pid_unresolved();
 }
 
 static int zmath_pi_atan2pid_special(double y, double x, double *value)
@@ -3619,29 +3807,50 @@ static int zmath_pi_atan2pid_special(double y, double x, double *value)
   return 0;
 }
 
-int zmath_core_atan2pid_checked(double y, double x, double *value)
+
+/* The caller handles zero, nonfinite, and equal-magnitude inputs. */
+double
+zmath_core_atan2pid_finite_bits(double y, double x,
+                                uint64_t y_bits, uint64_t x_bits)
 {
-  zmath_pi_atan2pid_d64u64 uy = {.f = y}, ux = {.f = x};
-  uint64_t ay = uy.u & ZMATH_PI_ATAN2PID_MASK, ax = ux.u & ZMATH_PI_ATAN2PID_MASK;
-  int ey = ay >> 52, ex = ax >> 52;
-
-  if (zmath_pi_atan2pid_special(y, x, value))
-    return 1;
-
-  if (__builtin_expect (54 <= ex && ex <= 2044 && 54 <= ey && ey <= 2044 &&
-                        -341 <= ey - ex && ey - ex <= 341, 1)) {
-    double h, l, err;
-    err = zmath_pi_atan2pid_fast (&h, &l, y, x);
-    double left = h + __builtin_fma (h, -err, l);
-    double right = h + __builtin_fma (h, +err, l);
-    if (__builtin_expect (left == right, 1)) {
-      *value = left;
-      return 1;
+  int ey = (y_bits >> 52) & 0x7ff, ex = (x_bits >> 52) & 0x7ff;
+  int gap = ey - ex;
+  if (gap >= 55) {
+    /* A positive exponent gap implies |y| > |x|. The x-positive side
+       needs one extra bit to round to +/-1/2. */
+    if ((x_bits >> 63) || gap >= 56)
+      return __builtin_copysign(0.5, y);
+  } else if (gap <= -55) {
+    /* A negative exponent gap implies |y| < |x|. */
+    if (x_bits >> 63)
+      return __builtin_copysign(1.0, y);
+    if (gap <= -97) {
+      double result;
+      if (zmath_pi_atan2pid_wide_small(y, x, &result))
+        return result;
     }
   }
 
-  return zmath_pi_atan2pid_accurate(y, x, value);
+  if (__builtin_expect (54 <= ex && ex <= 2044 &&
+                        54 <= ey && ey <= 2044 &&
+                        -341 <= gap && gap <= 341, 1)) {
+    double candidate =
+      zmath_pi_atan2pid_fast(y, x, y_bits, x_bits);
+    if (!zmath_pi_atan2pid_is_unresolved(candidate))
+      return candidate;
+  } else {
+    double result;
+    if (zmath_pi_atan2pid_fast_scaled(y, x, &result))
+      return result;
+  }
+
+  double result;
+  if (zmath_pi_atan2pid_accurate(y, x, &result))
+    return result;
+  return zmath_pi_atan2pid_unresolved();
 }
+
+ 
 
 int zmath_core_atan2pid_forced_ambiguity(double y, double x, double *value)
 {

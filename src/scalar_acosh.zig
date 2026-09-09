@@ -111,7 +111,7 @@ pub fn acoshh(value: f16) f16 {
         return @bitCast(canonical_nan_bits_h);
     }
     if ((bits & 0x8000) != 0 or magnitude < 0x3c00) return @bitCast(canonical_nan_bits_h);
-    if (bits == 0x3c00) return @as(f16, 0.0);
+    if (bits == 0x3c00) return 0.0;
 
     const input: f32 = @floatCast(value);
     const input_squared = input * input;
@@ -291,9 +291,9 @@ fn acoshdMulDoubleDouble(x_high: f64, x_low: f64, c: f64, low: *f64) f64 {
 }
 
 fn acoshdPolynomial(
+    comptime coefficient_count: usize,
     x_high: f64,
     x_low: f64,
-    comptime coefficient_count: usize,
     coefficients: []const [2]f64,
     low: *f64,
 ) f64 {
@@ -333,13 +333,7 @@ fn acoshdOne(x: f64, square_root_high: f64, square_root_low: f64) f64 {
             (acoshd_data.acosh_one_cl[2] + x *
                 (acoshd_data.acosh_one_cl[3] + x *
                     (acoshd_data.acosh_one_cl[4] + x * acoshd_data.acosh_one_cl[5])))));
-    var high = acoshdPolynomial(
-        x,
-        0.0,
-        10,
-        acoshd_data.acosh_one_ch[0..],
-        &low,
-    );
+    var high = acoshdPolynomial(10, x, 0.0, acoshd_data.acosh_one_ch[0..], &low);
     high = acoshdMulDoubleDouble(high, low, x, &low);
     var y1: f64 = undefined;
     var y0 = acoshdFastTwoSum(1.0, high, &y1);
@@ -452,13 +446,7 @@ fn acoshdRefine(x: f64, approximation: f64) f64 {
 
     var series_low = reduced_high * (acoshd_data.refine_cl[0] +
         reduced_high * (acoshd_data.refine_cl[1] + reduced_high * acoshd_data.refine_cl[2]));
-    var series_high = acoshdPolynomial(
-        reduced_high,
-        reduced_low,
-        3,
-        acoshd_data.refine_ch[0..],
-        &series_low,
-    );
+    var series_high = acoshdPolynomial(3, reduced_high, reduced_low, acoshd_data.refine_ch[0..], &series_low);
     series_high = acoshdMulDoubleDoubleAccurate(
         reduced_high,
         reduced_low,
@@ -512,16 +500,16 @@ fn acoshdRefine(x: f64, approximation: f64) f64 {
 pub fn acoshd(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);
-    const magnitude = bits & magnitude_mask_d;
-    if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
-    if (magnitude == infinity_bits_d) {
+    if (bits >= infinity_bits_d) {
+        const magnitude = bits & magnitude_mask_d;
+        if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
         if (bits == infinity_bits_d) return value;
         return @bitCast(canonical_nan_bits_d);
     }
-    if ((bits & 0x8000_0000_0000_0000) != 0 or magnitude < 0x3ff0_0000_0000_0000) {
+    if (bits <= 0x3ff0_0000_0000_0000) {
+        if (bits == 0x3ff0_0000_0000_0000) return 0.0;
         return @bitCast(canonical_nan_bits_d);
     }
-    if (bits == 0x3ff0_0000_0000_0000) return 0.0;
 
     var approximation: f64 = undefined;
     var error_bound: f64 = undefined;
@@ -547,10 +535,18 @@ pub fn acoshd(value: f64) f64 {
         };
         const z_squared = z * z;
         const z_fourth = z_squared * z_squared;
-        const polynomial = coefficients[0] + z * (((coefficients[1] + z * coefficients[2]) +
-            z_squared * (coefficients[3] + z * coefficients[4])) +
-            z_fourth * ((coefficients[5] + z * coefficients[6]) +
-                z_squared * (coefficients[7] + z * coefficients[8])));
+        const coefficient_1 = @mulAdd(f64, z, coefficients[2], coefficients[1]);
+        const coefficient_3 = @mulAdd(f64, z, coefficients[4], coefficients[3]);
+        const coefficient_5 = @mulAdd(f64, z, coefficients[6], coefficients[5]);
+        const coefficient_7 = @mulAdd(f64, z, coefficients[8], coefficients[7]);
+        const first = @mulAdd(f64, z_squared, coefficient_3, coefficient_1);
+        const second = @mulAdd(f64, z_squared, coefficient_7, coefficient_5);
+        const polynomial = @mulAdd(
+            f64,
+            z,
+            @mulAdd(f64, z_fourth, second, first),
+            coefficients[0],
+        );
         const delta = @mulAdd(f64, square_root_high * z, polynomial, square_root_low);
         const epsilon = delta * 0x1.00p-50 - 0x1p-104 * square_root_high;
         const lower = square_root_high + (delta - epsilon);
@@ -582,9 +578,17 @@ pub fn acoshd(value: f64) f64 {
             -0x1.aab6691f2bae7p-5,
         };
         const inverse_squared = 1.0 / (value * value);
-        approximation = coefficients[0] + inverse_squared *
-            (coefficients[1] + inverse_squared *
-                (coefficients[2] + inverse_squared * coefficients[3]));
+        approximation = @mulAdd(
+            f64,
+            inverse_squared,
+            @mulAdd(
+                f64,
+                inverse_squared,
+                @mulAdd(f64, inverse_squared, coefficients[3], coefficients[2]),
+                coefficients[1],
+            ),
+            coefficients[0],
+        );
         error_bound = 0x1.c3p-63;
     } else if (bits < 0x40e0_1000_0000_0000) {
         const coefficients = [_]f64{
@@ -593,8 +597,12 @@ pub fn acoshd(value: f64) f64 {
             -0x1.8000268641bfep-4,
         };
         const inverse_squared = 1.0 / (value * value);
-        approximation = coefficients[0] + inverse_squared *
-            (coefficients[1] + inverse_squared * coefficients[2]);
+        approximation = @mulAdd(
+            f64,
+            inverse_squared,
+            @mulAdd(f64, inverse_squared, coefficients[2], coefficients[1]),
+            coefficients[0],
+        );
         error_bound = 0x1.9ap-63;
     } else if (bits < 0x41ea_0000_0000_0000) {
         const coefficients = [_]f64{
@@ -602,7 +610,7 @@ pub fn acoshd(value: f64) f64 {
             -0x1.000000017d048p-2,
         };
         const inverse_squared = 1.0 / (value * value);
-        approximation = coefficients[0] + inverse_squared * coefficients[1];
+        approximation = @mulAdd(f64, inverse_squared, coefficients[1], coefficients[0]);
         error_bound = 0x1.99p-63;
     } else {
         approximation = 0.0;
@@ -625,14 +633,19 @@ pub fn acoshd(value: f64) f64 {
         acoshd_data.r2[interpolation_index_2];
     const delta = @mulAdd(f64, reciprocal, normalized, -1.0);
     const delta_squared = delta * delta;
-    const log_correction = delta_squared *
-        ((acoshd_data.log_poly[0] + delta * acoshd_data.log_poly[1]) +
-            delta_squared * ((acoshd_data.log_poly[2] + delta * acoshd_data.log_poly[3]) +
-                delta_squared * acoshd_data.log_poly[4]));
+    const first = @mulAdd(f64, delta, acoshd_data.log_poly[1], acoshd_data.log_poly[0]);
+    const second = @mulAdd(f64, delta, acoshd_data.log_poly[3], acoshd_data.log_poly[2]);
+    const tail = @mulAdd(f64, delta_squared, acoshd_data.log_poly[4], second);
+    const log_correction = delta_squared * @mulAdd(f64, delta_squared, tail, first);
     const log_two_high = 0x1.62e42fefa38p-1;
     const log_two_low = 0x1.ef35793c7673p-45;
-    const logarithm_high = (acoshd_data.l1[interpolation_index_1][1] +
-        acoshd_data.l2[interpolation_index_2][1]) + log_two_high * exponent_float;
+    const logarithm_high = @mulAdd(
+        f64,
+        log_two_high,
+        exponent_float,
+        acoshd_data.l1[interpolation_index_1][1] +
+            acoshd_data.l2[interpolation_index_2][1],
+    );
     const logarithm_low = log_two_low * exponent_float +
         (acoshd_data.l1[interpolation_index_1][0] + acoshd_data.l2[interpolation_index_2][0]);
     const logarithm_correction = log_correction + logarithm_low;

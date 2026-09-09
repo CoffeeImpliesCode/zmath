@@ -106,7 +106,6 @@ pub fn fma(a: anytype, b: anytype, c: anytype) @TypeOf(a) {
     @compileError("zmath.fma supports only f16, f32, and f64");
 }
 
-/// Computes 10 raised to `value` with the scalar implementation for its type.
 /// Computes the complementary error function of `value` with the scalar implementation
 /// for its type.
 ///

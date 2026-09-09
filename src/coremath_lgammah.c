@@ -107,8 +107,9 @@ _Float16 zmath_core_lgammah (_Float16 xf16, int *sign_out){
       errno = ERANGE;
 #endif
       t.f = x;
-      // gamma(+0) = +Inf, gamma(-0) = -Inf
-      if(!(t.u<<1)) *sign_out = 1 - 2*(t.u >> 31);
+      // gamma(+0) = +Inf with sign +1; -0 and every negative integer pole
+      // carry gamma sign -1. Upstream left the pole sign at +1.
+      *sign_out = 1 - 2*(t.u >> 31);
       return 1.0f/0.0f;
     }
     if(x==1.0f || x==2.0f) {

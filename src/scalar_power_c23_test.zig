@@ -106,6 +106,9 @@ test "pown and rootn apply ordered NaN and identity rules" {
 
     const pown_f_snan = power.pownf(common.F.fromBits(0x7f80_0123), 4);
     try std.testing.expectEqual(@as(u32, 0x7fc0_0123), common.F.toBits(pown_f_snan.value));
+    const pown_f_snan_one = power.pownf(common.F.fromBits(0x7f80_0123), 1);
+    try std.testing.expect(pown_f_snan_one.ok);
+    try std.testing.expectEqual(@as(u32, 0x7fc0_0123), common.F.toBits(pown_f_snan_one.value));
     const pown_d_snan = power.pownd(common.D.fromBits(0x7ff0_0000_0000_0123), 4);
     try std.testing.expectEqual(@as(u64, 0x7ff8_0000_0000_0123), common.D.toBits(pown_d_snan.value));
 
@@ -116,6 +119,9 @@ test "pown and rootn apply ordered NaN and identity rules" {
     try std.testing.expectEqual(@as(u32, 0x7fc0_0000), common.F.toBits(root_f_zero.value));
     const root_d_zero = power.rootnd(common.D.fromBits(0x7ff0_0000_0000_0123), 0);
     try std.testing.expectEqual(@as(u64, 0x7ff8_0000_0000_0000), common.D.toBits(root_d_zero.value));
+    const root_h_snan_one = power.rootnh(common.H.fromBits(0x7d55), 1);
+    try std.testing.expect(root_h_snan_one.ok);
+    try std.testing.expectEqual(@as(u16, 0x7f55), common.H.toBits(root_h_snan_one.value));
 }
 
 test "bounded pown covers subnormal bases reciprocal powers halfway cases and 64" {
@@ -136,6 +142,21 @@ test "bounded pown covers subnormal bases reciprocal powers halfway cases and 64
     try expectPownD(0x4000_0000_0000_0000, 64, 0x43f0_0000_0000_0000);
     try expectPownD(0x3fe0_0000_0000_0000, 64, 0x3bf0_0000_0000_0000);
     try expectPownD(0x3ff0_0000_0000_0001, 2, 0x3ff0_0000_0000_0002);
+}
+
+test "finite power identities preserve signs and round squares only once" {
+    try expectPownH(0xbc01, 1, 0xbc01);
+    try expectPownF(0xbf80_0001, 1, 0xbf80_0001);
+    try expectPownD(0xbff0_0000_0000_0001, 1, 0xbff0_0000_0000_0001);
+    try expectPownH(0xbc00, -63, 0xbc00);
+    try expectPownF(0x3f80_0000, -64, 0x3f80_0000);
+    try expectPownD(0xbff0_0000_0000_0000, 64, 0x3ff0_0000_0000_0000);
+    try expectPownH(0x9400, 2, 0x0010);
+    try expectPownF(0x1f80_0000, 2, 0x0020_0000);
+    try expectPownD(0x1ff0_0000_0000_0000, 2, 0x0004_0000_0000_0000);
+    try expectPownH(0xfbff, 2, 0x7c00);
+    try expectPownF(0xff7f_ffff, 2, 0x7f80_0000);
+    try expectPownD(0xffef_ffff_ffff_ffff, 2, 0x7ff0_0000_0000_0000);
 }
 
 test "bounded pown rejects both range boundaries with canonical quiet NaN" {
@@ -167,6 +188,8 @@ test "compoundn expands one plus x exactly before rounding" {
     try expectCompoundH(0x3c00, -3, 0x3000);
     try expectCompoundH(0xbc00, 3, 0x0000);
     try expectCompoundH(0xbc00, -3, 0x7c00);
+    try expectCompoundH(0xbbff, 2, 0x0004);
+    try expectCompoundH(0x7bff, -1, 0x0100);
     try expectCompoundH(0x7c00, 3, 0x7c00);
     try expectCompoundH(0x7c00, -3, 0x0000);
 
@@ -176,6 +199,27 @@ test "compoundn expands one plus x exactly before rounding" {
 
     try expectCompoundD(0x3ca0_0000_0000_0000, 2, 0x3ff0_0000_0000_0001);
     try expectCompoundD(0x3ff0_0000_0000_0000, -64, 0x3bf0_0000_0000_0000);
+}
+
+test "tiny compound bases round to one but the degree-limit boundary does not" {
+    try expectCompoundH(0x0020, 64, 0x3c00);
+    try expectCompoundH(0x8020, 64, 0x3c00);
+    try expectCompoundH(0x0020, -64, 0x3c00);
+    try expectCompoundH(0x8020, -64, 0x3c00);
+    try expectCompoundH(0x8080, 64, 0x3bff);
+    try expectCompoundH(0x8080, -64, 0x3c01);
+    try expectCompoundF(0x2f80_0000, 64, 0x3f80_0000);
+    try expectCompoundF(0xaf80_0000, 64, 0x3f80_0000);
+    try expectCompoundF(0x2f80_0000, -64, 0x3f80_0000);
+    try expectCompoundF(0xaf80_0000, -64, 0x3f80_0000);
+    try expectCompoundF(0xb080_0000, 64, 0x3f7f_ffff);
+    try expectCompoundF(0xb080_0000, -64, 0x3f80_0001);
+    try expectCompoundD(0x3c20_0000_0000_0000, 64, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0xbc20_0000_0000_0000, 64, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0x3c20_0000_0000_0000, -64, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0xbc20_0000_0000_0000, -64, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0xbc40_0000_0000_0000, 64, 0x3fef_ffff_ffff_ffff);
+    try expectCompoundD(0xbc40_0000_0000_0000, -64, 0x3ff0_0000_0000_0001);
 }
 
 test "compoundn preserves domain and NaN precedence and rejects 65" {
@@ -188,6 +232,9 @@ test "compoundn preserves domain and NaN precedence and rejects 65" {
     const h_invalid = power.compoundnh(common.H.fromBits(0x0000), 65);
     try std.testing.expect(!h_invalid.ok);
     try std.testing.expectEqual(@as(u16, 0x7e00), common.H.toBits(h_invalid.value));
+    const h_tiny_invalid = power.compoundnh(common.H.fromBits(0x0020), 65);
+    try std.testing.expect(!h_tiny_invalid.ok);
+    try std.testing.expectEqual(@as(u16, 0x7e00), common.H.toBits(h_tiny_invalid.value));
 
     const f_invalid = power.compoundnf(0.0, -65);
     try std.testing.expect(!f_invalid.ok);
@@ -222,6 +269,50 @@ test "rootn compares exact candidate powers for odd negatives reciprocal roots a
     try expectRootH(0x6692, 3, 0x49f2);
     try expectRootF(0x77b8_902c, 3, 0x5236_3168);
     try expectRootD(0x2889_000d_ce03_d28f, 3, 0x3822_9100_14a0_721d);
+}
+
+test "binary64 rootn returns the certified estimate bracket for every degree" {
+    // Each expected result comes from an exact half-ulp comparison of the
+    // candidate power with the input, so a proposal that the exact comparisons
+    // cannot certify must fall back to the search and still round once.
+    try expectRootD(0x3ff0_0000_0000_0001, 64, 0x3ff0_0000_0000_0000);
+    try expectRootD(0x3ff0_0000_0000_0002, 64, 0x3ff0_0000_0000_0000);
+    try expectRootD(0x3fef_ffff_ffff_ffff, 64, 0x3ff0_0000_0000_0000);
+    try expectRootD(0x3ff8_0000_0000_0000, 3, 0x3ff2_50bf_e1b0_82f5);
+    try expectRootD(0x4000_0000_0000_0000, 64, 0x3ff0_2c9a_3e77_8061);
+    try expectRootD(0x4000_0000_0000_0000, 2, 0x3ff6_a09e_667f_3bcd);
+    try expectRootD(0x4008_0000_0000_0000, 3, 0x3ff7_1374_4912_3ef6);
+    try expectRootD(0x4008_0000_0000_0000, -63, 0x3fef_7262_465b_163e);
+    try expectRootD(0x4000_0000_0000_0000, -64, 0x3fef_a7c1_819e_90d8);
+    try expectRootD(0x3ff8_0000_0000_0000, -3, 0x3feb_f45f_04ce_f0b9);
+    try expectRootD(0x7fef_ffff_ffff_ffff, 64, 0x40f0_0000_0000_0000);
+    try expectRootD(0x0000_0000_0000_0001, 64, 0x3ee2_9e9d_f51f_dee1);
+    try expectRootD(0x0000_0000_0000_0001, -64, 0x40fb_7f76_f2fb_5e47);
+    try expectRootD(0x0000_0000_0000_0001, -2, 0x6180_0000_0000_0000);
+}
+
+test "degree-one roots preserve finite bits and negative-one roots remain reciprocal" {
+    try expectRootH(0x0001, 1, 0x0001);
+    try expectRootH(0xbc01, 1, 0xbc01);
+    try expectRootH(0xc000, -1, 0xb800);
+    try expectRootF(0x0000_0001, 1, 0x0000_0001);
+    try expectRootF(0xbf80_0001, 1, 0xbf80_0001);
+    try expectRootF(0xc000_0000, -1, 0xbf00_0000);
+    try expectRootD(0x0000_0000_0000_0001, 1, 0x0000_0000_0000_0001);
+    try expectRootD(0xbff0_0000_0000_0001, 1, 0xbff0_0000_0000_0001);
+    try expectRootD(0xc000_0000_0000_0000, -1, 0xbfe0_0000_0000_0000);
+    try expectRootH(0xbc00, -63, 0xbc00);
+    try expectRootF(0x3f80_0000, -64, 0x3f80_0000);
+    try expectRootD(0xbff0_0000_0000_0000, 63, 0xbff0_0000_0000_0000);
+}
+
+test "reciprocal roots bracket the subnormal and overflow endpoints" {
+    try expectRootH(0x7bff, -1, 0x0100);
+    try expectRootH(0x0001, -1, 0x7c00);
+    try expectRootF(0x7f7f_ffff, -1, 0x0020_0000);
+    try expectRootF(0x0000_0001, -1, 0x7f80_0000);
+    try expectRootD(0x7fef_ffff_ffff_ffff, -1, 0x0004_0000_0000_0000);
+    try expectRootD(0x0000_0000_0000_0001, -1, 0x7ff0_0000_0000_0000);
 }
 
 test "rootn preserves exceptional values and exact degree bound" {

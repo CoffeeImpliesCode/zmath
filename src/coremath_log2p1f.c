@@ -39,24 +39,9 @@ SOFTWARE.
 typedef union {float f; uint32_t u;} b32u32_u;
 typedef union {double f; uint64_t u;} b64u64_u;
 
-static __attribute__((noinline)) float as_special(float x){
-  b32u32_u t = {.f = x};
-  uint32_t ux = t.u, ax = ux<<1;
-  if(ux == 0xbf800000u){ // x = -1.0
-#ifdef CORE_MATH_SUPPORT_ERRNO
-    errno = ERANGE;
-#endif
-    return -1.0f/0.0f; // to raise FE_DIVBYZERO
-  }
-  if(ux == 0x7f800000u) return x; // +inf
-  if(ax  > 0xff000000u) return x + x; // nan
-#ifdef CORE_MATH_SUPPORT_ERRNO
-  errno = EDOM;
-#endif
-  return 0.0f/0.0f; // to raise FE_INVALID and return nan
-}
 
-float cr_log2p1f(float x) {
+/* The Zig wrapper has checked that x is finite and x > -1. */
+float zmath_core_log2p1f_finite (float x) {
   static const struct {b32u32_u x; float f, df;} tb[] = {
     {{.f = 0x1.7a13c6p+30}, 0x1.e90026p+4, 0x1p-21},
     {{.f = -0x1.da285cp-5}, -0x1.60549p-4, 0x1p-29},
@@ -108,13 +93,11 @@ float cr_log2p1f(float x) {
   static const double g[] = {
     0x1.4ae0bf64f73a1p-26, -0x1.71547652b82fap-1, 0x1.ec709dc3bd7dep-2, -0x1.71547652e6faap-2,
     0x1.2776c0ff5c16ep-2, -0x1.ec70942dfbb5bp-3, 0x1.a673c6b6e2fa3p-3, -0x1.71b0db8113c46p-3};
-
   double z = x;
   b32u32_u t = {.f = x};
   uint32_t ux = t.u;
-  if(__builtin_expect(ux >= 0xbf800000u, 0)) return as_special(x); // x<=-1, x=-inf, x=-nan
-  uint32_t ax = ux&(~0u>>1);
-  if(__builtin_expect(ax >= 0x7f800000u, 0)) return as_special(x); // x=+inf, x=+nan
+  uint32_t ax = ux & (~0u >> 1);
+
   if(__builtin_expect(ax <  0x3cc00000u, 0)){ // |x|<0.0234375
     if(__builtin_expect(ax <= 0x58b90bu, 0)){ // |x|<=0x1-126*ln(2)
       if(ax==0) return x; // log2p1(-0.0) = -0.0 and log2p1(+0.0) = +0.0
@@ -149,3 +132,4 @@ float cr_log2p1f(float x) {
   lb = f;
   return lb;
 }
+

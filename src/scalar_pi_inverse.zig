@@ -6,10 +6,11 @@
 
 const common = @import("scalar_c23_common.zig");
 const c23 = @import("scalar_c23_types.zig");
+const tiny = @import("scalar_tiny.zig");
 
 extern fn zmath_core_asinpih(value: f16) callconv(.c) f16;
 extern fn zmath_core_asinpif(value: f32) callconv(.c) f32;
-extern fn zmath_core_asinpid(value: f64) callconv(.c) f64;
+extern fn zmath_core_asinpid_finite_bits(value: f64, bits: u64) callconv(.c) f64;
 extern fn zmath_core_acospih(value: f16) callconv(.c) f16;
 extern fn zmath_core_acospif(value: f32) callconv(.c) f32;
 extern fn zmath_core_acospid(value: f64) callconv(.c) f64;
@@ -18,7 +19,12 @@ extern fn zmath_core_atanpif(value: f32) callconv(.c) f32;
 extern fn zmath_core_atanpid(value: f64) callconv(.c) f64;
 extern fn zmath_core_atan2pih(y: f16, x: f16) callconv(.c) f16;
 extern fn zmath_core_atan2pif(y: f32, x: f32) callconv(.c) f32;
-extern fn zmath_core_atan2pid_checked(y: f64, x: f64, value: *f64) callconv(.c) c_int;
+extern fn zmath_core_atan2pid_finite_bits(
+    y: f64,
+    x: f64,
+    y_bits: u64,
+    x_bits: u64,
+) callconv(.c) f64;
 extern fn zmath_core_atan2pid_forced_ambiguity(
     y: f64,
     x: f64,
@@ -43,6 +49,7 @@ const one_result_bits_f: u32 = 0x3f80_0000;
 
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;
 const magnitude_mask_d: u64 = 0x7fff_ffff_ffff_ffff;
+const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
 const one_bits_d: u64 = 0x3ff0_0000_0000_0000;
 const quarter_bits_d: u64 = 0x3fd0_0000_0000_0000;
 const half_bits_d: u64 = 0x3fe0_0000_0000_0000;
@@ -103,11 +110,8 @@ pub fn asinpif(value: f32) f32 {
     const bits = common.F.toBits(value);
     const magnitude = bits & magnitude_mask_f;
     if (common.F.isNaNBits(bits)) return common.F.fromBits(common.F.quietNaNBits(bits));
-    if (common.F.isInfinityBits(bits)) return common.F.canonicalNaN();
-    if (magnitude > one_bits_f) return common.F.canonicalNaN();
-    if (common.F.isZeroBits(bits)) return value;
-    if (magnitude == one_bits_f) return signedF(half_bits_f, bits);
-    return zmath_core_asinpif(value);
+    if (magnitude <= one_bits_f) return zmath_core_asinpif(value);
+    return common.F.canonicalNaN();
 }
 
 /// Return asin(x) / pi for binary64.
@@ -117,12 +121,19 @@ pub fn asinpid(value: f64) f64 {
     @setFloatMode(.strict);
     const bits = common.D.toBits(value);
     const magnitude = bits & magnitude_mask_d;
-    if (common.D.isNaNBits(bits)) return common.D.fromBits(common.D.quietNaNBits(bits));
-    if (common.D.isInfinityBits(bits)) return common.D.canonicalNaN();
-    if (magnitude > one_bits_d) return common.D.canonicalNaN();
-    if (common.D.isZeroBits(bits)) return value;
-    if (magnitude == one_bits_d) return signedD(half_bits_d, bits);
-    return zmath_core_asinpid(value);
+    if (magnitude >= one_bits_d) {
+        if (magnitude == one_bits_d) return signedD(half_bits_d, bits);
+        if (common.D.isNaNBits(bits)) {
+            return common.D.fromBits(common.D.quietNaNBits(bits));
+        }
+        return common.D.canonicalNaN();
+    }
+    if (magnitude < tiny.magnitude_limit) {
+        // For this range, |asin(x) - x| / pi < |x|^3 < |x| * 2^-2042.
+        // This is smaller than the extra |x| * 2^-128 remainder accepted by scale().
+        return tiny.scale(.inv_pi, value);
+    }
+    return zmath_core_asinpid_finite_bits(value, bits);
 }
 
 /// Return acos(x) / pi for binary16.
@@ -168,10 +179,11 @@ pub fn acospid(value: f64) f64 {
     @setFloatMode(.strict);
     const bits = common.D.toBits(value);
     const magnitude = bits & magnitude_mask_d;
+    // For |x| < 0x1.921fbp-54, acos(x)/pi rounds to 0.5, including both zeros.
+    if (magnitude < 0x3c99_21fb_0000_0000) return @bitCast(half_bits_d);
     if (common.D.isNaNBits(bits)) return common.D.fromBits(common.D.quietNaNBits(bits));
     if (common.D.isInfinityBits(bits)) return common.D.canonicalNaN();
     if (magnitude > one_bits_d) return common.D.canonicalNaN();
-    if (common.D.isZeroBits(bits)) return @bitCast(half_bits_d);
     if (magnitude == one_bits_d) {
         if ((bits & sign_mask_d) == 0) return @bitCast(@as(u64, 0x0000_0000_0000_0000));
         return @bitCast(one_result_bits_d);
@@ -199,11 +211,7 @@ pub fn atanpih(value: f16) f16 {
 pub fn atanpif(value: f32) f32 {
     @setFloatMode(.strict);
     const bits = common.F.toBits(value);
-    const magnitude = bits & magnitude_mask_f;
     if (common.F.isNaNBits(bits)) return common.F.fromBits(common.F.quietNaNBits(bits));
-    if (common.F.isZeroBits(bits)) return value;
-    if (common.F.isInfinityBits(bits)) return signedF(half_bits_f, bits);
-    if (magnitude == one_bits_f) return signedF(quarter_bits_f, bits);
     return zmath_core_atanpif(value);
 }
 
@@ -215,9 +223,11 @@ pub fn atanpid(value: f64) f64 {
     const bits = common.D.toBits(value);
     const magnitude = bits & magnitude_mask_d;
     if (common.D.isNaNBits(bits)) return common.D.fromBits(common.D.quietNaNBits(bits));
-    if (common.D.isZeroBits(bits)) return value;
-    if (common.D.isInfinityBits(bits)) return signedD(half_bits_d, bits);
-    if (magnitude == one_bits_d) return signedD(quarter_bits_d, bits);
+    if (magnitude < tiny.magnitude_limit) {
+        // For this range, |atan(x) - x| / pi < |x|^3 / 3 < |x| * 2^-2043.
+        // This is smaller than the extra |x| * 2^-128 remainder accepted by scale().
+        return tiny.scale(.inv_pi, value);
+    }
     return zmath_core_atanpid(value);
 }
 
@@ -314,35 +324,41 @@ pub fn atan2pif(y: f32, x: f32) c23.Atan2Result(f32) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn atan2pid(y: f64, x: f64) c23.Atan2Result(f64) {
     @setFloatMode(.strict);
-    if (common.D.firstNaN2(y, x)) |nan| return atan2ResolvedD(nan);
-
     const y_bits = common.D.toBits(y);
     const x_bits = common.D.toBits(x);
     const y_magnitude = y_bits & magnitude_mask_d;
     const x_magnitude = x_bits & magnitude_mask_d;
 
-    if (common.D.isInfinityBits(y_bits)) {
-        if (common.D.isInfinityBits(x_bits)) {
-            const magnitude = if ((x_bits & sign_mask_d) == 0)
-                quarter_bits_d
+    if (y_magnitude >= infinity_bits_d or x_magnitude >= infinity_bits_d) {
+        if (y_magnitude > infinity_bits_d) {
+            return atan2ResolvedD(common.D.fromBits(common.D.quietNaNBits(y_bits)));
+        }
+        if (x_magnitude > infinity_bits_d) {
+            return atan2ResolvedD(common.D.fromBits(common.D.quietNaNBits(x_bits)));
+        }
+        if (y_magnitude == infinity_bits_d) {
+            if (x_magnitude == infinity_bits_d) {
+                const magnitude = if ((x_bits & sign_mask_d) == 0)
+                    quarter_bits_d
+                else
+                    three_quarter_bits_d;
+                return atan2ResolvedD(signedD(magnitude, y_bits));
+            }
+            return atan2ResolvedD(signedD(half_bits_d, y_bits));
+        }
+        if ((x_bits & sign_mask_d) == 0) return atan2ResolvedD(signedD(0, y_bits));
+        return atan2ResolvedD(signedD(one_result_bits_d, y_bits));
+    }
+    if (y_magnitude == 0 or x_magnitude == 0) {
+        if (y_magnitude == 0) {
+            const magnitude: u64 = if ((x_bits & sign_mask_d) == 0)
+                0
             else
-                three_quarter_bits_d;
+                one_result_bits_d;
             return atan2ResolvedD(signedD(magnitude, y_bits));
         }
         return atan2ResolvedD(signedD(half_bits_d, y_bits));
     }
-    if (common.D.isInfinityBits(x_bits)) {
-        if ((x_bits & sign_mask_d) == 0) return atan2ResolvedD(signedD(0, y_bits));
-        return atan2ResolvedD(signedD(one_result_bits_d, y_bits));
-    }
-    if (common.D.isZeroBits(y_bits)) {
-        if (common.D.isZeroBits(x_bits) or (x_bits & sign_mask_d) != 0) {
-            const magnitude = if ((x_bits & sign_mask_d) == 0) 0 else one_result_bits_d;
-            return atan2ResolvedD(signedD(magnitude, y_bits));
-        }
-        return atan2ResolvedD(y);
-    }
-    if (common.D.isZeroBits(x_bits)) return atan2ResolvedD(signedD(half_bits_d, y_bits));
     if (y_magnitude == x_magnitude) {
         const magnitude = if ((x_bits & sign_mask_d) == 0)
             quarter_bits_d
@@ -351,10 +367,12 @@ pub fn atan2pid(y: f64, x: f64) c23.Atan2Result(f64) {
         return atan2ResolvedD(signedD(magnitude, y_bits));
     }
 
-    // SAFETY: The C call writes `value` before returning nonzero; zero exits before the read.
-    var value: f64 = undefined;
-    if (zmath_core_atan2pid_checked(y, x, &value) == 0) return atan2UnresolvedD();
-    return atan2ResolvedD(value);
+    // The finite C ABI reserves canonical qNaN for an unresolved result.
+    const value = zmath_core_atan2pid_finite_bits(y, x, y_bits, x_bits);
+    return .{
+        .value = value,
+        .resolved = !common.D.isNaNBits(common.D.toBits(value)),
+    };
 }
 
 pub const testing = struct {

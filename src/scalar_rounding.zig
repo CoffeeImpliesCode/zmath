@@ -10,6 +10,7 @@ const IntegralRound = enum {
 };
 
 const HConfig = struct {
+    const Float = f16;
     const Bits = u16;
     const sign_mask: Bits = 0x8000;
     const exponent_mask: Bits = 0x7c00;
@@ -21,6 +22,7 @@ const HConfig = struct {
 };
 
 const FConfig = struct {
+    const Float = f32;
     const Bits = u32;
     const sign_mask: Bits = 0x8000_0000;
     const exponent_mask: Bits = 0x7f80_0000;
@@ -32,6 +34,7 @@ const FConfig = struct {
 };
 
 const DConfig = struct {
+    const Float = f64;
     const Bits = u64;
     const sign_mask: Bits = 0x8000_0000_0000_0000;
     const exponent_mask: Bits = 0x7ff0_0000_0000_0000;
@@ -42,8 +45,32 @@ const DConfig = struct {
     const maximum_exponent: u32 = 0x7ff;
 };
 
-fn roundBits(comptime Config: type, bits: Config.Bits, mode: IntegralRound) Config.Bits {
+fn roundBits(comptime Config: type, comptime mode: IntegralRound, bits: Config.Bits) Config.Bits {
+    @setFloatMode(.strict);
+
     const magnitude = bits & ~Config.sign_mask;
+    if (mode != .nearest_even) {
+        if (magnitude >= Config.exponent_mask) {
+            if (magnitude > Config.exponent_mask) return bits | Config.quiet_nan_bit;
+            return bits;
+        }
+        if (magnitude == 0) return bits;
+
+        // f16 widens exactly to f32. Nonintegral f16 is below 2^10, so its rounded
+        // integer fits exactly in f16.
+        const NativeFloat = if (Config == HConfig) f32 else Config.Float;
+        const value: NativeFloat = @floatCast(@as(Config.Float, @bitCast(bits)));
+        const rounded: NativeFloat = switch (mode) {
+            .nearest_even => unreachable,
+            .nearest_from_zero => @round(value),
+            .toward_zero => @trunc(value),
+            .toward_positive => @ceil(value),
+            .toward_negative => @floor(value),
+        };
+        return @bitCast(@as(Config.Float, @floatCast(rounded)));
+    }
+
+    // @round breaks ties away from zero; this path keeps nearest-even ties.
     const exponent_field: u32 = @intCast(
         (magnitude & Config.exponent_mask) >> Config.fraction_bits,
     );
@@ -62,13 +89,7 @@ fn roundBits(comptime Config: type, bits: Config.Bits, mode: IntegralRound) Conf
     const fraction_bits_i32: i32 = @intCast(Config.fraction_bits);
 
     if (unbiased_exponent < 0) {
-        const increment = switch (mode) {
-            .nearest_even => unbiased_exponent == -1 and fraction != 0,
-            .nearest_from_zero => unbiased_exponent == -1,
-            .toward_zero => false,
-            .toward_positive => bits & Config.sign_mask == 0,
-            .toward_negative => bits & Config.sign_mask != 0,
-        };
+        const increment = unbiased_exponent == -1 and fraction != 0;
         const one_magnitude: Config.Bits = @as(Config.Bits, @intCast(Config.exponent_bias)) <<
             Config.fraction_bits;
         return (bits & Config.sign_mask) | if (increment) one_magnitude else 0;
@@ -85,15 +106,8 @@ fn roundBits(comptime Config: type, bits: Config.Bits, mode: IntegralRound) Conf
     const truncated = magnitude & ~discarded_mask;
     const unit: Config.Bits = @as(Config.Bits, 1) << shift;
     const half: Config.Bits = unit >> 1;
-    const truncated_integer_lsb = (truncated >> shift) & 1;
-    const increment = switch (mode) {
-        .nearest_even => discarded > half or
-            (discarded == half and truncated_integer_lsb != 0),
-        .nearest_from_zero => discarded >= half,
-        .toward_zero => false,
-        .toward_positive => bits & Config.sign_mask == 0,
-        .toward_negative => bits & Config.sign_mask != 0,
-    };
+    const increment = discarded > half or
+        (discarded == half and ((truncated >> shift) & 1) != 0);
 
     const rounded_magnitude = truncated + if (increment) unit else 0;
     return (bits & Config.sign_mask) | rounded_magnitude;
@@ -101,62 +115,62 @@ fn roundBits(comptime Config: type, bits: Config.Bits, mode: IntegralRound) Conf
 
 pub fn ceilh(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
-    return common.H.fromBits(roundBits(HConfig, bits, .toward_positive));
+    return common.H.fromBits(roundBits(HConfig, .toward_positive, bits));
 }
 
 pub fn ceilf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
-    return common.F.fromBits(roundBits(FConfig, bits, .toward_positive));
+    return common.F.fromBits(roundBits(FConfig, .toward_positive, bits));
 }
 
 pub fn ceild(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
-    return common.D.fromBits(roundBits(DConfig, bits, .toward_positive));
+    return common.D.fromBits(roundBits(DConfig, .toward_positive, bits));
 }
 
 pub fn floorh(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
-    return common.H.fromBits(roundBits(HConfig, bits, .toward_negative));
+    return common.H.fromBits(roundBits(HConfig, .toward_negative, bits));
 }
 
 pub fn floorf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
-    return common.F.fromBits(roundBits(FConfig, bits, .toward_negative));
+    return common.F.fromBits(roundBits(FConfig, .toward_negative, bits));
 }
 
 pub fn floord(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
-    return common.D.fromBits(roundBits(DConfig, bits, .toward_negative));
+    return common.D.fromBits(roundBits(DConfig, .toward_negative, bits));
 }
 
 pub fn trunch(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
-    return common.H.fromBits(roundBits(HConfig, bits, .toward_zero));
+    return common.H.fromBits(roundBits(HConfig, .toward_zero, bits));
 }
 
 pub fn truncf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
-    return common.F.fromBits(roundBits(FConfig, bits, .toward_zero));
+    return common.F.fromBits(roundBits(FConfig, .toward_zero, bits));
 }
 
 pub fn truncd(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
-    return common.D.fromBits(roundBits(DConfig, bits, .toward_zero));
+    return common.D.fromBits(roundBits(DConfig, .toward_zero, bits));
 }
 
 pub fn nearbyinth(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
-    return common.H.fromBits(roundBits(HConfig, bits, .nearest_even));
+    return common.H.fromBits(roundBits(HConfig, .nearest_even, bits));
 }
 
 pub fn nearbyintf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
-    return common.F.fromBits(roundBits(FConfig, bits, .nearest_even));
+    return common.F.fromBits(roundBits(FConfig, .nearest_even, bits));
 }
 
 pub fn nearbyintd(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
-    return common.D.fromBits(roundBits(DConfig, bits, .nearest_even));
+    return common.D.fromBits(roundBits(DConfig, .nearest_even, bits));
 }
 
 pub fn rinth(value: f16) f16 {
@@ -173,17 +187,17 @@ pub fn rintd(value: f64) f64 {
 
 pub fn roundh(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
-    return common.H.fromBits(roundBits(HConfig, bits, .nearest_from_zero));
+    return common.H.fromBits(roundBits(HConfig, .nearest_from_zero, bits));
 }
 
 pub fn roundf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
-    return common.F.fromBits(roundBits(FConfig, bits, .nearest_from_zero));
+    return common.F.fromBits(roundBits(FConfig, .nearest_from_zero, bits));
 }
 
 pub fn roundd(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
-    return common.D.fromBits(roundBits(DConfig, bits, .nearest_from_zero));
+    return common.D.fromBits(roundBits(DConfig, .nearest_from_zero, bits));
 }
 
 pub fn roundevenh(value: f16) f16 {

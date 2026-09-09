@@ -77,3 +77,14 @@ test "sinpi rounds representative ordinary arguments" {
 test "sinpi handles large exact half-integers with odd symmetry" {
     try expectD(0xc267_e73e_5a0f_b000, 0x3ff0_0000_0000_0000);
 }
+
+test "sinpi f64 preserves exact lattice values at the integral cutoff" {
+    try expectD(0x432f_ffff_ffff_ffff, 0xbff0_0000_0000_0000);
+    try expectD(0xc32f_ffff_ffff_ffff, 0x3ff0_0000_0000_0000);
+    try expectD(0x4330_0000_0000_0000, 0x0000_0000_0000_0000);
+    try expectD(0xc330_0000_0000_0000, 0x8000_0000_0000_0000);
+    try expectD(0x4330_0000_0000_0001, 0x0000_0000_0000_0000);
+    try expectD(0xc330_0000_0000_0001, 0x8000_0000_0000_0000);
+    try expectD(0x7fef_ffff_ffff_ffff, 0x0000_0000_0000_0000);
+    try expectD(0xffef_ffff_ffff_ffff, 0x8000_0000_0000_0000);
+}

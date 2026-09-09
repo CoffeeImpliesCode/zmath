@@ -173,12 +173,12 @@ fn sourceBits(comptime source: common.Format, value: anytype) u64 {
 
 pub fn fadd(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         addBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
             false,
         ),
     ));
@@ -186,12 +186,12 @@ pub fn fadd(x: f64, y: f64) f32 {
 
 pub fn fsub(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         addBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
             true,
         ),
     ));
@@ -199,56 +199,56 @@ pub fn fsub(x: f64, y: f64) f32 {
 
 pub fn fmul(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         multiplyBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
         ),
     ));
 }
 
 pub fn fdiv(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         divideBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
         ),
     ));
 }
 
 pub fn ffma(x: f64, y: f64, z: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         fmaBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
-            sourceBits(common.D, z),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
+            sourceBits(common.binary64_format, z),
         ),
     ));
 }
 
 pub fn fsqrt(x: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
-        sqrtBits(common.D, common.F, sourceBits(common.D, x)),
+        common.binary32_format,
+        sqrtBits(common.binary64_format, common.binary32_format, sourceBits(common.binary64_format, x)),
     ));
 }
 
 pub fn f16addf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         addBits(
-            common.F,
-            common.H,
-            sourceBits(common.F, x),
-            sourceBits(common.F, y),
+            common.binary32_format,
+            common.binary16_format,
+            sourceBits(common.binary32_format, x),
+            sourceBits(common.binary32_format, y),
             false,
         ),
     ));
@@ -256,12 +256,12 @@ pub fn f16addf32(x: f32, y: f32) f16 {
 
 pub fn f16subf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         addBits(
-            common.F,
-            common.H,
-            sourceBits(common.F, x),
-            sourceBits(common.F, y),
+            common.binary32_format,
+            common.binary16_format,
+            sourceBits(common.binary32_format, x),
+            sourceBits(common.binary32_format, y),
             true,
         ),
     ));
@@ -269,56 +269,56 @@ pub fn f16subf32(x: f32, y: f32) f16 {
 
 pub fn f16mulf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         multiplyBits(
-            common.F,
-            common.H,
-            sourceBits(common.F, x),
-            sourceBits(common.F, y),
+            common.binary32_format,
+            common.binary16_format,
+            sourceBits(common.binary32_format, x),
+            sourceBits(common.binary32_format, y),
         ),
     ));
 }
 
 pub fn f16divf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         divideBits(
-            common.F,
-            common.H,
-            sourceBits(common.F, x),
-            sourceBits(common.F, y),
+            common.binary32_format,
+            common.binary16_format,
+            sourceBits(common.binary32_format, x),
+            sourceBits(common.binary32_format, y),
         ),
     ));
 }
 
 pub fn f16fmaf32(x: f32, y: f32, z: f32) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         fmaBits(
-            common.F,
-            common.H,
-            sourceBits(common.F, x),
-            sourceBits(common.F, y),
-            sourceBits(common.F, z),
+            common.binary32_format,
+            common.binary16_format,
+            sourceBits(common.binary32_format, x),
+            sourceBits(common.binary32_format, y),
+            sourceBits(common.binary32_format, z),
         ),
     ));
 }
 
 pub fn f16sqrtf32(x: f32) f16 {
     return @bitCast(common.fromBits(
-        common.H,
-        sqrtBits(common.F, common.H, sourceBits(common.F, x)),
+        common.binary16_format,
+        sqrtBits(common.binary32_format, common.binary16_format, sourceBits(common.binary32_format, x)),
     ));
 }
 
 pub fn f16addf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         addBits(
-            common.D,
-            common.H,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary16_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
             false,
         ),
     ));
@@ -326,12 +326,12 @@ pub fn f16addf64(x: f64, y: f64) f16 {
 
 pub fn f16subf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         addBits(
-            common.D,
-            common.H,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary16_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
             true,
         ),
     ));
@@ -339,56 +339,56 @@ pub fn f16subf64(x: f64, y: f64) f16 {
 
 pub fn f16mulf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         multiplyBits(
-            common.D,
-            common.H,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary16_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
         ),
     ));
 }
 
 pub fn f16divf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         divideBits(
-            common.D,
-            common.H,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary16_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
         ),
     ));
 }
 
 pub fn f16fmaf64(x: f64, y: f64, z: f64) f16 {
     return @bitCast(common.fromBits(
-        common.H,
+        common.binary16_format,
         fmaBits(
-            common.D,
-            common.H,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
-            sourceBits(common.D, z),
+            common.binary64_format,
+            common.binary16_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
+            sourceBits(common.binary64_format, z),
         ),
     ));
 }
 
 pub fn f16sqrtf64(x: f64) f16 {
     return @bitCast(common.fromBits(
-        common.H,
-        sqrtBits(common.D, common.H, sourceBits(common.D, x)),
+        common.binary16_format,
+        sqrtBits(common.binary64_format, common.binary16_format, sourceBits(common.binary64_format, x)),
     ));
 }
 
 pub fn f32addf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         addBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
             false,
         ),
     ));
@@ -396,12 +396,12 @@ pub fn f32addf64(x: f64, y: f64) f32 {
 
 pub fn f32subf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         addBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
             true,
         ),
     ));
@@ -409,44 +409,44 @@ pub fn f32subf64(x: f64, y: f64) f32 {
 
 pub fn f32mulf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         multiplyBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
         ),
     ));
 }
 
 pub fn f32divf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         divideBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
         ),
     ));
 }
 
 pub fn f32fmaf64(x: f64, y: f64, z: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
+        common.binary32_format,
         fmaBits(
-            common.D,
-            common.F,
-            sourceBits(common.D, x),
-            sourceBits(common.D, y),
-            sourceBits(common.D, z),
+            common.binary64_format,
+            common.binary32_format,
+            sourceBits(common.binary64_format, x),
+            sourceBits(common.binary64_format, y),
+            sourceBits(common.binary64_format, z),
         ),
     ));
 }
 
 pub fn f32sqrtf64(x: f64) f32 {
     return @bitCast(common.fromBits(
-        common.F,
-        sqrtBits(common.D, common.F, sourceBits(common.D, x)),
+        common.binary32_format,
+        sqrtBits(common.binary64_format, common.binary32_format, sourceBits(common.binary64_format, x)),
     ));
 }

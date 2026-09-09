@@ -29,6 +29,14 @@ fn oneBits(comptime Format: type) Format.Bits {
     @compileError("unsupported C23 scalar format");
 }
 
+fn tinyCompoundLimitBits(comptime Format: type) Format.Bits {
+    // Exactly 2^(-p-8), where p is the destination precision.
+    if (Format == common.H) return 0x0020;
+    if (Format == common.F) return 0x2f80_0000;
+    if (Format == common.D) return 0x3c20_0000_0000_0000;
+    @compileError("unsupported C23 scalar format");
+}
+
 fn signedZero(comptime Format: type, negative: bool) Format.Float {
     const bits: Format.Bits = if (negative) signBits(Format) else 0;
     return Format.fromBits(bits);
@@ -101,6 +109,16 @@ fn pownCore(
         return success(Format, signedZero(Format, negative_result));
     }
 
+    if (exponent == 1) return success(Format, base);
+    if ((base_bits & ~signBits(Format)) == oneBits(Format)) {
+        return success(
+            Format,
+            copySign(Format, 1.0, if (negative_result) signBits(Format) else 0),
+        );
+    }
+    // IEEE multiplication rounds the exact product once in the destination format.
+    if (exponent == 2) return success(Format, base * base);
+
     const magnitude_result = exact.pownFinite(Format, absoluteValue(Format, base), exponent);
     return success(
         Format,
@@ -165,6 +183,8 @@ fn rootnCore(
         return success(Format, signedInfinity(Format, value_negative and odd_exponent));
     }
 
+    if (exponent == 1) return success(Format, value);
+    if ((value_bits & ~signBits(Format)) == oneBits(Format)) return success(Format, value);
     const magnitude_result = exact.rootFinite(Format, absoluteValue(Format, value), exponent);
     return success(Format, copySign(Format, magnitude_result, value_bits));
 }
@@ -199,6 +219,13 @@ fn compoundnCore(
         if (exponent > 0) return success(Format, signedInfinity(Format, false));
         return success(Format, signedZero(Format, false));
     }
+
+    // Let t=2^(-p-8) and |x|<=t. For |n|<=64, both signs and
+    // both exponent directions obey |(1+x)^n-1| <= (1-t)^-64-1.
+    // Bernoulli gives (1-t)^64>=1-64t, hence the error is at most
+    // 64t/(1-64t)<128t=2^(-p-1). This is below the narrower
+    // midpoint immediately below one; the above-one midpoint is 2^-p.
+    if (magnitude_bits <= tinyCompoundLimitBits(Format)) return success(Format, 1.0);
 
     return success(Format, exact.compoundFinite(Format, value, exponent));
 }

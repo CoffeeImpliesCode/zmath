@@ -69,20 +69,12 @@ fn isNanH(bits: u16) bool {
     return (bits & magnitude_mask_h) > infinity_bits_h;
 }
 
-fn isNanF(bits: u32) bool {
-    return (bits & magnitude_mask_f) > infinity_bits_f;
-}
-
 fn isNanD(bits: u64) bool {
     return (bits & magnitude_mask_d) > infinity_bits_d;
 }
 
 fn isSignalingNanH(bits: u16) bool {
     return isNanH(bits) and (bits & quiet_nan_bit_h) == 0;
-}
-
-fn isSignalingNanF(bits: u32) bool {
-    return isNanF(bits) and (bits & quiet_nan_bit_f) == 0;
 }
 
 fn isSignalingNanD(bits: u64) bool {
@@ -111,26 +103,24 @@ fn hypotSpecialH(x_bits: u16, y_bits: u16) ?f16 {
     return null;
 }
 
-fn hypotSpecialF(x_bits: u32, y_bits: u32) ?f32 {
+noinline fn hypotSpecialF(x_bits: u32, y_bits: u32) f32 {
     const x_magnitude = x_bits & magnitude_mask_f;
     const y_magnitude = y_bits & magnitude_mask_f;
+
     const x_nan = x_magnitude > infinity_bits_f;
     const y_nan = y_magnitude > infinity_bits_f;
-    const x_inf = x_magnitude == infinity_bits_f;
-    const y_inf = y_magnitude == infinity_bits_f;
     if (x_nan and y_nan) return quietNanF(x_bits);
     if (x_nan) {
-        if (isSignalingNanF(x_bits)) return quietNanF(x_bits);
-        if (y_inf) return @bitCast(infinity_bits_f);
+        if ((x_bits & quiet_nan_bit_f) == 0) return quietNanF(x_bits);
+        if (y_magnitude == infinity_bits_f) return @bitCast(infinity_bits_f);
         return quietNanF(x_bits);
     }
     if (y_nan) {
-        if (isSignalingNanF(y_bits)) return quietNanF(y_bits);
-        if (x_inf) return @bitCast(infinity_bits_f);
+        if ((y_bits & quiet_nan_bit_f) == 0) return quietNanF(y_bits);
+        if (x_magnitude == infinity_bits_f) return @bitCast(infinity_bits_f);
         return quietNanF(y_bits);
     }
-    if (x_inf or y_inf) return @bitCast(infinity_bits_f);
-    return null;
+    return @bitCast(infinity_bits_f);
 }
 
 fn hypotSpecialD(x_bits: u64, y_bits: u64) ?f64 {
@@ -164,45 +154,40 @@ pub fn hypoth(x: f16, y: f16) f16 {
     const y_bits: u16 = @bitCast(y);
     if (hypotSpecialH(x_bits, y_bits)) |special| return special;
 
-    const x_abs: f16 = @bitCast(x_bits & magnitude_mask_h);
-    const y_abs: f16 = @bitCast(y_bits & magnitude_mask_h);
+    const x_magnitude = x_bits & magnitude_mask_h;
+    const y_magnitude = y_bits & magnitude_mask_h;
+    const larger_bits = @max(x_magnitude, y_magnitude);
+    const smaller_bits = @min(x_magnitude, y_magnitude);
+    const larger: f32 = @floatCast(@as(f16, @bitCast(larger_bits)));
+    const smaller: f32 = @floatCast(@as(f16, @bitCast(smaller_bits)));
+
+    // For n <= m/64, hypot(m, n) - m <= m/8192, below every upper f16 midpoint.
+    // This includes positive zero, subnormals, and the finite-to-infinity boundary.
+    if (smaller * 64.0 <= larger) return @bitCast(larger_bits);
+
+    // Half products are exact in f32; only the sum and square root round.
+    // Eight adjacent f32 values on each side enclose the exact root, including
+    // at binade boundaries. Equal narrowed endpoints certify the f16 result.
+    const root: f32 = @sqrt(larger * larger + smaller * smaller);
+    const root_bits: u32 = @bitCast(root);
+    const lower: f16 = @floatCast(@as(f32, @bitCast(root_bits - 8)));
+    const upper: f16 = @floatCast(@as(f32, @bitCast(root_bits + 8)));
+    if (@as(u16, @bitCast(lower)) == @as(u16, @bitCast(upper))) return lower;
+
+    const x_abs: f16 = @bitCast(x_magnitude);
+    const y_abs: f16 = @bitCast(y_magnitude);
     const x_wide: f64 = @floatCast(x_abs);
     const y_wide: f64 = @floatCast(y_abs);
     return @floatCast(@sqrt(x_wide * x_wide + y_wide * y_wide));
 }
 
-// Correctly rounded binary32 hypot, ported from CORE-MATH
-// src/binary32/hypot/hypotf.c at revision
-// 3bafed75e3c22399531857d63a3fa0e24bfb42fa under the MIT License.
-pub fn hypotf(x: f32, y: f32) f32 {
+noinline fn hypotfRefine(
+    root: f64,
+    squared_sum: f64,
+    x_squared: f64,
+    y_squared: f64,
+) f32 {
     @setFloatMode(.strict);
-    const x_bits: u32 = @bitCast(x);
-    const y_bits: u32 = @bitCast(y);
-    if (hypotSpecialF(x_bits, y_bits)) |special| return special;
-
-    const x_abs: f32 = @bitCast(x_bits & magnitude_mask_f);
-    const y_abs: f32 = @bitCast(y_bits & magnitude_mask_f);
-    const at: f32 = if (x_abs > y_abs) x_abs else y_abs;
-    const ay: f32 = if (x_abs > y_abs) y_abs else x_abs;
-    const xd: f64 = @floatCast(at);
-    const yd: f64 = @floatCast(ay);
-    const x_squared = xd * xd;
-    const y_squared = yd * yd;
-    const squared_sum = x_squared + y_squared;
-
-    if (yd < xd * 0x1.fffffep-13) {
-        return @mulAdd(f32, 0x1p-13, ay, at);
-    }
-
-    const root: f64 = @sqrt(squared_sum);
-    const root_bits: u64 = @bitCast(root);
-    const result: f32 = @floatCast(root);
-    if (root_bits > 0x47ef_ffff_e000_0000) return result;
-    if (((root_bits +% 1) & 0x0fff_ffff) > 2) return result;
-
-    const result_wide: f64 = @floatCast(result);
-    if ((result_wide * result_wide - x_squared) - y_squared == 0.0) return result;
-
     const inverse_squared_sum = 0.5 / squared_sum;
     const squared_sum_error = (x_squared - squared_sum) + y_squared;
     const root_inverse = root * inverse_squared_sum;
@@ -218,12 +203,51 @@ pub fn hypotf(x: f32, y: f32) f32 {
     return @floatCast(@as(f64, @bitCast(refined_bits)));
 }
 
+// Correctly rounded binary32 hypot, ported from CORE-MATH
+// src/binary32/hypot/hypotf.c at revision
+// 3bafed75e3c22399531857d63a3fa0e24bfb42fa under the MIT License.
+pub fn hypotf(x: f32, y: f32) f32 {
+    @setFloatMode(.strict);
+    const x_bits: u32 = @bitCast(x);
+    const y_bits: u32 = @bitCast(y);
+    const x_magnitude = x_bits & magnitude_mask_f;
+    const y_magnitude = y_bits & magnitude_mask_f;
+    if (@max(x_magnitude, y_magnitude) >= infinity_bits_f) return hypotSpecialF(x_bits, y_bits);
+
+    const xd: f64 = x;
+    const yd: f64 = y;
+    const x_squared = xd * xd;
+    const y_squared = yd * yd;
+    const squared_sum = x_squared + y_squared;
+
+    // Subnormal outputs have subnormal inputs. In units of 2^-149 their
+    // squared sum is an exact integer; its root is more than 2^-27 from
+    // a half-integer, while binary64 rounding is below 2^-30 units.
+    // Thus only normal binary32 midpoints can need refinement.
+
+    const root: f64 = @sqrt(squared_sum);
+    const root_bits: u64 = @bitCast(root);
+    const result: f32 = @floatCast(root);
+    if (root_bits > 0x47ef_ffff_e000_0000) return result;
+    if (((root_bits +% 0x1000_0001) & 0x1fff_ffff) > 2) return result;
+
+    const larger_squared = @max(x_squared, y_squared);
+    const smaller_squared = @min(x_squared, y_squared);
+    const result_wide: f64 = @floatCast(result);
+    if ((result_wide * result_wide - larger_squared) - smaller_squared == 0.0) return result;
+    return hypotfRefine(root, squared_sum, larger_squared, smaller_squared);
+}
+
 fn hypotdDenorm(x_bits: u64, y_bits: u64) f64 {
     @setFloatMode(.strict);
     const x_value: f64 = @floatFromInt(x_bits);
     const y_value: f64 = @floatFromInt(y_bits);
     const approximate_root: f64 = @sqrt(x_value * x_value + y_value * y_value);
-    var root: u64 = @as(u64, @intFromFloat(approximate_root)) << 1;
+    // Both inputs are subnormal significands below 2^52, so the root is
+    // nonnegative and below 2^53. The clamps make that conversion bound explicit.
+    var root: u64 = @as(u64, @intFromFloat(
+        @min(@max(approximate_root, 0.0), 0x1p+53),
+    )) << 1;
     const x_scaled: u128 = @as(u128, x_bits) << 1;
     const y_scaled: u128 = @as(u128, y_bits) << 1;
     const squared_sum: u128 = x_scaled * x_scaled + y_scaled * y_scaled;

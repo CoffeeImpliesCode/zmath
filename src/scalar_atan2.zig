@@ -12,7 +12,7 @@
 const c23 = @import("scalar_c23_types.zig");
 
 extern fn cr_atan2f16(y: f16, x: f16) callconv(.c) f16;
-extern fn cr_atan2f(y: f32, x: f32) callconv(.c) f32;
+extern fn zmath_core_atan2f_finite(y: f32, x: f32) callconv(.c) f32;
 extern fn zmath_core_atan2d_checked(y: f64, x: f64, out: *f64) callconv(.c) c_int;
 extern fn zmath_core_atan2d_forced_ambiguity(y: f64, x: f64, out: *f64) callconv(.c) c_int;
 
@@ -144,59 +144,46 @@ pub fn atan2h(y: f16, x: f16) c23.Atan2Result(f16) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn atan2f(y: f32, x: f32) c23.Atan2Result(f32) {
     @setFloatMode(.strict);
-
     const y_bits: u32 = @bitCast(y);
     const x_bits: u32 = @bitCast(x);
     const y_magnitude = y_bits & magnitude_mask_f;
     const x_magnitude = x_bits & magnitude_mask_f;
+    const finite_nonzero = y_magnitude -% 1 < infinity_bits_f - 1 and
+        x_magnitude -% 1 < infinity_bits_f - 1;
+    return .{
+        .value = if (finite_nonzero)
+            zmath_core_atan2f_finite(y, x)
+        else
+            atan2fSpecial(y_bits, x_bits),
+        .resolved = true,
+    };
+}
 
-    if (y_magnitude > infinity_bits_f) return .{ .value = @bitCast(y_bits | quiet_nan_bit_f), .resolved = true };
-    if (x_magnitude > infinity_bits_f) return .{ .value = @bitCast(x_bits | quiet_nan_bit_f), .resolved = true };
-
+noinline fn atan2fSpecial(y_bits: u32, x_bits: u32) f32 {
+    const y_magnitude = y_bits & magnitude_mask_f;
+    const x_magnitude = x_bits & magnitude_mask_f;
+    if (y_magnitude > infinity_bits_f) return @bitCast(y_bits | quiet_nan_bit_f);
+    if (x_magnitude > infinity_bits_f) return @bitCast(x_bits | quiet_nan_bit_f);
     if (y_magnitude == infinity_bits_f) {
         if (x_magnitude == infinity_bits_f) {
-            return .{
-                .value = if ((x_bits & sign_mask_f) != 0)
-                    signedF(three_pi_over_four_bits_f, y_bits)
-                else
-                    signedF(pi_over_four_bits_f, y_bits),
-                .resolved = true,
-            };
+            return signedF(if ((x_bits & sign_mask_f) != 0)
+                three_pi_over_four_bits_f
+            else
+                pi_over_four_bits_f, y_bits);
         }
-        return .{ .value = signedF(pi_over_two_bits_f, y_bits), .resolved = true };
+        return signedF(pi_over_two_bits_f, y_bits);
     }
-
     if (x_magnitude == infinity_bits_f) {
-        return .{
-            .value = if ((x_bits & sign_mask_f) != 0)
-                signedF(pi_bits_f, y_bits)
-            else
-                @bitCast(y_bits & sign_mask_f),
-            .resolved = true,
-        };
+        return if ((x_bits & sign_mask_f) != 0)
+            signedF(pi_bits_f, y_bits)
+        else
+            @bitCast(y_bits & sign_mask_f);
     }
-
     if (y_magnitude == 0) {
-        if (x_magnitude == 0) {
-            return .{
-                .value = if ((x_bits & sign_mask_f) != 0)
-                    signedF(pi_bits_f, y_bits)
-                else
-                    y,
-                .resolved = true,
-            };
-        }
-        return .{
-            .value = if ((x_bits & sign_mask_f) != 0)
-                signedF(pi_bits_f, y_bits)
-            else
-                y,
-            .resolved = true,
-        };
+        return if ((x_bits & sign_mask_f) != 0) signedF(pi_bits_f, y_bits) else @bitCast(y_bits);
     }
-
-    if (x_magnitude == 0) return .{ .value = signedF(pi_over_two_bits_f, y_bits), .resolved = true };
-    return .{ .value = cr_atan2f(y, x), .resolved = true };
+    if (x_magnitude != 0) unreachable;
+    return signedF(pi_over_two_bits_f, y_bits);
 }
 
 /// Return an `Atan2Result(f64)` for correctly rounded atan2(y, x).

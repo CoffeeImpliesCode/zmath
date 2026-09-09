@@ -29,6 +29,7 @@
 // Correct rounding requires the caller to use round-to-nearest, ties-to-even.
 
 const data = @import("scalar_exp2m1d_data.zig");
+const tiny_scale = @import("scalar_tiny.zig");
 
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
 const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
@@ -39,15 +40,20 @@ const ln2_low: f64 = 0x1.abc9e3b39803fp-56;
 const DoubleDouble = struct { high: f64, low: f64 };
 const FastResult = struct { value: DoubleDouble, error_bound: f64 };
 
-fn roundEvenFinite(value: f64) f64 {
+const Rounded = struct { value: f64, integer: i64 };
+
+fn roundEvenFinite(value: f64) Rounded {
     @setFloatMode(.strict);
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_float: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_float;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) return @floatFromInt(truncated + 1);
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) return @floatFromInt(truncated - 1);
-    return truncated_float;
+
+    // All callers bound |value| below 2^23. The biased encoding gives both
+    // the rounded value and its exact signed integer without a checked cast.
+    const rounding_constant: f64 = 0x1.8p52;
+    const biased = value + rounding_constant;
+    const biased_bits: u64 = @bitCast(biased);
+    return .{
+        .value = biased - rounding_constant,
+        .integer = @bitCast(biased_bits -% 0x4338_0000_0000_0000),
+    };
 }
 
 fn aMul(a: f64, b: f64) DoubleDouble {
@@ -95,14 +101,16 @@ fn q1(zh: f64, zl: f64) DoubleDouble {
     return fastSum(data.q1[0], product.high, product.low);
 }
 
-fn exp1(xh: f64, xl: f64) DoubleDouble {
+fn exp2Reduced(comptime accurate: bool, value: f64) DoubleDouble {
     @setFloatMode(.strict);
-    const k = roundEvenFinite(xh * 0x1.71547652b82fep+12);
-    const logarithm = sMul(k, 0x1.62e42fefa39efp-13, 0x1.abc9e3b39803fp-68);
-    var y = fastTwoSum(xh - logarithm.high, xl);
-    y.low -= logarithm.low;
+    const reduction = roundEvenFinite(value * 0x1p12);
+    const k = reduction.value;
+    // The binary grid and the residual are exact. Its logarithm is bounded
+    // by ln(2)*2^-13, inside both polynomial approximation intervals.
+    const residual = @mulAdd(f64, -k, 0x1p-12, value);
+    const y = sMul(residual, ln2_high, ln2_low);
 
-    const k_integer: i64 = @intFromFloat(k);
+    const k_integer = reduction.integer;
     var exponent = (k_integer >> 12) + 0x3ff;
     const table_2_index: usize = @intCast((k_integer >> 6) & 0x3f);
     const table_1_index: usize = @intCast(k_integer & 0x3f);
@@ -112,7 +120,7 @@ fn exp1(xh: f64, xl: f64) DoubleDouble {
         data.t1[table_2_index][0],
         data.t1[table_2_index][1],
     );
-    const polynomial = q1(y.high, y.low);
+    const polynomial = if (accurate) q2(y.high, y.low) else q1(y.high, y.low);
     result = dMul(result.high, result.low, polynomial.high, polynomial.low);
     if (exponent == 0x7ff) {
         result.high *= 2.0;
@@ -150,36 +158,6 @@ fn q2(zh: f64, zl: f64) DoubleDouble {
     return result;
 }
 
-fn exp2Accurate(value: f64) DoubleDouble {
-    @setFloatMode(.strict);
-    const k = roundEvenFinite(value * 0x1p12);
-    var y_high = @mulAdd(f64, -k, 0x1p-12, value);
-    const y = sMul(y_high, ln2_high, ln2_low);
-    y_high = y.high;
-
-    const k_integer: i64 = @intFromFloat(k);
-    var exponent = (k_integer >> 12) + 0x3ff;
-    const table_2_index: usize = @intCast((k_integer >> 6) & 0x3f);
-    const table_1_index: usize = @intCast(k_integer & 0x3f);
-    var result = dMul(
-        data.t2[table_1_index][0],
-        data.t2[table_1_index][1],
-        data.t1[table_2_index][0],
-        data.t1[table_2_index][1],
-    );
-    const polynomial = q2(y_high, y.low);
-    result = dMul(result.high, result.low, polynomial.high, polynomial.low);
-    if (exponent == 0x7ff) {
-        result.high *= 2.0;
-        result.low *= 2.0;
-        exponent -= 1;
-    }
-    const scale: f64 = @bitCast(@as(u64, @intCast(exponent)) << 52);
-    result.high *= scale;
-    result.low *= scale;
-    return result;
-}
-
 fn exp2m1FastTiny(value: f64) FastResult {
     @setFloatMode(.strict);
     const value_squared = value * value;
@@ -210,8 +188,7 @@ fn exp2m1FastTiny(value: f64) FastResult {
 fn exp2m1Fast(value: f64, tiny: bool) FastResult {
     @setFloatMode(.strict);
     if (tiny) return exp2m1FastTiny(value);
-    const logarithm = sMul(value, ln2_high, ln2_low);
-    var result = exp1(logarithm.high, logarithm.low);
+    var result = exp2Reduced(false, value);
     const sum = if (value >= 0.0)
         fastTwoSum(result.high, -1.0)
     else
@@ -226,7 +203,7 @@ fn exceptionLookup(comptime count: usize, value: f64, table: *const [count][3]f6
     var lower: usize = 0;
     var upper: usize = count;
     while (lower + 1 != upper) {
-        const middle = (lower + upper) / 2;
+        const middle = lower + (upper - lower) / 2;
         if (table[middle][0] <= value) lower = middle else upper = middle;
     }
     if (value == table[lower][0]) return table[lower][1] + table[lower][2];
@@ -287,13 +264,13 @@ fn exp2m1AccurateTiny(value: f64) f64 {
     return result.high + result.low;
 }
 
-fn exp2m1Accurate(value: f64) f64 {
+noinline fn exp2m1Accurate(value: f64) f64 {
     @setFloatMode(.strict);
     const absolute_bits = @as(u64, @bitCast(value)) & magnitude_mask;
     if (absolute_bits <= 0x3fc0_0000_0000_0000) return exp2m1AccurateTiny(value);
     if (exceptionLookup(data.exceptions_accurate.len, value, &data.exceptions_accurate)) |result|
         return result;
-    var result = exp2Accurate(value);
+    var result = exp2Reduced(true, value);
     const sum = if (value >= 0.0)
         fastTwoSum(result.high, -1.0)
     else
@@ -325,6 +302,7 @@ pub fn exp2m1d(value: f64) f64 {
     }
     if (absolute_bits <= 0x3cc0_527d_bd87_e24d) {
         if (absolute_bits <= 0x3970_0000_0000_0000) {
+            if (absolute_bits < tiny_scale.magnitude_limit) return tiny_scale.scale(.ln2, value);
             if (value == 0.0) return value;
             const scaled_value = value * 0x1p106;
             var result = aMul(ln2_high, scaled_value);
@@ -340,18 +318,6 @@ pub fn exp2m1d(value: f64) f64 {
         result.low = @mulAdd(f64, ln2_low, value, result.low);
         result.low += 0x1.ebfbdff82c58fp-3 * value * value;
         return result.high + result.low;
-    }
-
-    if (input_bits << 17 == 0) {
-        const integer: i64 = @intFromFloat(@floor(value));
-        if (value == @as(f64, @floatFromInt(integer)) and integer >= -53 and integer <= 53) {
-            if (integer >= 0) {
-                const shift: u6 = @intCast(integer);
-                return @floatFromInt((@as(u64, 1) << shift) - 1);
-            }
-            const power_bits = @as(u64, @intCast(integer + 1023)) << 52;
-            return -1.0 + @as(f64, @bitCast(power_bits));
-        }
     }
 
     const fast = exp2m1Fast(value, absolute_bits <= 0x3fc0_0000_0000_0000);

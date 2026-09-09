@@ -182,6 +182,39 @@ test "integer rounding reports each format's i64 boundary results" {
     try expectAllOperationsInvalidAt(f64, operations_d, negative_out_of_range_d);
 }
 
+test "integer rounding rejects signaling NaNs and rounds subnormals to zero" {
+    const operations_h: Operations(f16) = .{
+        .lrint = &rounding.lrinth,
+        .llrint = &rounding.llrinth,
+        .lround = &rounding.lroundh,
+        .llround = &rounding.llroundh,
+    };
+    const operations_f: Operations(f32) = .{
+        .lrint = &rounding.lrintf,
+        .llrint = &rounding.llrintf,
+        .lround = &rounding.lroundf,
+        .llround = &rounding.llroundf,
+    };
+    const operations_d: Operations(f64) = .{
+        .lrint = &rounding.lrintd,
+        .llrint = &rounding.llrintd,
+        .lround = &rounding.lroundd,
+        .llround = &rounding.llroundd,
+    };
+
+    try expectAllOperationsAt(f16, operations_h, @bitCast(@as(u16, 0x0001)), 0);
+    try expectAllOperationsAt(f16, operations_h, @bitCast(@as(u16, 0x8001)), 0);
+    try expectAllOperationsInvalidAt(f16, operations_h, @bitCast(@as(u16, 0xfc01)));
+
+    try expectAllOperationsAt(f32, operations_f, @bitCast(@as(u32, 0x0000_0001)), 0);
+    try expectAllOperationsAt(f32, operations_f, @bitCast(@as(u32, 0x8000_0001)), 0);
+    try expectAllOperationsInvalidAt(f32, operations_f, @bitCast(@as(u32, 0xff80_0001)));
+
+    try expectAllOperationsAt(f64, operations_d, @bitCast(@as(u64, 0x0000_0000_0000_0001)), 0);
+    try expectAllOperationsAt(f64, operations_d, @bitCast(@as(u64, 0x8000_0000_0000_0001)), 0);
+    try expectAllOperationsInvalidAt(f64, operations_d, @bitCast(@as(u64, 0xfff0_0000_0000_0001)));
+}
+
 test "integer rounding preserves H F D result signatures" {
     comptime {
         std.debug.assert(@TypeOf(rounding.lrinth) == fn (f16) c23.IntegerResult);

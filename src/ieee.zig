@@ -143,8 +143,8 @@ pub fn nextAfterh(from: f16, to: f16) f16 {
     const from_bits: u16 = @bitCast(from);
     const to_bits: u16 = @bitCast(to);
 
-    if (isNaNH(from_bits)) return quietNaNH(from_bits);
-    if (isNaNH(to_bits)) return quietNaNH(to_bits);
+    if (isNaNh(from_bits)) return quietNaNh(from_bits);
+    if (isNaNh(to_bits)) return quietNaNh(to_bits);
     if (from_bits == to_bits) return to;
 
     const from_magnitude = from_bits & ~sign_mask_h;
@@ -167,8 +167,8 @@ pub fn nextAfterf(from: f32, to: f32) f32 {
     const from_bits: u32 = @bitCast(from);
     const to_bits: u32 = @bitCast(to);
 
-    if (isNaNF(from_bits)) return quietNaNF(from_bits);
-    if (isNaNF(to_bits)) return quietNaNF(to_bits);
+    if (isNaNf(from_bits)) return quietNaNf(from_bits);
+    if (isNaNf(to_bits)) return quietNaNf(to_bits);
     if (from_bits == to_bits) return to;
 
     const from_magnitude = from_bits & ~sign_mask_f;
@@ -191,8 +191,8 @@ pub fn nextAfterd(from: f64, to: f64) f64 {
     const from_bits: u64 = @bitCast(from);
     const to_bits: u64 = @bitCast(to);
 
-    if (isNaND(from_bits)) return quietNaND(from_bits);
-    if (isNaND(to_bits)) return quietNaND(to_bits);
+    if (isNaNd(from_bits)) return quietNaNd(from_bits);
+    if (isNaNd(to_bits)) return quietNaNd(to_bits);
     if (from_bits == to_bits) return to;
 
     const from_magnitude = from_bits & ~sign_mask_d;
@@ -216,7 +216,7 @@ pub fn scaleBh(mode: RoundMode, value: f16, exponent: i32) f16 {
     const sign = bits & sign_mask_h;
     const magnitude = bits & ~sign_mask_h;
 
-    if (isNaNH(bits)) return quietNaNH(bits);
+    if (isNaNh(bits)) return quietNaNh(bits);
     if (magnitude == 0 or magnitude == exponent_mask_h) return value;
 
     var significand = (magnitude & fraction_mask_h) | 0x0400;
@@ -224,12 +224,16 @@ pub fn scaleBh(mode: RoundMode, value: f16, exponent: i32) f16 {
     if (exponent_field == 0) {
         significand = magnitude & fraction_mask_h;
         exponent_field = 1;
-        while (significand < 0x0400) {
-            significand <<= 1;
-            exponent_field -= 1;
-        }
+        // Zero returned above, so the fraction is in 1..0x03ff. The CLZ
+        // difference is 1..10 and normalizes without losing bits. Subtracting
+        // it preserves the value and leaves exponent_field in [-9, 0].
+        const normalization_shift: u4 =
+            @intCast(@clz(significand) - @clz(@as(u16, 0x0400)));
+        significand <<= normalization_shift;
+        exponent_field -= normalization_shift;
     }
 
+    // The finite exponent field is in [-9, 30], so adding any i32 fits i64.
     const scaled_exponent = exponent_field + @as(i64, exponent);
     if (scaled_exponent > 30) {
         return overflowH(mode, sign != 0);
@@ -257,7 +261,7 @@ pub fn roundIntegralh(mode: RoundMode, value: f16) f16 {
     const sign = bits & sign_mask_h;
     const magnitude = bits & ~sign_mask_h;
 
-    if (isNaNH(bits)) return quietNaNH(bits);
+    if (isNaNh(bits)) return quietNaNh(bits);
     if (magnitude == 0 or magnitude == exponent_mask_h) return value;
 
     const exponent_field: i32 = @intCast((magnitude & exponent_mask_h) >> 10);
@@ -315,19 +319,19 @@ pub fn totalOrderd(left: f64, right: f64) bool {
     return totalOrderKeyD(left_bits) <= totalOrderKeyD(right_bits);
 }
 
-fn isNaNH(bits: u16) bool {
+fn isNaNh(bits: u16) bool {
     return bits & ~sign_mask_h > exponent_mask_h;
 }
 
-fn isNaNF(bits: u32) bool {
+fn isNaNf(bits: u32) bool {
     return bits & ~sign_mask_f > exponent_mask_f;
 }
 
-fn isNaND(bits: u64) bool {
+fn isNaNd(bits: u64) bool {
     return bits & ~sign_mask_d > exponent_mask_d;
 }
 
-fn quietNaNH(bits: u16) f16 {
+fn quietNaNh(bits: u16) f16 {
     return @bitCast(bits | quiet_mask_h);
 }
 
@@ -371,11 +375,11 @@ fn roundShiftRightH(
     return if (increment) quotient + 1 else quotient;
 }
 
-fn quietNaNF(bits: u32) f32 {
+fn quietNaNf(bits: u32) f32 {
     return @bitCast(bits | quiet_mask_f);
 }
 
-fn quietNaND(bits: u64) f64 {
+fn quietNaNd(bits: u64) f64 {
     return @bitCast(bits | quiet_mask_d);
 }
 

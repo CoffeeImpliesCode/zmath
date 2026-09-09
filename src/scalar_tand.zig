@@ -44,5 +44,40 @@ pub fn tand(value: f64) f64 {
     if (magnitude == 0x3ead_ffff_ffff_fc7c) {
         return @bitCast(@as(u64, 0x3eae_0000_0000_0546) | (bits & 0x8000_0000_0000_0000));
     }
+    if (magnitude <= 0x3fc0_0000_0000_0000) return tanSmall(value);
+    var high: f64 = undefined;
+    var low: f64 = undefined;
+    const error_bound = sind_impl.tanFast(&high, &low, value);
+    const left = high + (low - error_bound);
+    const right = high + (low + error_bound);
+    if (left != right) {
+        @branchHint(.cold);
+        return sind_impl.tanAccurate(value);
+    }
+    return left;
+}
+
+inline fn tanSmall(value: f64) f64 {
+    @setFloatMode(.strict);
+    // On |x| <= 1/8, the positive Taylor tail after degree seventeen is
+    // bounded by c19*|x|^19/(1-4*x^2/pi^2). Together with evaluation
+    // error, this is below 2u*|x^3|, where u=2^-53.
+    const square = value * value;
+    const cubic = value * square;
+    var polynomial: f64 = 0x1.3558248036744p-11;
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.7da36452b75e3p-10);
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.d6d3d0e157de0p-9);
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.226e355e6c23dp-7);
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.664f4882c10fap-6);
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.ba1ba1ba1ba1cp-5);
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.1111111111111p-3);
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.5555555555555p-2);
+    const correction = cubic * polynomial;
+    const high = value + correction;
+    const low = correction - (high - value);
+    const error_bound = @abs(cubic) * 0x1p-52;
+    const left = high + (low - error_bound);
+    const right = high + (low + error_bound);
+    if (left == right) return left;
     return sind_impl.tanAccurate(value);
 }

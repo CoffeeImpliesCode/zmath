@@ -5,13 +5,14 @@
 // The wrappers construct exceptional results from target-format bits so that
 // NaN payloads, signs, poles, and domain errors do not depend on host conventions.
 
+const tiny = @import("scalar_tiny.zig");
+
 extern fn cr_log2p1f16(value: f16) callconv(.c) f16;
-extern fn cr_log2p1f(value: f32) callconv(.c) f32;
-extern fn cr_log2p1(value: f64) callconv(.c) f64;
+extern fn zmath_core_log2p1f_finite(value: f32) callconv(.c) f32;
+extern fn zmath_core_log2p1_finite(value: f64) callconv(.c) f64;
 
 const sign_mask_h: u16 = 0x8000;
 const sign_mask_f: u32 = 0x8000_0000;
-const sign_mask_d: u64 = 0x8000_0000_0000_0000;
 const magnitude_mask_h: u16 = 0x7fff;
 const magnitude_mask_f: u32 = 0x7fff_ffff;
 const magnitude_mask_d: u64 = 0x7fff_ffff_ffff_ffff;
@@ -41,6 +42,7 @@ pub fn log2p1h(value: f16) f16 {
     if (bits == negative_one_bits_h) return @bitCast(negative_infinity_bits_h);
     if ((bits & sign_mask_h) != 0 and magnitude > 0x3c00) return @bitCast(canonical_nan_bits_h);
     if (magnitude == infinity_bits_h) return value;
+    if (magnitude == 0) return value;
     return cr_log2p1f16(value);
 }
 
@@ -54,7 +56,8 @@ pub fn log2p1f(value: f32) f32 {
     if (bits == negative_one_bits_f) return @bitCast(negative_infinity_bits_f);
     if ((bits & sign_mask_f) != 0 and magnitude > 0x3f80_0000) return @bitCast(canonical_nan_bits_f);
     if (magnitude == infinity_bits_f) return value;
-    return cr_log2p1f(value);
+    if (magnitude == 0) return value;
+    return zmath_core_log2p1f_finite(value);
 }
 
 /// Computes log2(1 + value) for a binary64 value.
@@ -63,9 +66,13 @@ pub fn log2p1d(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);
     const magnitude = bits & magnitude_mask_d;
-    if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
-    if (bits == negative_one_bits_d) return @bitCast(negative_infinity_bits_d);
-    if ((bits & sign_mask_d) != 0 and magnitude > 0x3ff0_0000_0000_0000) return @bitCast(canonical_nan_bits_d);
-    if (magnitude == infinity_bits_d) return value;
-    return cr_log2p1(value);
+    if (magnitude >= infinity_bits_d or bits >= negative_one_bits_d) {
+        @branchHint(.unlikely);
+        if (magnitude > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
+        if (bits == negative_one_bits_d) return @bitCast(negative_infinity_bits_d);
+        if (bits > negative_one_bits_d) return @bitCast(canonical_nan_bits_d);
+        return value;
+    }
+    if (magnitude < tiny.magnitude_limit) return tiny.scale(.inv_ln2, value);
+    return zmath_core_log2p1_finite(value);
 }

@@ -20,30 +20,22 @@ fn Arithmetic(comptime storage_limbs: usize) type {
         const storage_bits = storage_limbs * 64;
 
         const Big = struct {
+            // Exactly limbs[0..len] are initialized; limbs[len..] are never read.
             limbs: [storage_limbs]u64,
             len: usize,
 
-            fn zero() Big {
-                return .{
-                    .limbs = [_]u64{0} ** storage_limbs,
-                    .len = 0,
-                };
+            fn zero(destination: *Big) void {
+                destination.len = 0;
             }
 
-            fn one() Big {
-                var result = zero();
-                result.limbs[0] = 1;
-                result.len = 1;
-                return result;
+            fn one(destination: *Big) void {
+                destination.limbs[0] = 1;
+                destination.len = 1;
             }
 
-            fn fromU64(value: u64) Big {
-                var result = zero();
-                if (value != 0) {
-                    result.limbs[0] = value;
-                    result.len = 1;
-                }
-                return result;
+            fn fromU64(value: u64, destination: *Big) void {
+                destination.len = @intFromBool(value != 0);
+                if (value != 0) destination.limbs[0] = value;
             }
 
             fn normalize(self: *Big) void {
@@ -66,8 +58,11 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 std.debug.assert(bit_index < storage_bits);
                 const limb_index = bit_index / 64;
                 const bit_in_limb: u6 = @intCast(bit_index & 63);
+                if (self.len <= limb_index) {
+                    @memset(self.limbs[self.len .. limb_index + 1], 0);
+                    self.len = limb_index + 1;
+                }
                 self.limbs[limb_index] |= @as(u64, 1) << bit_in_limb;
-                if (self.len <= limb_index) self.len = limb_index + 1;
             }
 
             fn lowU64(self: *const Big) u64 {
@@ -88,39 +83,69 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             }
 
             fn copy(source: *const Big, destination: *Big) void {
-                destination.* = source.*;
+                std.debug.assert(source != destination);
+                @memcpy(destination.limbs[0..source.len], source.limbs[0..source.len]);
+                destination.len = source.len;
             }
 
             /// Computes `source * 2^shift` into a distinct fixed-limb value.
             fn shifted(source: *const Big, shift: usize, destination: *Big) void {
-                destination.* = zero();
+                std.debug.assert(source != destination);
+                destination.len = 0;
                 if (source.len == 0) return;
 
                 const whole_limbs = shift / 64;
-                const bit_shift: usize = shift & 63;
-                const shift_amount: u6 = @intCast(bit_shift);
-                const reverse_shift: u6 = @intCast(if (bit_shift == 0) 0 else 64 - bit_shift);
-                std.debug.assert(source.len + whole_limbs <= storage_limbs);
-                if (bit_shift != 0) std.debug.assert(source.len + whole_limbs < storage_limbs);
-
-                var index: usize = 0;
-                while (index < source.len) : (index += 1) {
-                    const destination_index = index + whole_limbs;
-                    const limb = source.limbs[index];
-                    destination.limbs[destination_index] |= limb << shift_amount;
-                    if (bit_shift != 0) {
-                        destination.limbs[destination_index + 1] |= limb >> reverse_shift;
+                const bit_shift = shift & 63;
+                const output_len = source.len + whole_limbs + @intFromBool(bit_shift != 0);
+                std.debug.assert(output_len <= storage_limbs);
+                if (storage_limbs != 32) {
+                    // The larger formats retain their measured active-prefix shift loop.
+                    const shift_amount: u6 = @intCast(bit_shift);
+                    const reverse_shift: u6 = @intCast(if (bit_shift == 0) 0 else 64 - bit_shift);
+                    @memset(destination.limbs[0..output_len], 0);
+                    var index: usize = 0;
+                    while (index < source.len) : (index += 1) {
+                        const destination_index = index + whole_limbs;
+                        const limb = source.limbs[index];
+                        destination.limbs[destination_index] |= limb << shift_amount;
+                        if (bit_shift != 0) {
+                            destination.limbs[destination_index + 1] |= limb >> reverse_shift;
+                        }
                     }
+                    destination.len = output_len;
+                    destination.normalize();
+                    return;
+                }
+
+                @memset(destination.limbs[0..whole_limbs], 0);
+
+                if (bit_shift == 0) {
+                    @memcpy(
+                        destination.limbs[whole_limbs..output_len],
+                        source.limbs[0..source.len],
+                    );
+                    destination.len = output_len;
+                    return;
+                }
+
+                const shift_amount: u6 = @intCast(bit_shift);
+                const reverse_shift: u6 = @intCast(64 - bit_shift);
+                var carry: u64 = 0;
+                for (source.limbs[0..source.len], 0..) |limb, index| {
+                    destination.limbs[whole_limbs + index] = (limb << shift_amount) | carry;
+                    carry = limb >> reverse_shift;
                 }
                 destination.len = source.len + whole_limbs;
-                if (bit_shift != 0 and source.limbs[source.len - 1] >> reverse_shift != 0) {
+                if (carry != 0) {
+                    destination.limbs[destination.len] = carry;
                     destination.len += 1;
                 }
-                destination.normalize();
             }
 
             fn add(left: *const Big, right: *const Big, destination: *Big) void {
-                destination.* = zero();
+                std.debug.assert(left != destination);
+                std.debug.assert(right != destination);
+                destination.len = 0;
                 const count = if (left.len > right.len) left.len else right.len;
                 std.debug.assert(count <= storage_limbs);
 
@@ -166,8 +191,10 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             }
 
             fn subtract(left: *const Big, right: *const Big, destination: *Big) void {
+                std.debug.assert(left != destination);
+                std.debug.assert(right != destination);
                 std.debug.assert(compare(left, right) >= 0);
-                destination.* = zero();
+                destination.len = 0;
 
                 var borrow: u64 = 0;
                 var index: usize = 0;
@@ -187,11 +214,30 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             /// Fixed-limb schoolbook multiplication.  The `u128` accumulator is only
             /// an intra-limb carry; all persistent state remains the stack `u64` array.
             fn multiply(left: *const Big, right: *const Big, destination: *Big) void {
-                destination.* = zero();
+                std.debug.assert(left != destination);
+                std.debug.assert(right != destination);
+                destination.len = 0;
                 if (left.len == 0 or right.len == 0) return;
                 std.debug.assert(left.len + right.len <= storage_limbs);
 
                 var left_index: usize = 0;
+                if (storage_limbs == 32) {
+                    // The first row initializes its digits without reading destination.
+                    var carry: u128 = 0;
+                    var right_index: usize = 0;
+                    while (right_index < right.len) : (right_index += 1) {
+                        const total = @as(u128, left.limbs[0]) *
+                            @as(u128, right.limbs[right_index]) + carry;
+                        destination.limbs[right_index] = @truncate(total);
+                        carry = total >> 64;
+                    }
+                    destination.limbs[right.len] = @intCast(carry);
+                    left_index = 1;
+                } else {
+                    // Larger formats retain the measured active-prefix clearing path.
+                    @memset(destination.limbs[0 .. left.len + right.len], 0);
+                }
+
                 while (left_index < left.len) : (left_index += 1) {
                     var carry: u128 = 0;
                     var right_index: usize = 0;
@@ -203,14 +249,17 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                         destination.limbs[destination_index] = @truncate(total);
                         carry = total >> 64;
                     }
-
-                    var destination_index = left_index + right.len;
-                    while (carry != 0) {
-                        std.debug.assert(destination_index < storage_limbs);
-                        const total = @as(u128, destination.limbs[destination_index]) + carry;
-                        destination.limbs[destination_index] = @truncate(total);
-                        carry = total >> 64;
-                        destination_index += 1;
+                    if (storage_limbs == 32) {
+                        destination.limbs[left_index + right.len] = @intCast(carry);
+                    } else {
+                        var destination_index = left_index + right.len;
+                        while (carry != 0) {
+                            std.debug.assert(destination_index < storage_limbs);
+                            const total = @as(u128, destination.limbs[destination_index]) + carry;
+                            destination.limbs[destination_index] = @truncate(total);
+                            carry = total >> 64;
+                            destination_index += 1;
+                        }
                     }
                 }
                 destination.len = left.len + right.len;
@@ -222,27 +271,28 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 if (exponent != 0) {
                     std.debug.assert(base.bitLength() <= storage_bits / @as(usize, @intCast(exponent)));
                 }
-                var result = one();
+                var result: Big = undefined;
+                one(&result);
                 // SAFETY: copy initializes factor before its first read.
                 var factor: Big = undefined;
                 copy(base, &factor);
                 var remaining = exponent;
                 while (remaining != 0) {
                     if ((remaining & 1) != 0) {
-                        // SAFETY: multiply initializes product before it is copied.
+                        // SAFETY: multiply initializes the active product before copying it.
                         var product: Big = undefined;
                         multiply(&result, &factor, &product);
-                        result = product;
+                        copy(&product, &result);
                     }
                     remaining >>= 1;
                     if (remaining != 0) {
-                        // SAFETY: multiply initializes square before it is copied.
+                        // SAFETY: multiply initializes the active square before copying it.
                         var square: Big = undefined;
                         multiply(&factor, &factor, &square);
-                        factor = square;
+                        copy(&square, &factor);
                     }
                 }
-                destination.* = result;
+                copy(&result, destination);
             }
 
             /// Divides `numerator` by nonzero `denominator`, retaining the exact
@@ -254,7 +304,7 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 remainder: *Big,
             ) void {
                 std.debug.assert(denominator.len != 0);
-                quotient.* = zero();
+                quotient.len = 0;
                 copy(numerator, remainder);
                 const numerator_bits = numerator.bitLength();
                 const denominator_bits = denominator.bitLength();
@@ -340,26 +390,8 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             exponent: i64,
         };
 
-        fn decodeFinite(comptime Format: type, bits: Format.Bits) Decoded {
-            const info = formatInfo(Format);
-            const fraction_shift: u6 = @intCast(info.fraction_bits);
-            const raw_bits: u64 = @intCast(bits);
-            const exponent_field = (raw_bits & info.exponent_field_mask) >> fraction_shift;
-            const fraction = raw_bits & info.fraction_mask;
-
-            if (exponent_field == 0) {
-                return .{
-                    .significand = Big.fromU64(fraction),
-                    .exponent = info.minimum_exponent - @as(i64, info.fraction_bits),
-                };
-            }
-
-            const hidden_bit = @as(u64, 1) << fraction_shift;
-            return .{
-                .significand = Big.fromU64(hidden_bit | fraction),
-                .exponent = @as(i64, @intCast(exponent_field)) - info.exponent_bias -
-                    @as(i64, info.fraction_bits),
-            };
+        fn decodeFinite(comptime Format: type, bits: Format.Bits, result: *Decoded) void {
+            decodeFiniteBits(@intCast(bits), formatInfo(Format), result);
         }
 
         fn magnitude(exponent: i64) u64 {
@@ -384,13 +416,13 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             if (left_top > right_top) return 1;
 
             if (left_shift > right_shift) {
-                // SAFETY: `Big.shifted` overwrites all of `shifted_left` before comparison.
+                // SAFETY: `Big.shifted` initializes the active limbs before comparison.
                 var shifted_left: Big = undefined;
                 Big.shifted(left, @intCast(left_shift - right_shift), &shifted_left);
                 return Big.compare(&shifted_left, right);
             }
             if (right_shift > left_shift) {
-                // SAFETY: `Big.shifted` overwrites all of `shifted_right` before comparison.
+                // SAFETY: `Big.shifted` initializes the active limbs before comparison.
                 var shifted_right: Big = undefined;
                 Big.shifted(right, @intCast(right_shift - left_shift), &shifted_right);
                 return Big.compare(left, &shifted_right);
@@ -410,29 +442,27 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 std.debug.assert(decoded.significand.bitLength() <=
                     storage_bits / @as(usize, @intCast(degree)));
             }
-            // SAFETY: `Big.power` always overwrites `powered` before the sign branch reads it.
+            // SAFETY: `Big.power` initializes the active limbs before the sign branch.
             var powered: Big = undefined;
             Big.power(&decoded.significand, degree, &powered);
-
+            const power_shift = decoded.exponent * @as(i64, @intCast(degree));
             if (exponent >= 0) {
-                rational.* = .{
-                    .numerator = powered,
-                    .denominator = Big.one(),
-                    .shift = decoded.exponent * @as(i64, @intCast(degree)),
-                };
+                Big.copy(&powered, &rational.numerator);
+                rational.denominator.limbs[0] = 1;
+                rational.denominator.len = 1;
+                rational.shift = power_shift;
             } else {
-                rational.* = .{
-                    .numerator = Big.one(),
-                    .denominator = powered,
-                    .shift = -(decoded.exponent * @as(i64, @intCast(degree))),
-                };
+                rational.numerator.limbs[0] = 1;
+                rational.numerator.len = 1;
+                Big.copy(&powered, &rational.denominator);
+                rational.shift = -power_shift;
             }
         }
 
         fn roundScaledQuotient(rational: *const Rational, scale: i64) u64 {
-            // SAFETY: Each `total_shift` branch overwrites `numerator` before the next read.
+            // SAFETY: Both shift branches initialize the active numerator limbs.
             var numerator: Big = undefined;
-            // SAFETY: Each `total_shift` branch overwrites `denominator` before the next read.
+            // SAFETY: Both shift branches initialize the active denominator limbs.
             var denominator: Big = undefined;
             const total_shift = rational.shift + scale;
             if (total_shift >= 0) {
@@ -453,7 +483,7 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             // RN-even proof: `quotient` is floor(value / ulp), and the exact
             // remainder is below, above, or exactly halfway according to 2*r
             // compared with the divisor.  At equality, increment only an odd low bit.
-            // SAFETY: `Big.shifted` overwrites `doubled_remainder` before comparison.
+            // SAFETY: `Big.shifted` initializes the active limbs before comparison.
             var doubled_remainder: Big = undefined;
             Big.shifted(&remainder, 1, &doubled_remainder);
             const midpoint_relation = Big.compare(&doubled_remainder, &denominator);
@@ -522,47 +552,56 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             return Format.fromBits(@intCast(magnitude_bits));
         }
 
-        fn makeCompoundBase(comptime Format: type, value_bits: Format.Bits) Decoded {
+        fn makeCompoundBase(
+            comptime Format: type,
+            value_bits: Format.Bits,
+            result: *Decoded,
+        ) void {
             const info = formatInfo(Format);
             const raw_bits: u64 = @intCast(value_bits);
             const negative = (raw_bits & info.sign_mask) != 0;
-            const decoded = decodeFinite(Format, value_bits);
-            if (decoded.significand.isZero()) return .{ .significand = Big.one(), .exponent = 0 };
+            var decoded: Decoded = undefined;
+            decodeFinite(Format, value_bits, &decoded);
+            if (decoded.significand.isZero()) {
+                result.significand.limbs[0] = 1;
+                result.significand.len = 1;
+                result.exponent = 0;
+                return;
+            }
 
             if (decoded.exponent >= 0) {
-                // SAFETY: `Big.shifted` overwrites `integer_part` before `Big.add` reads it.
+                // SAFETY: `Big.shifted` initializes the active integer part.
                 var integer_part: Big = undefined;
                 Big.shifted(&decoded.significand, @intCast(decoded.exponent), &integer_part);
-                const one = Big.one();
-                // SAFETY: `Big.add` overwrites all of `result` before the returned copy reads it.
-                var result: Big = undefined;
-                Big.add(&integer_part, &one, &result);
-                return .{ .significand = result, .exponent = 0 };
+                var one: Big = undefined;
+                Big.one(&one);
+                Big.add(&integer_part, &one, &result.significand);
+                result.exponent = 0;
+                return;
             }
 
             const denominator_shift: usize = @intCast(-decoded.exponent);
-            var unit: Big = Big.zero();
+            var unit: Big = undefined;
+            Big.zero(&unit);
             unit.setBit(denominator_shift);
-            // SAFETY: Both `negative` branches overwrite `result` before the returned copy reads it.
-            var result: Big = undefined;
             if (negative) {
                 std.debug.assert(Big.compare(&unit, &decoded.significand) > 0);
-                Big.subtract(&unit, &decoded.significand, &result);
+                Big.subtract(&unit, &decoded.significand, &result.significand);
             } else {
-                Big.add(&unit, &decoded.significand, &result);
+                Big.add(&unit, &decoded.significand, &result.significand);
             }
-            return .{ .significand = result, .exponent = decoded.exponent };
+            result.exponent = decoded.exponent;
         }
 
         fn midpoint(lower_bits: u64, upper_bits: u64, info: FormatInfo, result: *Decoded) void {
-            const lower_decoded = decodeFiniteBits(lower_bits, info);
-            const upper_decoded = decodeFiniteBits(upper_bits, info);
+            var lower_decoded: Decoded = undefined;
+            var upper_decoded: Decoded = undefined;
+            decodeFiniteBits(lower_bits, info, &lower_decoded);
+            decodeFiniteBits(upper_bits, info, &upper_decoded);
 
             if (lower_decoded.significand.isZero()) {
-                result.* = .{
-                    .significand = upper_decoded.significand,
-                    .exponent = upper_decoded.exponent - 1,
-                };
+                Big.copy(&upper_decoded.significand, &result.significand);
+                result.exponent = upper_decoded.exponent - 1;
                 return;
             }
 
@@ -570,9 +609,8 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 lower_decoded.exponent
             else
                 upper_decoded.exponent;
-            // SAFETY: The first `Big.shifted` call overwrites `lower_scaled` before `Big.add`.
+            // SAFETY: Each shift initializes its active limbs before the addition.
             var lower_scaled: Big = undefined;
-            // SAFETY: The second `Big.shifted` call overwrites `upper_scaled` before `Big.add`.
             var upper_scaled: Big = undefined;
             Big.shifted(
                 &lower_decoded.significand,
@@ -584,27 +622,25 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 @intCast(upper_decoded.exponent - minimum_exponent),
                 &upper_scaled,
             );
-            // SAFETY: `Big.add` overwrites all of `sum` before the result copies it.
-            var sum: Big = undefined;
-            Big.add(&lower_scaled, &upper_scaled, &sum);
-            result.* = .{ .significand = sum, .exponent = minimum_exponent - 1 };
+            Big.add(&lower_scaled, &upper_scaled, &result.significand);
+            result.exponent = minimum_exponent - 1;
         }
 
-        fn decodeFiniteBits(raw_bits: u64, info: FormatInfo) Decoded {
+        fn decodeFiniteBits(raw_bits: u64, info: FormatInfo, result: *Decoded) void {
             const fraction_shift: u6 = @intCast(info.fraction_bits);
             const exponent_field = (raw_bits & info.exponent_field_mask) >> fraction_shift;
             const fraction = raw_bits & info.fraction_mask;
-            if (exponent_field == 0) {
-                return .{
-                    .significand = Big.fromU64(fraction),
-                    .exponent = info.minimum_exponent - @as(i64, info.fraction_bits),
-                };
-            }
-            return .{
-                .significand = Big.fromU64((@as(u64, 1) << fraction_shift) | fraction),
-                .exponent = @as(i64, @intCast(exponent_field)) - info.exponent_bias -
-                    @as(i64, info.fraction_bits),
-            };
+            const significand = if (exponent_field == 0)
+                fraction
+            else
+                (@as(u64, 1) << fraction_shift) | fraction;
+            result.significand.len = @intFromBool(significand != 0);
+            if (significand != 0) result.significand.limbs[0] = significand;
+            result.exponent = if (exponent_field == 0)
+                info.minimum_exponent - @as(i64, info.fraction_bits)
+            else
+                @as(i64, @intCast(exponent_field)) - info.exponent_bias -
+                    @as(i64, info.fraction_bits);
         }
 
         fn candidateRelation(
@@ -614,10 +650,11 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             reciprocal: bool,
             info: FormatInfo,
         ) i8 {
-            const candidate = decodeFiniteBits(candidate_bits, info);
+            var candidate: Decoded = undefined;
+            decodeFiniteBits(candidate_bits, info, &candidate);
             if (candidate.significand.isZero()) return -1;
 
-            // SAFETY: `Big.power` overwrites `candidate_power` before either relation path reads it.
+            // SAFETY: `Big.power` initializes the active limbs before either relation path.
             var candidate_power: Big = undefined;
             Big.power(&candidate.significand, degree, &candidate_power);
             const candidate_shift = candidate.exponent * @as(i64, @intCast(degree));
@@ -629,10 +666,11 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                     input.exponent,
                 );
             }
-            // SAFETY: `Big.multiply` overwrites all of `product` before comparison.
+            // SAFETY: `Big.multiply` initializes the active limbs before comparison.
             var product: Big = undefined;
             Big.multiply(&candidate_power, &input.significand, &product);
-            const one = Big.one();
+            var one: Big = undefined;
+            Big.one(&one);
             return compareScaled(&product, candidate_shift + input.exponent, &one, 0);
         }
 
@@ -644,63 +682,164 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             reciprocal: bool,
             info: FormatInfo,
         ) i8 {
-            // SAFETY: `midpoint` overwrites `middle` on every path before the next statement reads it.
+            // SAFETY: `midpoint` initializes the active limbs and exponent on both paths.
             var middle: Decoded = undefined;
             midpoint(lower_bits, upper_bits, info, &middle);
-            // SAFETY: `Big.power` overwrites `middle_power` before either relation path reads it.
+            // SAFETY: `Big.power` initializes the active limbs before either relation path.
             var middle_power: Big = undefined;
             Big.power(&middle.significand, degree, &middle_power);
             const middle_shift = middle.exponent * @as(i64, @intCast(degree));
             if (!reciprocal) {
                 return compareScaled(&middle_power, middle_shift, &input.significand, input.exponent);
             }
-            // SAFETY: `Big.multiply` overwrites all of `product` before comparison.
+            // SAFETY: `Big.multiply` initializes the active limbs before comparison.
             var product: Big = undefined;
             Big.multiply(&middle_power, &input.significand, &product);
-            const one = Big.one();
+            var one: Big = undefined;
+            Big.one(&one);
             return compareScaled(&product, middle_shift + input.exponent, &one, 0);
         }
 
         fn overflowThresholdRelation(input: *const Decoded, degree: u64, info: FormatInfo) i8 {
             // RN-even overflow begins at max_finite + half its final ulp.  Written
             // exactly, that midpoint is `(2^(p+1)-1) * 2^(emax-p)`.
-            var threshold_numerator = Big.zero();
+            var threshold_numerator: Big = undefined;
+            Big.zero(&threshold_numerator);
             threshold_numerator.setBit(@intCast(info.precision_bits + 1));
             threshold_numerator.decrement();
-            // SAFETY: `Big.power` overwrites `threshold_power` before multiplication.
+            // SAFETY: `Big.power` initializes the active limbs before multiplication.
             var threshold_power: Big = undefined;
             Big.power(&threshold_numerator, degree, &threshold_power);
             const threshold_shift =
                 (info.maximum_exponent - @as(i64, info.precision_bits)) * @as(i64, @intCast(degree));
 
-            // SAFETY: `Big.multiply` overwrites all of `product` before comparison.
+            // SAFETY: `Big.multiply` initializes the active limbs before comparison.
             var product: Big = undefined;
             Big.multiply(&threshold_power, &input.significand, &product);
-            const one = Big.one();
+            var one: Big = undefined;
+            Big.one(&one);
             return compareScaled(&product, threshold_shift + input.exponent, &one, 0);
+        }
+
+        fn powerOfTwoBits(exponent: i64, info: FormatInfo) u64 {
+            const subnormal_exponent = info.minimum_exponent - @as(i64, info.fraction_bits);
+            if (exponent < subnormal_exponent) return 0;
+            if (exponent > info.maximum_exponent) return info.infinity_bits;
+            if (exponent < info.minimum_exponent) {
+                const bit_index: u6 = @intCast(exponent - subnormal_exponent);
+                return @as(u64, 1) << bit_index;
+            }
+            const exponent_field: u64 = @intCast(exponent + info.exponent_bias);
+            const fraction_shift: u6 = @intCast(info.fraction_bits);
+            return exponent_field << fraction_shift;
+        }
+
+        /// Proposes a search start from a rounded estimate and certifies it with
+        /// exact candidate comparisons.  The estimate never decides a result: a
+        /// proposal counts only when `C(lower) <= 0 < C(lower + 1)` holds exactly,
+        /// which is the same invariant the binary search maintains.  Every other
+        /// case, including a proposal outside the search window, returns false and
+        /// leaves the exact search to decide.
+        fn seedLowerBound(
+            comptime Format: type,
+            value_bits: Format.Bits,
+            degree: u64,
+            reciprocal: bool,
+            input: *const Decoded,
+            lower_bound: u64,
+            upper_bound: u64,
+            lower: *u64,
+            lower_relation: *i8,
+        ) bool {
+            @setFloatMode(.strict);
+            const info = formatInfo(Format);
+            const input_magnitude: f64 = @bitCast(@as(u64, value_bits) & ~info.sign_mask);
+            const sign: f64 = if (reciprocal) -1.0 else 1.0;
+            const step: f64 = sign / @as(f64, @floatFromInt(degree));
+            const estimate: f64 = std.math.pow(f64, input_magnitude, step);
+            const estimate_bits = @as(u64, @bitCast(estimate));
+            if (estimate_bits < lower_bound or estimate_bits > upper_bound) return false;
+
+            if (estimate_bits > lower_bound) {
+                const below = candidateRelation(estimate_bits - 1, input, degree, reciprocal, info);
+                if (below > 0) return false;
+                const above = candidateRelation(estimate_bits, input, degree, reciprocal, info);
+                if (above <= 0) return false;
+                lower.* = estimate_bits - 1;
+                lower_relation.* = below;
+                return true;
+            }
+
+            const at = candidateRelation(estimate_bits, input, degree, reciprocal, info);
+            if (at > 0) return false;
+            lower.* = estimate_bits;
+            lower_relation.* = at;
+            return true;
         }
 
         fn rootFiniteBits(comptime Format: type, value_bits: Format.Bits, exponent: i64) u64 {
             const info = formatInfo(Format);
-            const input = decodeFinite(Format, value_bits);
+            var input: Decoded = undefined;
+            decodeFinite(Format, value_bits, &input);
             std.debug.assert(!input.significand.isZero());
             const degree = magnitude(exponent);
             const reciprocal = exponent < 0;
 
-            var lower: u64 = 0;
-            var upper_bound = info.maximum_finite_bits;
-            while (lower < upper_bound) {
-                const span = upper_bound - lower;
-                const middle = lower + span / 2 + (span & 1);
-                const relation = candidateRelation(middle, &input, degree, reciprocal, info);
-                if (relation <= 0) {
-                    lower = middle;
-                } else {
-                    upper_bound = middle - 1;
+            // If 2^E <= x < 2^(E+1), positive roots lie in
+            // [2^floor(E/d), 2^(floor(E/d)+1)). Reciprocal roots lie in
+            // (2^floor((-E-1)/d), 2^(floor(-E/d)+1)).
+            // Clamp only the encoded endpoints; exact candidate and midpoint
+            // comparisons still decide the rounded answer and overflow.
+            const input_floor = input.exponent +
+                @as(i64, @intCast(input.significand.bitLength())) - 1;
+            const divisor: i64 = @intCast(degree);
+            const lower_exponent = @divFloor(
+                if (reciprocal) -input_floor - 1 else input_floor,
+                divisor,
+            );
+            const upper_exponent = @divFloor(
+                if (reciprocal) -input_floor else input_floor,
+                divisor,
+            ) + 1;
+            const upper_bits = powerOfTwoBits(upper_exponent, info);
+            std.debug.assert(upper_bits != 0);
+            var lower = @min(powerOfTwoBits(lower_exponent, info), info.maximum_finite_bits);
+            const upper_bound = @min(upper_bits - 1, info.maximum_finite_bits);
+            std.debug.assert(lower <= upper_bound);
+
+            // A rounded estimate can only start the search; exact comparisons
+            // still decide the rounded answer and overflow.  Degrees below two
+            // and every rejected proposal use the exact binary search.
+            var lower_relation: i8 = undefined;
+            var seeded = false;
+            if (Format == common.D and degree >= 2) {
+                seeded = seedLowerBound(
+                    Format,
+                    value_bits,
+                    degree,
+                    reciprocal,
+                    &input,
+                    lower,
+                    upper_bound,
+                    &lower,
+                    &lower_relation,
+                );
+            }
+            if (!seeded) {
+                var search_upper = upper_bound;
+                while (lower < search_upper) {
+                    const span = search_upper - lower;
+                    const middle = lower + span / 2 + (span & 1);
+                    const relation = candidateRelation(middle, &input, degree, reciprocal, info);
+                    if (relation <= 0) {
+                        lower = middle;
+                    } else {
+                        search_upper = middle - 1;
+                    }
                 }
+                lower_relation = candidateRelation(lower, &input, degree, reciprocal, info);
             }
 
-            const lower_relation = candidateRelation(lower, &input, degree, reciprocal, info);
             if (lower_relation == 0) return lower;
             if (lower == info.maximum_finite_bits) {
                 if (reciprocal and overflowThresholdRelation(&input, degree, info) <= 0) {
@@ -722,9 +861,10 @@ fn Arithmetic(comptime storage_limbs: usize) type {
         fn pownFinite(comptime Format: type, base: Format.Float, exponent: i64) Format.Float {
             std.debug.assert(exponent >= -max_degree);
             std.debug.assert(exponent <= max_degree);
-            const decoded = decodeFinite(Format, Format.toBits(base));
+            var decoded: Decoded = undefined;
+            decodeFinite(Format, Format.toBits(base), &decoded);
             std.debug.assert(!decoded.significand.isZero());
-            // SAFETY: `rationalFromPower` overwrites `rational` on both sign paths before return.
+            // SAFETY: Both sign paths initialize the rational's active limbs and shift.
             var rational: Rational = undefined;
             rationalFromPower(&decoded, exponent, &rational);
             return roundRational(Format, &rational, false);
@@ -734,8 +874,9 @@ fn Arithmetic(comptime storage_limbs: usize) type {
         fn compoundFinite(comptime Format: type, value: Format.Float, exponent: i64) Format.Float {
             std.debug.assert(exponent >= -max_degree);
             std.debug.assert(exponent <= max_degree);
-            const base = makeCompoundBase(Format, Format.toBits(value));
-            // SAFETY: `rationalFromPower` overwrites `rational` on both sign paths before return.
+            var base: Decoded = undefined;
+            makeCompoundBase(Format, Format.toBits(value), &base);
+            // SAFETY: Both sign paths initialize the rational's active limbs and shift.
             var rational: Rational = undefined;
             rationalFromPower(&base, exponent, &rational);
             return roundRational(Format, &rational, false);
@@ -790,20 +931,52 @@ pub fn rootFinite(comptime Format: type, value: Format.Float, exponent: i64) For
 
 test "exact division retains a small quotient and remainder across many limbs" {
     const Big = Arithmetic(limb_count).Big;
-    var denominator = Big.one();
+    var denominator: Big = undefined;
+    Big.one(&denominator);
     denominator.setBit(1024);
-    var numerator = Big.fromU64(49);
+    var numerator: Big = undefined;
+    Big.fromU64(49, &numerator);
     numerator.setBit(1029);
     numerator.setBit(1026);
     numerator.setBit(1024);
     var quotient: Big = undefined;
     var remainder: Big = undefined;
     Big.divideRemainder(&numerator, &denominator, &quotient, &remainder);
-    const expected_quotient = Big.fromU64(37);
-    const expected_remainder = Big.fromU64(12);
+    var expected_quotient: Big = undefined;
+    var expected_remainder: Big = undefined;
+    Big.fromU64(37, &expected_quotient);
+    Big.fromU64(12, &expected_remainder);
     try std.testing.expectEqual(@as(i8, 0), Big.compare(&quotient, &expected_quotient));
     try std.testing.expectEqual(@as(i8, 0), Big.compare(&remainder, &expected_remainder));
     Big.divideRemainder(&expected_remainder, &denominator, &quotient, &remainder);
     try std.testing.expect(quotient.isZero());
     try std.testing.expectEqual(@as(i8, 0), Big.compare(&remainder, &expected_remainder));
+}
+
+test "shifted exact integer initializes gaps and carry limbs" {
+    const Big = Arithmetic(32).Big;
+    var source: Big = undefined;
+    Big.fromU64(0x8000_0000_0000_0001, &source);
+    source.setBit(64);
+
+    for ([_]usize{ 0, 1, 63, 64, 65, 1024 }) |shift| {
+        var expected: Big = undefined;
+        Big.zero(&expected);
+        for ([_]usize{ 0, 63, 64 }) |bit_index| {
+            expected.setBit(bit_index + shift);
+        }
+
+        var actual: Big = undefined;
+        Big.one(&actual);
+        actual.setBit(1900);
+        Big.shifted(&source, shift, &actual);
+        try std.testing.expectEqual(@as(i8, 0), Big.compare(&expected, &actual));
+    }
+
+    var zero: Big = undefined;
+    Big.zero(&zero);
+    var actual: Big = undefined;
+    Big.one(&actual);
+    Big.shifted(&zero, 65, &actual);
+    try std.testing.expect(actual.isZero());
 }

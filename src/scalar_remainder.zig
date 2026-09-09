@@ -62,13 +62,13 @@ const Parts = struct {
 };
 
 const Division = struct {
-    remainder: u128,
+    remainder: u64,
     quotient_low: u8,
 };
 
-fn bitLength(value: u128) u32 {
+fn bitLength(value: u64) u32 {
     if (value == 0) return 0;
-    return 128 - @as(u32, @intCast(@clz(value)));
+    return 64 - @as(u32, @intCast(@clz(value)));
 }
 
 fn decompose(comptime format: Format, value: format.Float) Parts {
@@ -76,49 +76,54 @@ fn decompose(comptime format: Format, value: format.Float) Parts {
     const exponent_mask: format.Bits = @intCast(format.exponent_mask);
     const fraction_mask: format.Bits = @intCast(format.fraction_mask);
     const sign_mask: format.Bits = @intCast(format.sign_mask);
+    const negative = bits & sign_mask != 0;
     const raw_exponent: u32 = @intCast((bits & exponent_mask) >> format.fraction_bits);
     const fraction: u64 = @intCast(bits & fraction_mask);
 
     if (raw_exponent == 0) {
         return .{
-            .negative = bits & sign_mask != 0,
+            .negative = negative,
             .mantissa = fraction,
             .exponent = 1 - format.exponent_bias - @as(i32, @intCast(format.fraction_bits)),
         };
     }
 
     return .{
-        .negative = bits & sign_mask != 0,
+        .negative = negative,
         .mantissa = fraction | (@as(u64, 1) << @intCast(format.fraction_bits)),
         .exponent = @as(i32, @intCast(raw_exponent)) - format.exponent_bias -
             @as(i32, @intCast(format.fraction_bits)),
     };
 }
 
-fn divideShifted(numerator: u64, denominator: u128, shift: u32) Division {
+fn divideShifted(numerator: u64, denominator: u64, shift: u32) Division {
     stdAssert(denominator != 0);
-    stdAssert(shift <= 2_147_483_647);
+    // Every divisor here is a significand of at most 53 bits.
+    const chunk_max: u32 = @clz(denominator);
+    stdAssert(chunk_max >= 11);
 
-    const numerator_bits = bitLength(numerator);
-    if (numerator_bits == 0) return .{ .remainder = 0, .quotient_low = 0 };
-
-    const shift_i64: i64 = @intCast(shift);
-    var remainder: u128 = 0;
-    var quotient_low: u8 = 0;
-    var bit_index: i64 = @as(i64, @intCast(numerator_bits)) - 1 + shift_i64;
-    while (bit_index >= 0) : (bit_index -= 1) {
-        const bit: u128 = if (bit_index >= shift_i64)
-            (@as(u128, numerator) >> @intCast(bit_index - shift_i64)) & 1
-        else
-            0;
-        remainder = (remainder << 1) | bit;
-
-        var quotient_bit: u8 = 0;
-        if (remainder >= denominator) {
-            remainder -= denominator;
-            quotient_bit = 1;
+    var remainder = numerator % denominator;
+    var quotient_low: u8 = @intCast((numerator / denominator) & 7);
+    var remaining_shift = shift;
+    while (remaining_shift != 0) {
+        if (remainder == 0) {
+            if (remaining_shift >= 3) return .{ .remainder = 0, .quotient_low = 0 };
+            quotient_low = (quotient_low << @as(u3, @intCast(remaining_shift))) & 7;
+            return .{ .remainder = 0, .quotient_low = quotient_low };
         }
-        quotient_low = ((quotient_low << 1) | quotient_bit) & 7;
+
+        const chunk: u32 = @min(remaining_shift, chunk_max);
+        // remainder < denominator, so (remainder << chunk) fits in u64.
+        const expanded = remainder << @as(u6, @intCast(chunk));
+        const chunk_quotient = expanded / denominator;
+        remainder = expanded % denominator;
+        if (chunk >= 3) {
+            quotient_low = @intCast(chunk_quotient & 7);
+        } else {
+            quotient_low = ((quotient_low << @as(u3, @intCast(chunk))) |
+                @as(u8, @intCast(chunk_quotient))) & 7;
+        }
+        remaining_shift -= chunk;
     }
 
     return .{ .remainder = remainder, .quotient_low = quotient_low };
@@ -128,7 +133,12 @@ fn stdAssert(condition: bool) void {
     if (!condition) @panic("scalar remainder invariant failed");
 }
 
-fn packExact(comptime format: Format, magnitude: u128, exponent: i32, negative: bool) format.Float {
+fn packExact(
+    comptime format: Format,
+    magnitude: u64,
+    exponent: i32,
+    negative: bool,
+) format.Float {
     const sign_mask: format.Bits = @intCast(format.sign_mask);
     const fraction_mask: format.Bits = @intCast(format.fraction_mask);
     const exponent_mask: format.Bits = @intCast(format.exponent_mask);
@@ -190,30 +200,28 @@ fn reduce(
     const quotient_negative = x_parts.negative != y_parts.negative;
     const exponent_delta = x_parts.exponent - y_parts.exponent;
 
-    if (exponent_delta < 0 and -exponent_delta > @as(i32, @intCast(format.precision))) {
-        return .{ .value = x, .quotient = 0 };
+    if (exponent_delta < 0) {
+        // The higher-exponent divisor is normal: its shifted significand is
+        // larger than the dividend's. Only a one-step gap can exceed half.
+        if (reduction == .truncating or exponent_delta < -1 or
+            x_parts.mantissa <= y_parts.mantissa)
+        {
+            return .{ .value = x, .quotient = 0 };
+        }
+        const magnitude = (y_parts.mantissa << 1) - x_parts.mantissa;
+        return .{
+            .value = packExact(format, magnitude, x_parts.exponent, !x_parts.negative),
+            .quotient = if (quotient_negative) -1 else 1,
+        };
     }
 
-    var division: Division = .{ .remainder = 0, .quotient_low = 0 };
-    var remainder_exponent: i32 = 0;
-    if (exponent_delta >= 0) {
-        division = divideShifted(x_parts.mantissa, y_parts.mantissa, @intCast(exponent_delta));
-        remainder_exponent = y_parts.exponent;
-    } else {
-        const denominator_shift: u32 = @intCast(-exponent_delta);
-        const denominator = @as(u128, y_parts.mantissa) << @intCast(denominator_shift);
-        division = divideShifted(x_parts.mantissa, denominator, 0);
-        remainder_exponent = x_parts.exponent;
-    }
+    const division = divideShifted(x_parts.mantissa, y_parts.mantissa, @intCast(exponent_delta));
 
     var quotient_low = division.quotient_low;
     var remainder_magnitude = division.remainder;
     var remainder_negative = x_parts.negative;
     if (reduction == .nearest_even) {
-        const denominator = if (exponent_delta >= 0)
-            @as(u128, y_parts.mantissa)
-        else
-            @as(u128, y_parts.mantissa) << @intCast(-exponent_delta);
+        const denominator = y_parts.mantissa;
         const twice_remainder = remainder_magnitude << 1;
         const increment = twice_remainder > denominator or
             (twice_remainder == denominator and quotient_low & 1 != 0);
@@ -225,7 +233,7 @@ fn reduce(
     }
     var quotient: i32 = @intCast(quotient_low);
     if (quotient_negative) quotient = -quotient;
-    const value = packExact(format, remainder_magnitude, remainder_exponent, remainder_negative);
+    const value = packExact(format, remainder_magnitude, y_parts.exponent, remainder_negative);
     return .{ .value = value, .quotient = quotient };
 }
 

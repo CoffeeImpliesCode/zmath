@@ -55,31 +55,9 @@ SOFTWARE.
 */
 
 #include <stdint.h>
-#define FLAG_T uint32_t
 
 #include "coremath_pow.h"
 
-/*
- * zmath has a caller-round-to-nearest contract.  The CORE-MATH kernel's
- * exception-flag save/restore path is therefore intentionally inert.
- */
-
-#ifndef POW_ITERATION
-#define POW_ITERATION 15
-#endif
-
-#define ENABLE_FP (POW_ITERATION & 0x1)
-#define ENABLE_ZIV2 (POW_ITERATION & 0x2)
-#define ENABLE_EXACT (POW_ITERATION & 0x4)
-#define ENABLE_ZIV3 (POW_ITERATION & 0x8)
-
-static FLAG_T get_flag(void) {
-  return 0;
-}
-
-static void set_flag(FLAG_T flag) {
-  (void)flag;
-}
 
 /***************** polynomial approximations of exp(z) ***********************/
 
@@ -89,19 +67,21 @@ static void set_flag(FLAG_T flag) {
    | (qh+ql) / exp(z) - 1 | < 2^-64.902632
 
    and |ql| <= 2^-51.999. See Lemma 6 from reference [5].
+   The degree-4 Sollya seed has absolute error < 2^-74.34 on the same
+   interval (see sollya/Q_1.sollya).
 */
 static inline void q_1 (double *qh, double *ql, double z) {
   double q, h0, h1, l1;
 
-  q = __builtin_fma (Q_1[4], z, Q_1[3]);
+  q = __builtin_fma (0x1.5555555849d8dp-5, z, 0x1.5555555997996p-3);
 
-  q = __builtin_fma (q, z, Q_1[2]);
+  q = __builtin_fma (q, z, 0x1p-1);
 
-  h0 = __builtin_fma (q, z, Q_1[1]);
+  h0 = __builtin_fma (q, z, 0x1p0);
 
   a_mul (&h1, &l1, z, h0);
 
-  fast_sum (qh, ql, Q_1[0], h1, l1);
+  fast_sum (qh, ql, 0x1p0, h1, l1);
 }
 
 /* Given |y| < 0.00016923 < 2^-12.52, put in r an approximation of exp(y),
@@ -292,13 +272,17 @@ static inline void q_3 (qint64_t *r, qint64_t *y) {
    | (z + ph + pl) / log(1+z) - 1 | < 2^-67.441
 
    See Lemma 2 from reference [5].
+   The degree-8 Sollya seed approximates log(1+x)-x+x^2/2 on
+   [-0.0040283203125,0.0040283203125] with absolute error < 2^-81.63.
+   The relative error of x-x^2/2+P(x) against log(1+x) is < 2^-72.423
+   (see sollya/P_1.sollya).
 */
 static inline void p_1 (double *ph, double *pl, double z) {
   double wh, wl;
   a_mul (&wh, &wl, z, z);
-  double t = __builtin_fma (P_1[5], z, P_1[4]);
-  double u = __builtin_fma (P_1[3], z, P_1[2]);
-  double v = __builtin_fma (P_1[1], z, P_1[0]);
+  double t = __builtin_fma (-0x1.0001f0c80e8cep-3, z, 0x1.2494526fd4a06p-3);
+  double u = __builtin_fma (-0x1.55555553d1eb4p-3, z, 0x1.999999981f535p-3);
+  double v = __builtin_fma (-0x1.0000000000003p-2, z, 0x1.5555555555558p-2);
   u = __builtin_fma (t, wh, u);
   v = __builtin_fma (u, wh, v);
   u = v * wh;
@@ -1202,8 +1186,7 @@ static void exp_3 (qint64_t *r, qint64_t *x) {
   possible, since 3^35 has 56 bits.
 */
 static char
-exact_pow (double *r, double x, double y, const dint64_t *z,
-           __attribute__((unused)) int exact)
+exact_pow (double *r, double x, double y, const dint64_t *z)
 {
   int64_t _s = z->sgn ? -1 : 1;
 
@@ -1216,7 +1199,7 @@ exact_pow (double *r, double x, double y, const dint64_t *z,
   if (m == 1) {
     double G = (double) E * y;
 
-    if (is_int (G)) {
+    if (integer_class (G) != 0) {
       *r = z->sgn ? -1.0 : 1.0;
       int64_t g = (int64_t) G;
       pow2(r, g);
@@ -1309,378 +1292,25 @@ exact_pow (double *r, double x, double y, const dint64_t *z,
   pow2(r, G);
 
  end:
-#ifdef CORE_MATH_SUPPORT_ERRNO
-  if (!exact && __builtin_fabs (*r) < 0x1p-1022)
-    errno = ERANGE; // underflow
-#endif
 
   return 1;
 }
 
-// return non-zero if x^y is exact (and exactly representable as a double)
-static int
-is_exact (double x, double y)
-{
-  /* All cases such that x^y might be exact are:
-     (a) |x| = 1
-     (b) y integer, 0 <= y <= 33
-     (c) y<0: x=1 or (x=2^e and |y|=n*2^-k with 2^k dividing e)
-     (d) y>0: y=n*2^f with -5 <= f <= -1 and 1 <= n <= 33
-     In cases (b)-(d), the low 42 bits of the encoding of y are zero,
-     thus we use that for an early exit test. */
-
-  f64_u v = {.f = x}, w = {.f = y};
-  if (__builtin_expect ((v.u << 1) != 0x7fe0000000000000ull &&
-                        (w.u << 22) != 0, 1))
-    return 0;
-
-  if (__builtin_expect ((v.u << 1) == 0x7fe0000000000000ull, 0)) // |x| = 1
-    return 1;
-
-  // xmax[y] for 1<=y<=33 is the largest odd m such that m^y fits in 53 bits
-  static const uint64_t xmax[] = { 0, 0xffffffffffffffff,
-                                   94906265, 208063, 9741, 1551, 455, 189, 97,
-                                   59, 39, 27, 21, 15, 13, 11, 9, 7, 7, 5, 5,
-                                   5, 5, 4, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3 };
-  if (y >= 0 && is_int (y)) {
-    /* let x = m*2^e with m an odd integer, x^y is exact when
-       - y = 0 or y = 1
-       - m = 1 or -1 and -1074 <= e*y < 1024
-       - if |x| is not a power of 2, 2 <= y <= 33 and
-         m^y should fit in 53 bits
-    */
-    uint64_t m = v.u & 0xfffffffffffffull;
-    int64_t e = ((v.u << 1) >> 53) - 0x433;
-    if (e >= -1074)
-      m |= 0x10000000000000ull;
-    else // subnormal numbers
-      e++;
-    int t = __builtin_ctzll (m);
-    m = m >> t;
-    e += t;
-    /* For normal numbers, we have x = m*2^e. */
-    if (y == 0 || y == 1)
-      return 1;
-    if (m == 1)
-      return -1074 <= y * e && y * e < 1024;
-    // now for y < 0 or 33 < y it cannot be exact
-    if (y < 0 || 33 < y)
-      return 0;
-    // now 2 <= y <= 33
-    int y_int = (int) y;
-    if (m > xmax[y_int])
-      return 0;
-    // |x^y| = m^y * 2^(e*y)
-    uint64_t my = m * m;
-    for (int i = 2; i < y_int; i++)
-      my = my * m;
-    // my = m^y
-    t = 64 - __builtin_clzll (m);
-    // 2^(t-1) <= m^y < 2^t thus 2^(e*y + t - 1) <= |x^y| < 2^(e*y + t)
-    int64_t ez = e * y_int + t;
-    if (ez <= -1074 || 1024 < ez)
-      return 0;
-    // since m is odd, x^y is an odd multiple of 2^(e*y)
-    return e * y_int >= -1074;
-  }
-
-  uint64_t n = w.u & 0xfffffffffffffull;
-  int64_t f = ((w.u << 1) >> 53) - 0x433;
-  if (f >= -1074)
-    n |= 0x10000000000000ull;
-  else // subnormal numbers
-    f++;
-  int t = __builtin_ctzll (n);
-  n = n >> t;
-  f += t;
-  // |y| = n*2^f with n odd
-
-  uint64_t m = v.u & 0xfffffffffffffull;
-  int64_t e = ((v.u << 1) >> 53) - 0x433;
-  if (e >= -1074)
-    m |= 0x10000000000000ull;
-  else // subnormal numbers
-    e++;
-  t = __builtin_ctzll (m);
-  m = m >> t;
-  e += t;
-  // |x| = m*2^e with m odd
-
-  /* if y < 0 and y is not an integer, the only case where x^y might be
-     exact is when x = 2^e and n*e*2^f is an integer */
-  if (y < 0)
-  {
-    if (m != 1) return 0;
-    // now e <> 0 since the case |x|=1 has already been treated
-    int64_t ez;
-    if (f >= 0)
-      // if f >= 12, since n*e <> 0, (n*e)<<f cannot be in [-1074,1024)
-      ez = (f < 12) ? (-n * e) << f : 1024;
-    else { // f < 0 thus 2^-f should divide e
-      t = __builtin_ctzll (e);
-      if (-f > t) return 0; // 2^-f does not divide e
-      ez = (-e >> (-f)) * n;
-    }
-    return -1074 <= ez && ez < 1024;
-  }
-
-  /* now y > 0, y is not a integer, y = n*2^f with n odd and f < 0.
-     Since x^(n*2^f) = (x^(2^f))^n, and n is odd, necessarily
-     x is an exact (2^k)th power with k=-f.
-     This implies x is a square. Since x = m*2^e with m odd,
-     necessarily m is a square, and e is even. */
-  while (f++) {
-    // try to extract a square from m*2^e
-    if (e&1) return 0;
-    e = e / 2;
-    double dm = (double) m;
-    double s = __builtin_round (__builtin_sqrt (dm));
-    if (s * s != dm)
-      return 0;
-    /* The above call of sqrt() might set the inexact flag, but in case
-       it happens, m is not a square, thus x^y cannot be exact. */
-    m = (uint64_t) s; // m remains odd (square root of an odd number)
-  }
-
-  // Now |x^y| = (m*2^e)^n with m, n odd integers
-  // now for 33 < n it cannot be exact, unless m=1
-  if (m > 1)
-  {
-    if (33 < n)
-      return 0;
-    // now n <= 33
-    if (m > xmax[n])
-      return 0;
-  }
-  // |x^y| = m^n * 2^(e*n) with m odd
-  uint64_t my = m, n0 = n;
-  while (n0-- > 1)
-    my = my * m;
-  // |x^y| = my * 2^(e*n)
-  t = 64 - __builtin_clzll (my); // number of significant bits of m^n
-  /* x^y is an odd multiple of 2^(e*n) thus we should have e*n >= -1074,
-     we also have 2^(t-1) <= m^n thus 2^(e*n+t-1) <= |x^y| < 2^(e*n+t)
-     and we need e*n+t <= 1024 */
-  return -1074 <= e * (int) n && e * (int) n + t <= 1024;
-}
 
 // Correctly rounded power function
-double cr_pow (double x, double y) {
+double cr_powFinite (double x, double y) {
   double s = 1.0; /* sign of the result */
   double x0 = x; // original value of x
 
-  f64_u _x = {.f = x};
   f64_u _y = {.f = y};
 
-  if (__builtin_expect((_x.u >= 0x7ff0000000000000 || _y.u >= 0x7ff0000000000000), 0)) {
-
-    if (__builtin_isnan(x)) {
-      // IEEE 754-2019: pow(x,+/-0) = 1 if x is not a signaling NaN
-      if (y == 0.0 && !is_signaling(x))
-        return 1.0;
-
-      /* pow(sNaN, y) = qNaN. This is implicit in IEEE 754-2019,
-         Section 7.2: "the default result of an operation that signals the
-         invalid operation exception shall be a quiet NaN" and "These
-         operations are: a) any general-computational operation on a signaling
-         NaN".
-
-         Moreover, in 6.2.3:
-         "An operation that propagates a NaN operand to its result and has a
-         single NaN as an input should produce a NaN with the payload of the
-         input NaN if representable in the destination format. If two or more
-         inputs are NaN, then the payload of the resulting NaN should be
-         identical to the payload of one of the input NaNs if representable in
-         the destination format. This standard does not specify which of the
-         input NaNs will provide the payload."
-
-         Returning x+x has the double effect to quiet the signaling bit
-         and to raise the invalid exception if x=sNaN. */
-      return x + x;
-    }
-
-    if (__builtin_isnan(y)) {
-      // IEEE 754-2019: pow(1,y) = 1 for any y (even a quiet NaN)
-      if (x == 1.0 && !is_signaling(y))
-        return 1.0;
-
-      // pow(x, sNaN) = qNaN (see above)
-      return y + y;
-    }
-
-    switch (_x.u) {
-
-    // x = +inf
-    case 0x7ff0000000000000:
-      if (y == 0.0)
-        return 1.0;
-
-      if (y < 0.0)
-        return 0.0;
-
-      if (y > 0.0)
-        return INFINITY;
-
-      break;
-
-    // x = -inf
-    case 0xfff0000000000000:
-
-      // y is an odd integer
-      if (is_int(y) && !is_int(y * 0.5)) {
-
-        // y is a negative odd integer
-        if (y < 0.0)
-          return -0.0;
-
-        // y is a positive odd integer
-        else
-          return -INFINITY;
-      }
-
-      // y is a negative even integer or is negative non-integer
-      if (y < 0.0)
-        return 0.0;
-
-      // y is a positive even integer or is positive non-integer
-      if (y > 0.0)
-        return INFINITY;
-
-      break;
-    }
-
-    switch (_y.u) {
-
-    // y = +inf
-    case 0x7ff0000000000000:
-      if (x == 0.0)
-        return 0.0;
-
-      if (x == -1.0 || x == 1.0)
-        return 1.0;
-
-      if (-1.0 < x && x < 1.0)
-        return 0.0;
-
-      if (x < -1.0 || 1.0 < x)
-        return INFINITY;
-
-      break;
-
-    // y = -inf
-    case 0xfff0000000000000:
-        if (x == 0.0)
-          return INFINITY;
-
-      if (x == -1.0 || x == 1.0)
-        return 1.0;
-
-      if (-1.0 < x && x < 1.0)
-        return INFINITY;
-
-      if (x < -1.0 || 1.0 < x)
-        return 0.0;
-
-      break;
-    }
-  } // From now on, x and y are finite values
-
-  /* first deal with the case x <= 0 */
-  if (x <= 0.0) {
-    /* pow(x,+/-0) is 1 if x is not a signaling NaN. */
-    if (y == 0.0)
-      return 1.0;
-
-    switch (_x.u) {
-
-    // x = +0.0
-    case 0x0:
-
-      // y is an odd integer
-      if (is_int(y) && !is_int(y * 0.5)) {
-
-        // y is a negative odd integer
-        if (y < 0.0) {
-          feraiseexcept(FE_DIVBYZERO);
-#ifdef CORE_MATH_SUPPORT_ERRNO
-          errno = ERANGE;
-#endif
-          return INFINITY;
-        }
-
-        // y is a positive odd integer
-        return 0.0;
-      }
-
-      // y is positive (non-integer or a positive even integer)
-      if (y > 0.0)
-        return 0.0;
-
-      // y is negative, finite and an even integer or a non-integer
-      feraiseexcept(FE_DIVBYZERO);
-#ifdef CORE_MATH_SUPPORT_ERRNO
-      errno = ERANGE;
-#endif
-      return INFINITY;
-
-    // x = -0.0
-    case 0x8000000000000000:
-
-      // y is an odd integer
-      if (is_int(y) && !is_int(y * 0.5)) {
-
-        // y is a negative odd integer
-        if (y < 0.0) {
-#ifdef CORE_MATH_SUPPORT_ERRNO
-          errno = ERANGE;
-#endif
-          feraiseexcept(FE_DIVBYZERO);
-          return -INFINITY;
-        }
-
-        // y is a positive odd integer
-        return -0.0;
-      }
-
-      // y is positive (non-integer or a positive even integer)
-      if (y > 0.0)
-        return 0.0;
 
 
-      // y is negative, finite and an even integer or a non-integer
-#ifdef CORE_MATH_SUPPORT_ERRNO
-      errno = ERANGE;
-#endif
-      feraiseexcept(FE_DIVBYZERO);
-      return INFINITY;
-
-    }
-
-    if (!is_int(y)) {
-#ifdef CORE_MATH_SUPPORT_ERRNO
-      errno = EDOM;
-#endif
-      feraiseexcept(FE_INVALID);
-      return NAN;
-    }
-
-    double cs[] = {1.0, -1.0};
-
-    // set sign to 1 for y even, to -1 for y odd
-    int y_parity = __builtin_fabs (y) >= 0x1p53 ? 0 : ((int64_t) y & 0x1);
-    s = cs[y_parity];
-
-    // Set x to |x| for the rest of the computation
-    x = -x;
-  } /* end of case x <= 0 */
-
-#if ENABLE_FP > 0
   /* This is Algorithm phase_1 from reference [5]. */
   double res_h, res_l;
 
   double lh, ll;
 
-  FLAG_T flag = get_flag ();
 
   // approximate log(x)
   int cancel = log_1 (&lh, &ll, x);
@@ -1715,19 +1345,13 @@ double cr_pow (double x, double y) {
 
   /* The error bounds 2^-63.797 and 2^-57.579 are those from Algorithm
      phase_1 from reference [5]. */
-  static const double err[] = { 0x1.27p-64, /* 2^-63.797 < 0x1.27p-64 */
-                                0x1.57p-58, /* 2^-57.579 < 0x1.57p-58 */
-  };
+  double err = cancel ? 0x1.57p-58 : 0x1.27p-64;
   double res_min, res_max;
-  res_min = res_h + __builtin_fma (err[cancel], -res_h, res_l);
-  res_max = res_h + __builtin_fma (err[cancel], res_h, res_l);
+  res_min = res_h + __builtin_fma (err, -res_h, res_l);
+  res_max = res_h + __builtin_fma (err, res_h, res_l);
   /* if res_h < 0, we have res_max < res_min, but since we only check
      equality between res_min and res_max, it does not matter */
 
-  int exact = is_exact (x, y);
-  if (exact)
-    // restore inexact flag
-    set_flag (flag);
 
   if (__builtin_expect (res_min == res_max, 1)) {
     /* when res_min * ex is in the subnormal range, exp_1() returns NaN
@@ -1753,7 +1377,7 @@ double cr_pow (double x, double y) {
     /* we have underflow for |x| < 2^-511, since even for RNDU and
        x = nextbelow(2^-511), x^2 would be rounded to 0x1.fffffffffffffp-1023
        with unbouded exponent range, which is not representable */
-    if (__builtin_fabs (x) < 0x1p-511 && !exact)
+    if (__builtin_fabs (x) < 0x1p-511)
       errno = ERANGE; // underflow
 #endif
       return z;
@@ -1764,12 +1388,10 @@ double cr_pow (double x, double y) {
 
   if (y == 0.0)
     return 1.0;
-#endif /* ENABLE_FP */
 
   uint64_t rd; // used in the 2nd and 3rd phases
 
 // Second iteration of rounding
-#if ENABLE_ZIV2 > 0
   dint64_t X, Y;
   dint_fromd (&X, x); /* exact: |x| = 2^(X->ex-63) * X->hi (X->lo = 0) */
   dint_fromd (&Y, y); /* exact: |y| = 2^(Y->ex-63) * Y->hi (Y->lo = 0) */
@@ -1846,23 +1468,16 @@ double cr_pow (double x, double y) {
 
   if (rd)
     // dint_tod should deal with underflow/overflow/errno issues
-    return dint_tod (&R, exact);
+    return dint_tod (&R);
 
-#if ENABLE_EXACT > 0
   // Detect rounding boundary cases
   double e;
 
-  if (exact_pow (&e, x0, y, &R, exact))
+  if (exact_pow (&e, x0, y, &R))
     return e;
-#endif /* ENABLE_EXACT */
-#endif /* ENABLE_ZIV2 */
 
-  /* Note: exact and midpoint cases should be filtered by
-     exact_pow() above, and should not enter the 2nd iteration.
-     Thus check.sh might fail when POW_ITERATION | 2 == 0
-     or POW_ITERATION | 4 == 0. */
+  /* exact_pow() filters exact and midpoint cases before this final phase. */
 
-#if ENABLE_ZIV3
   // Hard to round cases
   qint64_t qX, qY;
   qint_fromd (&qX, x); /* exact */
@@ -1915,7 +1530,5 @@ double cr_pow (double x, double y) {
 
   return -0.0;
 
-#else
-  return -0.0;
-#endif /* ENABLE_ZIV3 */
 }
+

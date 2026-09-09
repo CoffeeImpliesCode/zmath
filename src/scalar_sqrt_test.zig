@@ -55,10 +55,12 @@ test "Square root handles negative finite and -Inf as canonical +qNaN" {
     try expectSqrtHBits(0xbc00, 0x7e00); // -1.0 -> canonical qNaN
     try expectSqrtHBits(0xfc00, 0x7e00); // -Inf -> canonical qNaN
     try expectSqrtHBits(0x8200, 0x7e00); // -subnormal -> canonical qNaN
+    try expectSqrtFBits(0x8000_0001, 0x7fc0_0000); // -subnormal
     try expectSqrtFBits(0xbf80_0000, 0x7fc0_0000); // -1.0 -> canonical qNaN
     try expectSqrtFBits(0xff80_0000, 0x7fc0_0000); // -Inf -> canonical qNaN
     try expectSqrtDBits(0xbff0_0000_0000_0000, 0x7ff8_0000_0000_0000); // -1.0 -> canonical qNaN
     try expectSqrtDBits(0xfff0_0000_0000_0000, 0x7ff8_0000_0000_0000); // -Inf -> canonical qNaN
+    try expectSqrtDBits(0x8000_0000_0000_0001, 0x7ff8_0000_0000_0000); // -subnormal
 }
 
 test "Square root quiets sNaN and preserves qNaN payload" {
@@ -66,14 +68,20 @@ test "Square root quiets sNaN and preserves qNaN payload" {
     try expectSqrtHBits(0x7d00, 0x7f00);
     // f16 quiet NaN: 0x7e55 -> 0x7e55 (preserved)
     try expectSqrtHBits(0x7e55, 0x7e55);
+    try expectSqrtHBits(0xfd01, 0xff01); // negative signaling NaN
+    try expectSqrtHBits(0xfe55, 0xfe55); // negative quiet NaN
     // f32 signaling NaN: 0x7f800001 -> 0x7fc00001 (quieted)
     try expectSqrtFBits(0x7f80_0001, 0x7fc0_0001);
     // f32 quiet NaN: 0x7fc0_0123 -> 0x7fc0_0123 (preserved)
     try expectSqrtFBits(0x7fc0_0123, 0x7fc0_0123);
+    try expectSqrtFBits(0xff80_0011, 0xffc0_0011); // negative signaling NaN
+    try expectSqrtFBits(0xffc0_0123, 0xffc0_0123); // negative quiet NaN
     // f64 signaling NaN: 0x7ff0_0000_0000_0001 -> 0x7ff8_0000_0000_0001 (quieted)
     try expectSqrtDBits(0x7ff0_0000_0000_0001, 0x7ff8_0000_0000_0001);
     // f64 quiet NaN: 0x7ff8_0000_0000_0123 -> 0x7ff8_0000_0000_0123 (preserved)
     try expectSqrtDBits(0x7ff8_0000_0000_0123, 0x7ff8_0000_0000_0123);
+    try expectSqrtDBits(0xfff0_0000_0000_0011, 0xfff8_0000_0000_0011); // negative signaling NaN
+    try expectSqrtDBits(0xfff8_0000_0000_0123, 0xfff8_0000_0000_0123); // negative quiet NaN
 }
 
 test "Square root handles subnormal inputs" {
@@ -87,6 +95,10 @@ test "Square root handles subnormal inputs" {
 
     // f64: sqrt(2^-1074) = 2^-537 (exact power), nearest f64 = 0x1e60000000000000
     try expectSqrtDBits(0x0000_0000_0000_0001, 0x1e60_0000_0000_0000);
+    // Minimum positive normal inputs are exact squares in every format.
+    try expectSqrtHBits(0x0400, 0x2000);
+    try expectSqrtFBits(0x0080_0000, 0x2000_0000);
+    try expectSqrtDBits(0x0010_0000_0000_0000, 0x2000_0000_0000_0000);
 }
 
 test "Square root computes correctly rounded result for sqrt(2)" {

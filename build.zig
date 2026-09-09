@@ -86,7 +86,7 @@ pub fn build(b: *std.Build) void {
         \\#endif
         \\
         \\extern _Float16 cr_atan2f16(_Float16, _Float16);
-        \\extern float cr_atan2f(float, float);
+        \\extern float zmath_core_atan2f_finite(float, float);
         \\extern int zmath_core_atan2d_checked(double, double, double *);
         \\extern int zmath_core_atan2d_forced_ambiguity(double, double, double *);
         \\extern void zmath_core_atan2d_test_subtract_two_limbs(uint64_t *, uint64_t *, uint64_t *);
@@ -95,19 +95,20 @@ pub fn build(b: *std.Build) void {
         \\extern double cr_cospi(double);
         \\extern _Float16 cr_erfcf16(_Float16);
         \\extern float cr_erfcf(float);
-        \\extern double cr_erfc(double);
+        \\extern double zmath_core_erfcd_negative(double);
+        \\extern double zmath_core_erfcd_positive(double);
         \\extern _Float16 zmath_core_lgammah(_Float16, int *);
         \\extern float zmath_core_lgammaf(float, int *);
         \\extern double zmath_core_lgammad(double, int *);
         \\extern _Float16 cr_log10p1f16(_Float16);
-        \\extern float cr_log10p1f(float);
-        \\extern double cr_log10p1(double);
+        \\extern float zmath_core_log10p1f_finite(float);
+        \\extern double zmath_core_log10p1_finite(double);
         \\extern _Float16 cr_log2p1f16(_Float16);
-        \\extern float cr_log2p1f(float);
-        \\extern double cr_log2p1(double);
+        \\extern float zmath_core_log2p1f_finite(float);
+        \\extern double zmath_core_log2p1_finite(double);
         \\extern _Float16 zmath_core_asinpih(_Float16);
         \\extern float zmath_core_asinpif(float);
-        \\extern double zmath_core_asinpid(double);
+        \\extern double zmath_core_asinpid_finite_bits(double, uint64_t);
         \\extern _Float16 zmath_core_acospih(_Float16);
         \\extern float zmath_core_acospif(float);
         \\extern double zmath_core_acospid(double);
@@ -116,20 +117,20 @@ pub fn build(b: *std.Build) void {
         \\extern double zmath_core_atanpid(double);
         \\extern _Float16 zmath_core_atan2pih(_Float16, _Float16);
         \\extern float zmath_core_atan2pif(float, float);
-        \\extern int zmath_core_atan2pid_checked(double, double, double *);
+        \\extern double zmath_core_atan2pid_finite_bits(double, double, uint64_t, uint64_t);
         \\extern int zmath_core_atan2pid_forced_ambiguity(double, double, double *);
         \\extern _Float16 cr_powf16(_Float16, _Float16);
-        \\extern float cr_powf(float, float);
-        \\extern double cr_pow(double, double);
+        \\extern float cr_powfFiniteBits(uint32_t, float);
+        \\extern double cr_powFinite(double, double);
         \\extern _Float16 cr_tgammaf16(_Float16);
         \\extern float cr_tgammaf(float);
-        \\extern double cr_tgamma(double);
+        \\extern double cr_tgamma_finite(double);
         \\
         \\typedef void (*zmath_c_kernel_symbol)(void);
         \\__attribute__((used, retain))
         \\static zmath_c_kernel_symbol const zmath_c_kernel_symbols[] = {
         \\    (zmath_c_kernel_symbol)cr_atan2f16,
-        \\    (zmath_c_kernel_symbol)cr_atan2f,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2f_finite,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2d_checked,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2d_forced_ambiguity,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2d_test_subtract_two_limbs,
@@ -138,19 +139,20 @@ pub fn build(b: *std.Build) void {
         \\    (zmath_c_kernel_symbol)cr_cospi,
         \\    (zmath_c_kernel_symbol)cr_erfcf16,
         \\    (zmath_c_kernel_symbol)cr_erfcf,
-        \\    (zmath_c_kernel_symbol)cr_erfc,
+        \\    (zmath_c_kernel_symbol)zmath_core_erfcd_negative,
+        \\    (zmath_c_kernel_symbol)zmath_core_erfcd_positive,
         \\    (zmath_c_kernel_symbol)zmath_core_lgammah,
         \\    (zmath_c_kernel_symbol)zmath_core_lgammaf,
         \\    (zmath_c_kernel_symbol)zmath_core_lgammad,
         \\    (zmath_c_kernel_symbol)cr_log10p1f16,
-        \\    (zmath_c_kernel_symbol)cr_log10p1f,
-        \\    (zmath_c_kernel_symbol)cr_log10p1,
+        \\    (zmath_c_kernel_symbol)zmath_core_log10p1f_finite,
+        \\    (zmath_c_kernel_symbol)zmath_core_log10p1_finite,
         \\    (zmath_c_kernel_symbol)cr_log2p1f16,
-        \\    (zmath_c_kernel_symbol)cr_log2p1f,
-        \\    (zmath_c_kernel_symbol)cr_log2p1,
+        \\    (zmath_c_kernel_symbol)zmath_core_log2p1f_finite,
+        \\    (zmath_c_kernel_symbol)zmath_core_log2p1_finite,
         \\    (zmath_c_kernel_symbol)zmath_core_asinpih,
         \\    (zmath_c_kernel_symbol)zmath_core_asinpif,
-        \\    (zmath_c_kernel_symbol)zmath_core_asinpid,
+        \\    (zmath_c_kernel_symbol)zmath_core_asinpid_finite_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_acospih,
         \\    (zmath_c_kernel_symbol)zmath_core_acospif,
         \\    (zmath_c_kernel_symbol)zmath_core_acospid,
@@ -159,14 +161,14 @@ pub fn build(b: *std.Build) void {
         \\    (zmath_c_kernel_symbol)zmath_core_atanpid,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2pih,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2pif,
-        \\    (zmath_c_kernel_symbol)zmath_core_atan2pid_checked,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2pid_finite_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2pid_forced_ambiguity,
         \\    (zmath_c_kernel_symbol)cr_powf16,
-        \\    (zmath_c_kernel_symbol)cr_powf,
-        \\    (zmath_c_kernel_symbol)cr_pow,
+        \\    (zmath_c_kernel_symbol)cr_powfFiniteBits,
+        \\    (zmath_c_kernel_symbol)cr_powFinite,
         \\    (zmath_c_kernel_symbol)cr_tgammaf16,
         \\    (zmath_c_kernel_symbol)cr_tgammaf,
-        \\    (zmath_c_kernel_symbol)cr_tgamma,
+        \\    (zmath_c_kernel_symbol)cr_tgamma_finite,
         \\};
         \\
     );
@@ -369,22 +371,16 @@ pub fn build(b: *std.Build) void {
     // A run step that will run the test executable.
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
-    // Creates an executable that will run `test` blocks from the executable's
-    // root module. Note that test executables only test one module at a time,
-    // hence why we have to create two separate ones.
-    const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
-    });
-
-    // A run step that will run the second test executable.
-    const run_exe_tests = b.addRunArtifact(exe_tests);
-
-    // A top level step for running all tests. dependOn can be called multiple
-    // times and since the two run steps do not depend on one another, this will
-    // make the two of them run in parallel.
+    // The demonstration has no tests. Run the library's numerical suites.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_exe_tests.step);
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = exe.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    const docs_step = b.step("docs", "Generate documentation");
+    docs_step.dependOn(&install_docs.step);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //

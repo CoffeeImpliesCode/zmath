@@ -1,4 +1,5 @@
 const std = @import("std");
+const scalar_tiny = @import("scalar_tiny.zig");
 
 // Correctly rounded half-revolution tangent for binary64 values.
 //
@@ -158,10 +159,10 @@ fn tanpiDatabase(value: f64, result: f64) f64 {
         if (period != 0) absolute_value = 0.5 - absolute_value;
     }
     const sign: f64 = if ((period ^ (input_bits >> 63)) != 0) -1.0 else 1.0;
-    var lower: i32 = 0;
-    var upper: i32 = @intCast(database.len - 1);
+    var lower: isize = 0;
+    var upper: isize = @intCast(database.len - 1);
     while (lower <= upper) {
-        const middle: i32 = @divTrunc(lower + upper, 2);
+        const middle: isize = @divTrunc(lower + upper, 2);
         const middle_index: usize = @intCast(middle);
         if (database[middle_index][0] < absolute_value) {
             lower = middle + 1;
@@ -248,16 +249,30 @@ pub fn tanpid(value: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(value);
     const absolute_bits = input_bits & magnitude_mask;
+    if (absolute_bits >= infinity_bits) {
+        if (absolute_bits > infinity_bits) return @bitCast(input_bits | quiet_nan_bit);
+        return @bitCast(canonical_nan_bits);
+    }
+    if (absolute_bits == 0) return value;
+    if (absolute_bits < scalar_tiny.magnitude_limit) {
+        // With y = pi*x, tan(y)-y = integral_0^y tan(t)^2 dt and |tan(t)| < 2*|t|
+        // for |t| <= 1/2; |y| < 2^-1019, so the remainder is < 2^7*|x|^3
+        // < |x|*2^-128, inside the integer-stage allowance.
+        return scalar_tiny.scale(.pi, value);
+    }
+
+    // Above 2^53 the binary64 spacing is at least two, so every value is an
+    // even integer and tanpi has the input sign on its exact zero.
+    if (absolute_bits >= (0x434 << 52)) {
+        return @bitCast(input_bits & 0x8000_0000_0000_0000);
+    }
+
     var high: f64 = undefined;
     var low: f64 = undefined;
     var result: f64 = undefined;
 
     if (absolute_bits >= (0x3f3 << 52)) {
         if (absolute_bits >= (0x42d << 52)) {
-            if (absolute_bits >= infinity_bits) {
-                if (absolute_bits > infinity_bits) return @bitCast(input_bits | quiet_nan_bit);
-                return @bitCast(canonical_nan_bits);
-            }
             const exponent: i32 = @intCast(absolute_bits >> 52);
             const shift_signed = exponent - 1069;
             if (shift_signed > 6) return @bitCast(input_bits & 0x8000_0000_0000_0000);
@@ -403,7 +418,6 @@ pub fn tanpid(value: f64) f64 {
         high = fastTwoSum(high, low, &low);
         result = high;
     } else {
-        if (absolute_bits == 0) return value;
         const pi_high = 0x1.921fb54442d18p+1;
         const pi_low = 0x1.1a62633145c07p-53;
         if (absolute_bits < (0x3ca << 52)) {

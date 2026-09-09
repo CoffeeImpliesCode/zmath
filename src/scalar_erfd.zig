@@ -24,20 +24,22 @@
 //! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //! SOFTWARE.
 
+const tiny = @import("scalar_tiny.zig");
+
 const b64u64_u = extern union {
     f: f64,
     u: u64,
 };
 
-fn my_copysign(x: f64, y: f64) f64 {
+fn myCopysign(x: f64, y: f64) f64 {
     const x_bits: u64 = @bitCast(x);
     const y_bits: u64 = @bitCast(y);
     return @bitCast((x_bits & 0x7fff_ffff_ffff_ffff) | (y_bits & 0x8000_0000_0000_0000));
 }
 
-const CH: f64 = 1.1283791670955126;
-const CL: f64 = 0.00000000000000001533545961316588;
-const C: [94][13]f64 = [94][13]f64{
+const ch: f64 = 1.1283791670955126;
+const cl: f64 = 0.00000000000000001533545961316588;
+const coefficients_fast: [94][13]f64 = [94][13]f64{
     [13]f64{
         0.10547644378177959,
         -@as(f64, 0.0000000000000000008405304569045673),
@@ -1449,7 +1451,7 @@ const C: [94][13]f64 = [94][13]f64{
         -@as(f64, 0.0000000000005513181076420298),
     },
 };
-const C2: [47][27]f64 = [47][27]f64{
+const coefficients_accurate: [47][27]f64 = [47][27]f64{
     [27]f64{
         0.20911767705937584,
         0.000000000000000008912959283486115,
@@ -2814,7 +2816,7 @@ const C2: [47][27]f64 = [47][27]f64{
         0.000000035404049486391726,
     },
 };
-fn fast_two_sum(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
+fn fastTwoSum(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
     @setFloatMode(.strict);
     var hi = arg_hi;
     _ = &hi;
@@ -2830,7 +2832,7 @@ fn fast_two_sum(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
     e = hi.* - a;
     lo.* = b - e;
 }
-fn two_sum(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
+fn twoSum(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
     @setFloatMode(.strict);
     var hi = arg_hi;
     _ = &hi;
@@ -2851,7 +2853,7 @@ fn two_sum(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
     _ = &db;
     lo.* = da + db;
 }
-fn a_mul(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
+fn aMul(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
     @setFloatMode(.strict);
     var hi = arg_hi;
     _ = &hi;
@@ -2864,7 +2866,7 @@ fn a_mul(arg_hi: [*c]f64, arg_lo: [*c]f64, arg_a: f64, arg_b: f64) void {
     hi.* = a * b;
     lo.* = @mulAdd(f64, a, b, -hi.*);
 }
-fn cr_erf_fast(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) f64 {
+fn crErfFast(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) f64 {
     @setFloatMode(.strict);
     var h = arg_h;
     _ = &h;
@@ -2876,52 +2878,32 @@ fn cr_erf_fast(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) f64 {
     _ = &th;
     var tl: f64 = undefined;
     _ = &tl;
-    if (z < @as(f64, 0.0625)) {
-        const static_local_c0 = struct {
-            const c0: [8]f64 = [8]f64{
-                1.1283791670955126,
-                0.000000000000000015335458324517626,
-                -@as(f64, 0.37612638903183754),
-                0.000000000000000013488819958138915,
-                0.11283791670954989,
-                -@as(f64, 0.02686617064150544),
-                0.005223974478269176,
-                -@as(f64, 0.0008537735898387047),
-            };
-        };
-        _ = &static_local_c0;
-        var z2h: f64 = undefined;
-        _ = &z2h;
-        var z2l: f64 = undefined;
-        _ = &z2l;
-        var z4: f64 = undefined;
-        _ = &z4;
-        a_mul(&z2h, &z2l, z, z);
-        z4 = z2h * z2h;
-        var c9: f64 = @mulAdd(f64, static_local_c0.c0[@as(c_int, 7)], z2h, static_local_c0.c0[@as(c_int, 6)]);
-        _ = &c9;
-        var c5: f64 = @mulAdd(f64, static_local_c0.c0[@as(c_int, 5)], z2h, static_local_c0.c0[@as(c_int, 4)]);
-        _ = &c5;
-        c5 = @mulAdd(f64, c9, z4, c5);
-        a_mul(&th, &tl, z2h, c5);
-        fast_two_sum(h, l, static_local_c0.c0[@as(c_int, 2)], th);
-        l.* += tl + static_local_c0.c0[@as(c_int, 3)];
-        var h_copy: f64 = h.*;
-        _ = &h_copy;
-        a_mul(&th, &tl, z2h, h.*);
-        tl += @mulAdd(f64, z2h, l.*, static_local_c0.c0[@as(c_int, 1)]);
-        fast_two_sum(h, l, static_local_c0.c0[@as(c_int, 0)], th);
-        l.* += @mulAdd(f64, z2l, h_copy, tl);
-        a_mul(h, &tl, h.*, z);
-        l.* = @mulAdd(f64, l.*, z, tl);
-        return 0.0000000000000000000024881592825595072;
+    if (z < 0x1p-4) {
+        const square = z * z;
+        const cubic = z * square;
+        var polynomial: f64 = 0x1.f9a326f9b89b7p-14;
+        polynomial = @mulAdd(f64, polynomial, square, -0x1.c02db40040b86p-11);
+        polynomial = @mulAdd(f64, polynomial, square, 0x1.565bcd0e6a53fp-8);
+        polynomial = @mulAdd(f64, polynomial, square, -0x1.b82ce31288b51p-6);
+        polynomial = @mulAdd(f64, polynomial, square, 0x1.ce2f21a042be2p-4);
+        polynomial = @mulAdd(f64, polynomial, square, -0x1.812746b0379e7p-2);
+        const linear = ch * z;
+        const linear_low = @mulAdd(f64, cl, z, @mulAdd(f64, ch, z, -linear));
+        h.* = linear;
+        l.* = linear_low + cubic * polynomial;
+        // On [2^-61, 2^-4), the degree-15 Taylor tail is below
+        // 2^-10*u*z^3. Coefficient/evaluation error and interval-endpoint
+        // rounding are bounded by 8*u*z^3 + 16*u^2*z, where u=2^-53.
+        // h=CH*z>z, so this relative bound encloses the absolute error.
+        return square * 0x1p-50 + 0x1p-102;
     }
-    var v: f64 = @floor(@as(f64, @as(f64, 16.0) * z));
-    _ = &v;
-    var i: u32 = @intFromFloat(@as(f64, 16.0) * z);
-    _ = &i;
+    // The index truncates toward zero on a non-negative input, so it is also
+    // the floor of the range reduction. It converts back to f64 exactly, so the
+    // second scaling and its rounding disappear.
+    const i: u32 = @intFromFloat(@as(f64, 16.0) * z);
+    const v: f64 = @floatFromInt(i);
     z = (z - @as(f64, 0.03125)) - (@as(f64, 0.0625) * v);
-    var c: [*c]const f64 = @ptrCast(@alignCast(&C[i -% @as(u32, 1)]));
+    var c: [*c]const f64 = @ptrCast(@alignCast(&coefficients_fast[i -% @as(u32, 1)]));
     _ = &c;
     var z2: f64 = z * z;
     _ = &z2;
@@ -2937,29 +2919,29 @@ fn cr_erf_fast(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) f64 {
     _ = &c3h;
     var c3l: f64 = undefined;
     _ = &c3l;
-    fast_two_sum(&c3h, &c3l, c[@as(c_int, 5)], z * c[@as(c_int, 6)]);
+    fastTwoSum(&c3h, &c3l, c[@as(c_int, 5)], z * c[@as(c_int, 6)]);
     c7 = @mulAdd(f64, c9, z2, c7);
-    fast_two_sum(&c3h, &tl, c3h, c5 * z2);
+    fastTwoSum(&c3h, &tl, c3h, c5 * z2);
     c3l += tl;
-    fast_two_sum(&c3h, &tl, c3h, c7 * z4);
+    fastTwoSum(&c3h, &tl, c3h, c7 * z4);
     c3l += tl;
     var c2h: f64 = undefined;
     _ = &c2h;
     var c2l: f64 = undefined;
     _ = &c2l;
-    a_mul(&th, &tl, z, c3h);
-    fast_two_sum(&c2h, &c2l, c[@as(c_int, 4)], th);
+    aMul(&th, &tl, z, c3h);
+    fastTwoSum(&c2h, &c2l, c[@as(c_int, 4)], th);
     c2l += @mulAdd(f64, z, c3l, tl);
-    a_mul(&th, &tl, z, c2h);
-    fast_two_sum(h, l, c[@as(c_int, 2)], th);
+    aMul(&th, &tl, z, c2h);
+    fastTwoSum(h, l, c[@as(c_int, 2)], th);
     l.* += tl + @mulAdd(f64, z, c2l, c[@as(c_int, 3)]);
-    a_mul(&th, &tl, z, h.*);
+    aMul(&th, &tl, z, h.*);
     tl = @mulAdd(f64, z, l.*, tl);
-    fast_two_sum(h, l, c[@as(c_int, 0)], th);
+    fastTwoSum(h, l, c[@as(c_int, 0)], th);
     l.* += tl + c[@as(c_int, 1)];
     return 0.0000000000000000000018065624578158124;
 }
-fn cr_erf_accurate_tiny(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
+fn crErfAccurateTiny(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
     @setFloatMode(.strict);
     var h = arg_h;
     _ = &h;
@@ -3835,7 +3817,8 @@ fn cr_erf_accurate_tiny(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
     _ = &k;
     {
         i = 0;
-        j = @sizeOf(@TypeOf(static_local_exceptions.exceptions)) / @sizeOf(@TypeOf(static_local_exceptions.exceptions[@as(c_int, 0)]));
+        j = @sizeOf(@TypeOf(static_local_exceptions.exceptions)) /
+            @sizeOf(@TypeOf(static_local_exceptions.exceptions[@as(c_int, 0)]));
         while ((i +% @as(u64, 1)) < j) {
             k = (i +% j) / @as(u64, 2);
             if (static_local_exceptions.exceptions[k][@as(c_int, 0)] <= z) {
@@ -3881,7 +3864,12 @@ fn cr_erf_accurate_tiny(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
         var a: c_int = 19;
         _ = &a;
         while (a > @as(c_int, 11)) : (a -= 2) {
-            h.* = @mulAdd(f64, h.*, z2, static_local_p.p[@bitCast(@as(isize, @intCast(@divTrunc(a, @as(c_int, 2)) + @as(c_int, 4))))]);
+            h.* = @mulAdd(
+                f64,
+                h.*,
+                z2,
+                static_local_p.p[@bitCast(@as(isize, @intCast(@divTrunc(a, @as(c_int, 2)) + @as(c_int, 4))))],
+            );
         }
     }
     l.* = @floatFromInt(@as(c_int, 0));
@@ -3889,11 +3877,16 @@ fn cr_erf_accurate_tiny(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
         var a: c_int = 11;
         _ = &a;
         while (a > @as(c_int, 7)) : (a -= 2) {
-            a_mul(&th, &tl, h.*, z);
+            aMul(&th, &tl, h.*, z);
             tl = @mulAdd(f64, l.*, z, tl);
-            a_mul(h, l, th, z);
+            aMul(h, l, th, z);
             l.* = @mulAdd(f64, tl, z, l.*);
-            fast_two_sum(h, &tl, static_local_p.p[@bitCast(@as(isize, @intCast(@divTrunc(a, @as(c_int, 2)) + @as(c_int, 4))))], h.*);
+            fastTwoSum(
+                h,
+                &tl,
+                static_local_p.p[@bitCast(@as(isize, @intCast(@divTrunc(a, @as(c_int, 2)) + @as(c_int, 4))))],
+                h.*,
+            );
             l.* += tl;
         }
     }
@@ -3901,19 +3894,19 @@ fn cr_erf_accurate_tiny(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
         var a: c_int = 7;
         _ = &a;
         while (a >= @as(c_int, 1)) : (a -= 2) {
-            a_mul(&th, &tl, h.*, z);
+            aMul(&th, &tl, h.*, z);
             tl = @mulAdd(f64, l.*, z, tl);
-            a_mul(h, l, th, z);
+            aMul(h, l, th, z);
             l.* = @mulAdd(f64, tl, z, l.*);
-            fast_two_sum(h, &tl, static_local_p.p[@bitCast(@as(isize, @intCast(a - @as(c_int, 1))))], h.*);
+            fastTwoSum(h, &tl, static_local_p.p[@bitCast(@as(isize, @intCast(a - @as(c_int, 1))))], h.*);
             l.* += static_local_p.p[@bitCast(@as(isize, @intCast(a)))] + tl;
         }
     }
-    a_mul(h, &tl, h.*, z);
+    aMul(h, &tl, h.*, z);
     l.* = @mulAdd(f64, l.*, z, tl);
     return;
 }
-fn cr_erf_accurate(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
+fn crErfAccurate(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
     @setFloatMode(.strict);
     var h = arg_h;
     _ = &h;
@@ -3954,26 +3947,29 @@ fn cr_erf_accurate(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
     {
         var i: c_int = 0;
         _ = &i;
-        while (i < @as(c_int, 5)) : (i += 1) if (z == static_local_exceptions.exceptions[@bitCast(@as(isize, @intCast(i)))][@as(c_int, 0)]) {
-            h.* = static_local_exceptions.exceptions[@bitCast(@as(isize, @intCast(i)))][@as(c_int, 1)];
-            l.* = static_local_exceptions.exceptions[@bitCast(@as(isize, @intCast(i)))][@as(c_int, 2)];
-            return;
-        };
+        while (i < @as(c_int, 5)) : (i += 1) {
+            if (z == static_local_exceptions.exceptions[@bitCast(@as(isize, @intCast(i)))][@as(c_int, 0)]) {
+                h.* = static_local_exceptions.exceptions[@bitCast(@as(isize, @intCast(i)))][@as(c_int, 1)];
+                l.* = static_local_exceptions.exceptions[@bitCast(@as(isize, @intCast(i)))][@as(c_int, 2)];
+                return;
+            }
+        }
     }
     var th: f64 = undefined;
     _ = &th;
     var tl: f64 = undefined;
     _ = &tl;
     if (z < @as(f64, 0.125)) {
-        cr_erf_accurate_tiny(h, l, z);
+        crErfAccurateTiny(h, l, z);
         return;
     }
-    var v: f64 = @floor(@as(f64, @as(f64, 8.0) * z));
-    _ = &v;
-    var i: u32 = @intFromFloat(@as(f64, 8.0) * z);
-    _ = &i;
+    // The index truncates toward zero on a non-negative input, so it is also
+    // the floor of the range reduction. It converts back to f64 exactly, so the
+    // second scaling and its rounding disappear.
+    const i: u32 = @intFromFloat(@as(f64, 8.0) * z);
+    const v: f64 = @floatFromInt(i);
     z = (z - @as(f64, 0.0625)) - (@as(f64, 0.125) * v);
-    var p: [*c]const f64 = @ptrCast(@alignCast(&C2[i -% @as(u32, 1)]));
+    var p: [*c]const f64 = @ptrCast(@alignCast(&coefficients_accurate[i -% @as(u32, 1)]));
     _ = &p;
     h.* = p[@as(c_int, 26)];
     {
@@ -3988,9 +3984,9 @@ fn cr_erf_accurate(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
         var j: c_int = 10;
         _ = &j;
         while (j > @as(c_int, 7)) : (j -= 1) {
-            a_mul(&th, &tl, h.*, z);
+            aMul(&th, &tl, h.*, z);
             tl = @mulAdd(f64, l.*, z, tl);
-            two_sum(h, l, p[@bitCast(@as(isize, @intCast(@as(c_int, 8) + j)))], th);
+            twoSum(h, l, p[@bitCast(@as(isize, @intCast(@as(c_int, 8) + j)))], th);
             l.* += tl;
         }
     }
@@ -3998,9 +3994,9 @@ fn cr_erf_accurate(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
         var j: c_int = 7;
         _ = &j;
         while (j >= @as(c_int, 0)) : (j -= 1) {
-            a_mul(&th, &tl, h.*, z);
+            aMul(&th, &tl, h.*, z);
             tl = @mulAdd(f64, l.*, z, tl);
-            two_sum(h, l, p[@bitCast(@as(isize, @intCast(@as(c_int, 2) * j)))], th);
+            twoSum(h, l, p[@bitCast(@as(isize, @intCast(@as(c_int, 2) * j)))], th);
             l.* += p[@bitCast(@as(isize, @intCast((@as(c_int, 2) * j) + @as(c_int, 1))))] + tl;
         }
     }
@@ -4011,45 +4007,50 @@ fn cr_erf_accurate(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
 pub fn erfd(arg_x: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(arg_x);
-    var x = arg_x;
-    _ = &x;
-    var z: f64 = @abs(@as(f64, x));
-    _ = &z;
-    var t: b64u64_u = b64u64_u{
-        .f = z,
-    };
-    _ = &t;
-    var ux: u64 = t.u;
-    _ = &ux;
-    if (ux > 0x4017_afb4_8dc9_6626) {
-        var os: f64 = my_copysign(1.0, x);
-        _ = &os;
-        if (ux > 0x7ff0_0000_0000_0000) {
+    const magnitude_bits = input_bits & 0x7fff_ffff_ffff_ffff;
+    if (magnitude_bits > 0x4017_afb4_8dc9_6626) {
+        if (magnitude_bits > 0x7ff0_0000_0000_0000) {
             return @bitCast(input_bits | 0x0008_0000_0000_0000);
         }
-        if (ux == 0x7ff0_0000_0000_0000) return os;
-        return os - (0x1p-54 * os);
+        return @bitCast((input_bits & 0x8000_0000_0000_0000) | 0x3ff0_0000_0000_0000);
     }
+    var x = arg_x;
+    _ = &x;
     var h: f64 = undefined;
     _ = &h;
     var l: f64 = undefined;
     _ = &l;
     var err: f64 = undefined;
     _ = &err;
-    if (z < 0x1p-61) {
-        if (x == 0.0) return x;
-        var y: f64 = CH * x;
+    if (magnitude_bits < 0x3c20_0000_0000_0000) {
+        if (magnitude_bits < tiny.magnitude_limit) {
+            // |erf(x) - 2*x/sqrt(pi)| < |x|^3 < |x|*2^-2042 in this domain.
+            return tiny.scale(.two_inv_sqrt_pi, arg_x);
+        }
+        var y: f64 = ch * x;
         _ = &y;
+        if (magnitude_bits >= 0x0390_0000_0000_0000) {
+            // These neighboring fractions bracket 2*C, C=2/sqrt(pi):
+            // 7705853849415594/3414567582477941 and
+            // 19180872201022277/8499302699107124. Their denominator sum
+            // exceeds 2^53, excluding every binary64 product midpoint.
+            // Both 2*(ch+cl +/- u*cl) and 2*erf(x)/x stay inside this
+            // interval, u=2^-53. Here cl*x is normal, so one final FMA
+            // gives the correctly rounded result without a residual.
+            return @mulAdd(f64, ch, x, cl * x);
+        }
         var sx: f64 = x * 0x1p+106;
         _ = &sx;
-        a_mul(&h, &l, CH, sx);
-        l = @mulAdd(f64, CL, sx, l);
+        aMul(&h, &l, ch, sx);
+        l = @mulAdd(f64, cl, sx, l);
         l += h - (y * 0x1p+106);
         var res: f64 = @mulAdd(f64, l, 0x1p-106, y);
         _ = &res;
         return res;
     }
-    err = cr_erf_fast(&h, &l, z);
+    const z: f64 = @bitCast(magnitude_bits);
+    const sign_bits = input_bits & 0x8000_0000_0000_0000;
+    err = crErfFast(&h, &l, z);
     var u: b64u64_u = b64u64_u{
         .f = h,
     };
@@ -4058,14 +4059,13 @@ pub fn erfd(arg_x: f64) f64 {
         .f = l,
     };
     _ = &v;
-    t.f = x;
-    u.u ^= t.u & 0x8000_0000_0000_0000;
-    v.u ^= t.u & 0x8000_0000_0000_0000;
+    u.u ^= sign_bits;
+    v.u ^= sign_bits;
     var left: f64 = u.f + @mulAdd(f64, err, -u.f, v.f);
     _ = &left;
     var right: f64 = u.f + @mulAdd(f64, err, u.f, v.f);
     _ = &right;
     if (left == right) return left;
-    cr_erf_accurate(&h, &l, z);
+    crErfAccurate(&h, &l, z);
     return if (x >= 0.0) h + l else -h + -l;
 }

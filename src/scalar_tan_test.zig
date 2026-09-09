@@ -106,3 +106,10 @@ test "tand handles ordinary, huge, and CORE-MATH accurate inputs" {
     try expectTandBits(0x3e9d_ffff_ffff_ff1f, 0x3e9e_0000_0000_0151);
     try expectTandBits(0x3ead_ffff_ffff_fc7c, 0x3eae_0000_0000_0546);
 }
+
+test "tand handles reduced zero and pole neighborhoods" {
+    try expectTandBits(0x3ff9_21fb_5444_2d18, 0x434d_0296_7c31_cdb5);
+    try expectTandBits(0xbff9_21fb_5444_2d18, 0xc34d_0296_7c31_cdb5);
+    try expectTandBits(0x4009_21fb_5444_2d18, 0xbca1_a626_3314_5c07);
+    try expectTandBits(0xc009_21fb_5444_2d18, 0x3ca1_a626_3314_5c07);
+}

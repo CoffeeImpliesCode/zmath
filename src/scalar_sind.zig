@@ -63,12 +63,34 @@ pub fn sind(value: f64) f64 {
     // every binary64 subnormal and both signed zeros.
     if (magnitude <= 0x3e57_1374_4912_3ef6) return value;
 
-    const fast = sinFast(value);
+    if (magnitude <= 0x3fc0_0000_0000_0000) {
+        // For |x| <= 1/8, the degree-eleven Taylor tail is below
+        // |x|^13/13!. Evaluation and truncation fit within u*|x^3|,
+        // where u=2^-53. FastTwoSum retains the correction exactly.
+        const square = value * value;
+        const cubic = value * square;
+        var polynomial: f64 = -0x1.ae64567f544e4p-26;
+        polynomial = @mulAdd(f64, polynomial, square, 0x1.71de3a556c734p-19);
+        polynomial = @mulAdd(f64, polynomial, square, -0x1.a01a01a01a01ap-13);
+        polynomial = @mulAdd(f64, polynomial, square, 0x1.1111111111111p-7);
+        polynomial = @mulAdd(f64, polynomial, square, -0x1.5555555555555p-3);
+        const approximation = fastTwoSum(value, cubic * polynomial);
+        const error_bound = @abs(cubic) * 0x1p-53;
+        const left = approximation.high + (approximation.low - error_bound);
+        const right = approximation.high + (approximation.low + error_bound);
+        if (left == right) return left;
+        return sinAccurate(value);
+    }
+
+    const absolute_value: f64 = @bitCast(magnitude);
+    const fast = sinFast(absolute_value, (bits & sign_mask) != 0);
     const left = fast.high + (fast.low - fast.error_bound);
     const right = fast.high + (fast.low + fast.error_bound);
-    if (left == right) return left;
-
-    return sinAccurate(value);
+    if (left != right) {
+        @branchHint(.cold);
+        return sinAccurate(value);
+    }
+    return left;
 }
 
 fn dintBits(value: Dint) u128 {
@@ -374,56 +396,160 @@ fn reduce2(value: *Dint) usize {
 
 fn setDoubleDouble(high: *f64, low: *f64, high_limb_input: u64, low_limb_input: u64) void {
     @setFloatMode(.strict);
-    var high_limb = high_limb_input;
-    var low_limb = low_limb_input;
-    if (high_limb != 0) {
-        const leading_zero_count: u7 = @intCast(@clz(high_limb));
-        if (leading_zero_count != 0) {
-            const shift: u6 = @intCast(leading_zero_count);
-            high_limb = (high_limb << shift) |
-                (low_limb >> @as(u6, @intCast(@as(u7, 64) - shift)));
-            low_limb <<= shift;
-        }
-        const exponent_field: u64 = 0x3fe - @as(u64, leading_zero_count);
-        high.* = @bitCast((exponent_field << 52) | ((high_limb << 1) >> 12));
-        low_limb = (high_limb << 53) | (low_limb >> 11);
-        if (low_limb != 0) {
-            const low_zero_count: u7 = @intCast(@clz(low_limb));
-            low_limb <<= @as(u6, @intCast(low_zero_count));
-            const low_exponent: u64 = exponent_field - 53 - low_zero_count;
-            low.* = @bitCast((low_exponent << 52) | ((low_limb << 1) >> 12));
-        } else {
-            low.* = 0.0;
-        }
-    } else if (low_limb != 0) {
-        const leading_zero_count: u7 = @intCast(@clz(low_limb));
-        const exponent_field: u64 = 0x3fe - 64 - @as(u64, leading_zero_count);
-        const first_shift: u7 = leading_zero_count + 1;
-        low_limb = if (first_shift == 64) 0 else low_limb << @as(u6, @intCast(first_shift));
-        high.* = @bitCast((exponent_field << 52) | (low_limb >> 12));
-        low_limb <<= 52;
-        if (low_limb != 0) {
-            const low_zero_count: u7 = @intCast(@clz(low_limb));
-            const second_shift: u7 = low_zero_count + 1;
-            low_limb = if (second_shift == 64) 0 else low_limb << @as(u6, @intCast(second_shift));
-            const low_exponent: u64 = exponent_field - 64 - low_zero_count;
-            low.* = @bitCast((low_exponent << 52) | (low_limb >> 12));
-        } else {
-            low.* = 0.0;
-        }
-    } else {
-        high.* = 0.0;
-        low.* = 0.0;
-    }
+    // Keep the leading 53 fraction bits in high and the next 53 in low.
+    // Each integer conversion is exact; the discarded suffix is below
+    // 2^-106 turns.
+    const high_integer: u64 = high_limb_input >> 11;
+    const low_integer: u64 = ((high_limb_input & 0x7ff) << 42) | (low_limb_input >> 22);
+    high.* = @as(f64, @floatFromInt(high_integer)) * 0x1p-53;
+    low.* = @as(f64, @floatFromInt(low_integer)) * 0x1p-106;
 }
 
-fn reduceFast(high: *f64, low: *f64, value: f64, error_bound: *f64) usize {
+// The reducer guarantees 0 <= value < 1. Decode floor(value * 2^11)
+// directly so ReleaseSafe does not need a checked float-to-integer conversion.
+inline fn reductionIndex(value: f64) u16 {
+    const bits: u64 = @bitCast(value);
+    const exponent: u11 = @truncate(bits >> 52);
+    if (exponent < 0x3f4) return 0;
+    if (exponent >= 0x3ff) unreachable;
+
+    const significand = (@as(u64, 1) << 52) | (bits & 0x000f_ffff_ffff_ffff);
+    const shift: u6 = @intCast(0x428 - exponent);
+    return @truncate(significand >> shift);
+}
+
+// Multiplication by either +1 or -1 changes only the sign bit for finite
+// binary64 values. Express that exact operation without an FP multiply.
+inline fn negateIf(value: f64, negative: bool) f64 {
+    const bits: u64 = @bitCast(value);
+    const sign = @as(u64, @intFromBool(negative)) << 63;
+    return @bitCast(bits ^ sign);
+}
+
+inline fn reduceFast(
+    comptime tangent_precision: bool,
+    high: *f64,
+    low: *f64,
+    value: f64,
+    error_bound: *f64,
+) u16 {
     @setFloatMode(.strict);
     if (value <= 0x1.921fb54442d17p+2) {
-        const product = aMul(0x1.45f306dc9c883p-3, value);
-        high.* = product.high;
-        low.* = @mulAdd(f64, -0x1.6b01ec5417056p-57, value, product.low);
-        error_bound.* = 0x1.d9p-105 * high.*;
+        // Here product_high is below one, so index extraction and residual
+        // subtraction can precede the split-tail accumulation.
+        const product_high = 0x1.45f306dc9c883p-3 * value;
+        var index: u16 = undefined;
+        var product_low: f64 = undefined;
+        if (tangent_precision) {
+            index = reductionIndex(product_high);
+            product_low = @mulAdd(
+                f64,
+                0x1.45f306dc9c883p-3,
+                value,
+                -product_high,
+            );
+            high.* = @mulAdd(
+                f64,
+                @as(f64, @floatFromInt(index)),
+                -0x1p-11,
+                product_high,
+            );
+        } else {
+            // The sine and cosine callers enter here with value > 1/8, so
+            // 2^-6 < product_high < 1. Removing the encoded fraction bits
+            // forms the exact floor grid without integer conversion.
+            const product_bits: u64 = @bitCast(product_high);
+            const product_exponent: u11 = @truncate(product_bits >> 52);
+            // The shift lies in [42, 47], so truncation loses no bits.
+            const fraction_bit_count: u6 = @truncate(0x428 -% product_exponent);
+            const significand = (@as(u64, 1) << 52) |
+                (product_bits & 0x000f_ffff_ffff_ffff);
+            const grid_units = significand >> fraction_bit_count;
+            const grid_prefix = product_bits >> fraction_bit_count;
+            index = @truncate(grid_units & 0x7ff);
+            const grid_high: f64 = @bitCast(grid_prefix << fraction_bit_count);
+            high.* = product_high - grid_high;
+            product_low = @mulAdd(
+                f64,
+                0x1.45f306dc9c883p-3,
+                value,
+                -product_high,
+            );
+        }
+        low.* = @mulAdd(f64, -0x1.6b01ec5417056p-57, value, product_low);
+        // The reducer error is in turns. Since |d sin(2*pi*x)/dx| and
+        // |d cos(2*pi*x)/dx| are below 2*pi < 8, scale it to an output
+        // bound for the sine and cosine callers.
+        if (!tangent_precision) error_bound.* = 0x1.d9p-102 * product_high;
+        return index;
+    } else if (value <= 0x1p+26) {
+        // For 2*pi < value <= 2^26, the split reciprocal gives a turn
+        // error below 2^-80.768.
+        const product_high = 0x1.45f306dc9c883p-3 * value;
+        var provisional_index: u16 = undefined;
+        var grid_high: f64 = undefined;
+        if (tangent_precision) {
+            // Retain tangent's branchless compensation of the rounded grid.
+            const grid_bias: f64 = 0x1.8p41;
+            const biased = product_high + grid_bias;
+            const biased_bits: u64 = @bitCast(biased);
+            const bias_bits: u64 = @bitCast(grid_bias);
+            var grid_units: u64 = biased_bits -% bias_bits;
+            const rounded_grid = biased - grid_bias;
+            const overshoot = rounded_grid > product_high;
+            grid_units -%= @intFromBool(overshoot);
+            const correction: f64 = @bitCast(
+                @as(u64, @intFromBool(overshoot)) * 0x3f40_0000_0000_0000,
+            );
+            grid_high = rounded_grid - correction;
+            provisional_index = @truncate(grid_units & 0x7ff);
+        } else {
+            // Here 1 <= product_high < 2^24. Removing the encoded fraction
+            // bits below 2^-11 forms the same floor grid directly. The implicit
+            // leading bit is above the low 11 grid bits, which hold the index.
+            const product_bits: u64 = @bitCast(product_high);
+            const product_exponent: u11 = @truncate(product_bits >> 52);
+            // The shift lies in [18, 41], so truncation loses no bits.
+            const fraction_bit_count: u6 = @truncate(0x428 -% product_exponent);
+            const grid_prefix = product_bits >> fraction_bit_count;
+            provisional_index = @truncate(grid_prefix & 0x7ff);
+            grid_high = @bitCast(grid_prefix << fraction_bit_count);
+        }
+        const provisional_high = product_high - grid_high;
+        const product_low = @mulAdd(
+            f64,
+            0x1.45f306dc9c883p-3,
+            value,
+            -product_high,
+        );
+        const fractional_low = @mulAdd(
+            f64,
+            -0x1.6b01ec5417056p-57,
+            value,
+            product_low,
+        );
+        // The rounded multiplication residual is at most 2^-30. The
+        // split-tail contribution keeps |fractional_low| below 2^-29.
+        // Thus a 2^-27 margin prevents changes to the table index and
+        // crossings of either neighboring grid boundary.
+        const index_margin = 0x1p-27;
+        if (!tangent_precision and value <= 0x1p+6 and
+            provisional_high >= index_margin and
+            provisional_high <= 0x1p-11 - index_margin)
+        {
+            high.* = provisional_high;
+            low.* = fractional_low;
+            error_bound.* = 0x1p-67;
+        } else {
+            // The reflection step needs a coarse high-part lattice so
+            // 2^-11-high is exact. Adding one is exact here; normalize
+            // on its binade, then remove it without losing the tail.
+            const reduced = fastTwoSum(1.0 + provisional_high, fractional_low);
+            high.* = reduced.high - 1.0;
+            low.* = reduced.low;
+            error_bound.* = if (tangent_precision) 0x1p-80 else 0x1p-77;
+        }
+        return provisional_index;
     } else {
         const bits: u64 = @bitCast(value);
         var exponent: i64 = @intCast((bits >> 52) & 0x7ff);
@@ -431,10 +557,22 @@ fn reduceFast(high: *f64, low: *f64, value: f64, error_bound: *f64) usize {
         var limbs: [3]u64 = undefined;
         var product: u128 = undefined;
 
+        // Tangent keeps one more 64-bit limb because it needs relative reduction
+        // accuracy near zeros of both sine and cosine.
         if (exponent <= 1074) {
-            product = @as(u128, significand) * data.t[1];
-            limbs[0] = @truncate(product);
-            limbs[1] = @truncate(product >> 64);
+            if (tangent_precision) {
+                const tail_product = @as(u128, significand) * data.t[2];
+                product = @as(u128, significand) * data.t[1];
+                const product_low: u64 = @truncate(product);
+                const tail_high: u64 = @truncate(tail_product >> 64);
+                limbs[0] = product_low +% tail_high;
+                limbs[1] = @as(u64, @truncate(product >> 64)) +%
+                    @intFromBool(limbs[0] < product_low);
+            } else {
+                product = @as(u128, significand) * data.t[1];
+                limbs[0] = @truncate(product);
+                limbs[1] = @truncate(product >> 64);
+            }
             product = @as(u128, significand) * data.t[0];
             const addend: u64 = @truncate(product);
             const carry = limbs[1] +% addend < limbs[1];
@@ -443,9 +581,19 @@ fn reduceFast(high: *f64, low: *f64, value: f64, error_bound: *f64) usize {
             exponent = 1075 - exponent;
         } else {
             const table_index: usize = @intCast(@divTrunc(exponent - 1138 + 63, 64));
-            product = @as(u128, significand) * data.t[table_index + 2];
-            limbs[0] = @truncate(product);
-            limbs[1] = @truncate(product >> 64);
+            if (tangent_precision) {
+                const tail_product = @as(u128, significand) * data.t[table_index + 3];
+                product = @as(u128, significand) * data.t[table_index + 2];
+                const product_low: u64 = @truncate(product);
+                const tail_high: u64 = @truncate(tail_product >> 64);
+                limbs[0] = product_low +% tail_high;
+                limbs[1] = @as(u64, @truncate(product >> 64)) +%
+                    @intFromBool(limbs[0] < product_low);
+            } else {
+                product = @as(u128, significand) * data.t[table_index + 2];
+                limbs[0] = @truncate(product);
+                limbs[1] = @truncate(product >> 64);
+            }
             product = @as(u128, significand) * data.t[table_index + 1];
             var addend: u64 = @truncate(product);
             var carry = limbs[1] +% addend < limbs[1];
@@ -469,10 +617,12 @@ fn reduceFast(high: *f64, low: *f64, value: f64, error_bound: *f64) usize {
                 (limbs[1] >> shift);
         }
         setDoubleDouble(high, low, limbs[1], limbs[0]);
-        error_bound.* = 0x1.01p-76;
+        // The large reducer error is in turns; convert it to an absolute
+        // sine/cosine output bound with 2*pi < 8.
+        if (!tangent_precision) error_bound.* = 0x1.01p-73;
     }
 
-    const index: usize = @intFromFloat(high.* * 0x1p11);
+    const index = reductionIndex(high.*);
     high.* = @mulAdd(f64, @as(f64, @floatFromInt(index)), -0x1p-11, high.*);
     return index;
 }
@@ -509,40 +659,64 @@ fn fastTwoSum(a: f64, b: f64) DoubleDouble {
     return .{ .high = high, .low = b - error_value };
 }
 
-fn evalSinFast(x_high: f64, x_low: f64, square_high: f64, square_low: f64) DoubleDouble {
+const FastTail = struct {
+    linear: DoubleDouble,
+    sine: f64,
+    cosine: f64,
+};
+
+inline fn evalTailFast(high: f64, low: f64) FastTail {
     @setFloatMode(.strict);
-    var high = data.ps_fast[4];
-    high = @mulAdd(f64, high, square_high, data.ps_fast[3]);
-    high = @mulAdd(f64, high, square_high, data.ps_fast[2]);
-    var product = sMul(high, square_high, square_low);
-    const sum = fastTwoSum(data.ps_fast[0], product.high);
-    product.high = sum.high;
-    product.low += data.ps_fast[1] + sum.low;
-    return dMul(product.high, product.low, x_high, x_low);
+    // |high| < 2^-11 + 2^-24 and |low| < 2^-49. Retain the linear
+    // sine term as a pair and include both first-order low corrections.
+    const square = high * high;
+    const cubic = square * high;
+    const cross = high * low;
+    var sine = cubic * @mulAdd(f64, 0x1.466bc6775aae2p+6, square, -0x1.4abbce625be53p+5);
+    sine = @mulAdd(f64, -0x1.f019b59389d7cp+6, high * cross, sine);
+    var cosine = square * @mulAdd(
+        f64,
+        @mulAdd(f64, -0x1.55d3c7e3cbffap+6, square, 0x1.03c1f081b5ac4p+6),
+        square,
+        -0x1.3bd3cc9be45dep+4,
+    );
+    cosine = @mulAdd(f64, -0x1.3bd3cc9be45dep+5, cross, cosine);
+    var linear = aMul(0x1.921fb54442d18p+2, high);
+    linear.low = @mulAdd(f64, 0x1.1a62633145c07p-52, high, linear.low);
+    linear.low = @mulAdd(f64, 0x1.921fb54442d18p+2, low, linear.low);
+    return .{ .linear = linear, .sine = sine, .cosine = cosine };
 }
 
-fn evalCosFast(square_high: f64, square_low: f64) DoubleDouble {
+inline fn combineTailFast(
+    cosine_coefficient: f64,
+    sine_coefficient: f64,
+    tail: FastTail,
+    negative: bool,
+    reduction_error: f64,
+) FastResult {
     @setFloatMode(.strict);
-    var high = data.pc_fast[4];
-    high = @mulAdd(f64, high, square_high, data.pc_fast[3]);
-    high = @mulAdd(f64, high, square_high, data.pc_fast[2]);
-    var product = sMul(high, square_high, square_low);
-    const sum = fastTwoSum(data.pc_fast[0], product.high);
-    product.high = sum.high;
-    product.low += data.pc_fast[1] + sum.low;
-    return product;
+    const scaled = aMul(sine_coefficient, tail.linear.high);
+    var correction = @mulAdd(f64, sine_coefficient, tail.linear.low + tail.sine, scaled.low);
+    correction = @mulAdd(f64, cosine_coefficient, tail.cosine, correction);
+    const sum = fastTwoSum(cosine_coefficient, scaled.high);
+    // The degree-five sine and degree-six cosine tails, coefficient
+    // errors, table errors and compensated evaluation fit within 2^-65.
+    return .{
+        .high = negateIf(sum.high, negative),
+        .low = negateIf(sum.low + correction, negative),
+        .error_bound = 0x1p-65 + reduction_error,
+    };
 }
 
-fn sinFast(value: f64) FastResult {
+fn sinFast(absolute_value: f64, input_negative: bool) FastResult {
     @setFloatMode(.strict);
-    var negative = value < 0.0;
+    var negative = input_negative;
     var use_sine = true;
-    const absolute_value = if (negative) -value else value;
 
     var high: f64 = undefined;
     var low: f64 = undefined;
     var reduction_error: f64 = undefined;
-    var index = reduceFast(&high, &low, absolute_value, &reduction_error);
+    var index = reduceFast(false, &high, &low, absolute_value, &reduction_error);
 
     negative = negative != ((index >> 10) != 0);
     index &= 0x3ff;
@@ -556,32 +730,18 @@ fn sinFast(value: f64) FastResult {
         low = -low;
     }
 
-    high -= data.sc[index][0];
-    var square = aMul(high, high);
-    square.low = @mulAdd(f64, high + high, low, square.low);
-    const sine = evalSinFast(high, low, square.high, square.low);
-    const cosine = evalCosFast(square.high, square.low);
-    const sign: f64 = if (negative) -1.0 else 1.0;
+    const table_index: u8 = @truncate(index);
 
-    if (use_sine) {
-        const sine_scaled = sMul(sign * data.sc[index][2], sine.high, sine.low);
-        const cosine_scaled = sMul(sign * data.sc[index][1], cosine.high, cosine.low);
-        const sum = fastTwoSum(cosine_scaled.high, sine_scaled.high);
-        return .{
-            .high = sum.high,
-            .low = sum.low + (sine_scaled.low + cosine_scaled.low),
-            .error_bound = 0x1.55p-69 + reduction_error,
-        };
-    }
-
-    const cosine_scaled = sMul(sign * data.sc[index][2], cosine.high, cosine.low);
-    const sine_scaled = sMul(sign * data.sc[index][1], sine.high, sine.low);
-    const sum = fastTwoSum(cosine_scaled.high, -sine_scaled.high);
-    return .{
-        .high = sum.high,
-        .low = sum.low + (cosine_scaled.low - sine_scaled.low),
-        .error_bound = 0x1.81p-69 + reduction_error,
-    };
+    high -= data.sc[table_index][0];
+    const tail = evalTailFast(high, low);
+    if (use_sine) return combineTailFast(
+        data.sc[table_index][1],
+        data.sc[table_index][2],
+        tail,
+        negative,
+        reduction_error,
+    );
+    return combineTailFast(data.sc[table_index][2], -data.sc[table_index][1], tail, negative, reduction_error);
 }
 
 fn evalSinAccurate(x: *const Dint, square: *const Dint) Dint {
@@ -615,7 +775,7 @@ fn evalCosAccurate(square: *const Dint) Dint {
     return result;
 }
 
-fn sinAccurate(value: f64) f64 {
+noinline fn sinAccurate(value: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(value);
     const absolute_bits = input_bits & magnitude_mask;
@@ -687,7 +847,7 @@ fn cosFast(value: f64) FastResult {
     var high: f64 = undefined;
     var low: f64 = undefined;
     var reduction_error: f64 = undefined;
-    var index = reduceFast(&high, &low, value, &reduction_error);
+    var index = reduceFast(false, &high, &low, value, &reduction_error);
 
     negative = negative != ((index >> 10) != 0);
     index &= 0x3ff;
@@ -702,35 +862,21 @@ fn cosFast(value: f64) FastResult {
         low = -low;
     }
 
-    high -= data.sc[index][0];
-    var square = aMul(high, high);
-    square.low = @mulAdd(f64, high + high, low, square.low);
-    const sine = evalSinFast(high, low, square.high, square.low);
-    const cosine = evalCosFast(square.high, square.low);
-    const sign: f64 = if (negative) -1.0 else 1.0;
+    const table_index: u8 = @truncate(index);
 
-    if (!use_cosine) {
-        const sine_scaled = sMul(sign * data.sc[index][2], sine.high, sine.low);
-        const cosine_scaled = sMul(sign * data.sc[index][1], cosine.high, cosine.low);
-        const sum = fastTwoSum(cosine_scaled.high, sine_scaled.high);
-        return .{
-            .high = sum.high,
-            .low = sum.low + (sine_scaled.low + cosine_scaled.low),
-            .error_bound = 0x1.55p-69 + reduction_error,
-        };
-    }
-
-    const cosine_scaled = sMul(sign * data.sc[index][2], cosine.high, cosine.low);
-    const sine_scaled = sMul(sign * data.sc[index][1], sine.high, sine.low);
-    const sum = fastTwoSum(cosine_scaled.high, -sine_scaled.high);
-    return .{
-        .high = sum.high,
-        .low = sum.low + (cosine_scaled.low - sine_scaled.low),
-        .error_bound = 0x1.81p-69 + reduction_error,
-    };
+    high -= data.sc[table_index][0];
+    const tail = evalTailFast(high, low);
+    if (!use_cosine) return combineTailFast(
+        data.sc[table_index][1],
+        data.sc[table_index][2],
+        tail,
+        negative,
+        reduction_error,
+    );
+    return combineTailFast(data.sc[table_index][2], -data.sc[table_index][1], tail, negative, reduction_error);
 }
 
-fn cosAccurate(value: f64) f64 {
+noinline fn cosAccurate(value: f64) f64 {
     @setFloatMode(.strict);
     const absolute_bits: u64 = @bitCast(value);
     var reduced = dintFromDouble(value);
@@ -811,18 +957,150 @@ pub fn cosd(value: f64) f64 {
     if (magnitude == infinity_bits) return @bitCast(canonical_nan_bits);
 
     // For this interval, cos(x) rounds to one in nearest-even mode.
-    if (magnitude <= 0x3e46_a09e_667f_3bcc) {
-        const absolute_value: f64 = @bitCast(magnitude);
-        return @mulAdd(f64, absolute_value, -0x1p-28, 1.0);
-    }
+    if (magnitude <= 0x3e46_a09e_667f_3bcc) return 1.0;
+    if (magnitude <= 0x3fc0_0000_0000_0000) return cosSmall(value);
 
     const absolute_value: f64 = @bitCast(magnitude);
     const fast = cosFast(absolute_value);
     const left = fast.high + (fast.low - fast.error_bound);
     const right = fast.high + (fast.low + fast.error_bound);
-    if (left == right) return left;
+    if (left != right) {
+        @branchHint(.cold);
+        return cosAccurate(absolute_value);
+    }
+    return left;
+}
 
-    return cosAccurate(absolute_value);
+inline fn cosSmall(value: f64) f64 {
+    @setFloatMode(.strict);
+    // Above the one-rounding cutoff, x^2 >= u. On |x| <= 1/8, the
+    // degree-twelve tail and evaluation error fit within 2u*x^4.
+    // Include rounding of the retained low sum separately (u=2^-53).
+    const square = aMul(value, value);
+    const fourth = square.high * square.high;
+    var polynomial: f64 = 0x1.1eed8eff8d898p-29;
+    polynomial = @mulAdd(f64, polynomial, square.high, -0x1.27e4fb7789f5cp-22);
+    polynomial = @mulAdd(f64, polynomial, square.high, 0x1.a01a01a01a01ap-16);
+    polynomial = @mulAdd(f64, polynomial, square.high, -0x1.6c16c16c16c17p-10);
+    polynomial = @mulAdd(f64, polynomial, square.high, 0x1.5555555555555p-5);
+    const correction = @mulAdd(f64, fourth, polynomial, -0.5 * square.low);
+    const sum = fastTwoSum(1.0, -0.5 * square.high);
+    const low = sum.low + correction;
+    const error_bound = (@abs(sum.low) + fourth) * 0x1p-52;
+    const left = sum.high + (low - error_bound);
+    const right = sum.high + (low + error_bound);
+    if (left == right) return left;
+    return cosAccurate(@abs(value));
+}
+
+fn tangentRatio(
+    index: u8,
+    high: f64,
+    low: f64,
+) struct { numerator: DoubleDouble, denominator: DoubleDouble } {
+    @setFloatMode(.strict);
+    // Only the nonlinear term uses the rounded argument. Its evaluation
+    // error is bounded by 16*u times that term, u=2^-53. The paired
+    // linear term retains the reduction tail and the low part of 2*pi.
+    const argument = high + low;
+    const square = argument * argument;
+    const cubic = square * argument;
+    var polynomial = @mulAdd(f64, 0x1.45fff9b48e95ep+14, square, 0x1.466bc6775aae2p+10);
+    polynomial = @mulAdd(f64, polynomial, square, 0x1.4abbce625be53p+6);
+    const nonlinear = cubic * polynomial;
+    var linear = aMul(0x1.921fb54442d18p+2, high);
+    linear.low = @mulAdd(f64, 0x1.1a62633145c07p-52, high, linear.low);
+    linear.low = @mulAdd(f64, 0x1.921fb54442d18p+2, low, linear.low);
+    const tail = fastTwoSum(linear.high, linear.low + nonlinear);
+
+    // tan(a+b) = (tan(a)+tan(b))/(1-tan(a)*tan(b)).
+    // Both sums are well-conditioned on this reduced quadrant.
+    const row = data.tan_fast[index];
+    // Row zero is exact zero. Every other row is at least tan(2*pi/2048);
+    // the tail has no larger exponent. FastTwoSum is exact in both cases.
+    const numerator = fastTwoSum(row[0], tail.high);
+    const cross = dMul(row[0], row[1], tail.high, tail.low);
+    const denominator = fastTwoSum(1.0, -cross.high);
+    return .{
+        .numerator = .{ .high = numerator.high, .low = numerator.low + (row[1] + tail.low) },
+        .denominator = .{ .high = denominator.high, .low = denominator.low - cross.low },
+    };
+}
+
+fn fastDiv(
+    numerator_high: f64,
+    numerator_low: f64,
+    denominator_high: f64,
+    denominator_low: f64,
+) DoubleDouble {
+    @setFloatMode(.strict);
+    const reciprocal = 1.0 / denominator_high;
+    const high = numerator_high * reciprocal;
+    const residual_high = @mulAdd(f64, denominator_high, -high, numerator_high);
+    const residual_low = @mulAdd(f64, denominator_low, -high, numerator_low);
+    return .{
+        .high = high,
+        .low = reciprocal * (residual_high + residual_low),
+    };
+}
+
+pub fn tanFast(high: *f64, low: *f64, value: f64) f64 {
+    @setFloatMode(.strict);
+    const input_bits: u64 = @bitCast(value);
+    var negative = (input_bits & sign_mask) != 0;
+    const absolute_value: f64 = @bitCast(input_bits & magnitude_mask);
+    var is_tan = true;
+    var reduction_error_bound: f64 = 0.0;
+    var index = reduceFast(
+        true,
+        high,
+        low,
+        absolute_value,
+        &reduction_error_bound,
+    );
+
+    index &= 0x3ff;
+    is_tan = is_tan != ((index >> 9) != 0);
+    negative = negative != ((index >> 9) != 0);
+    index &= 0x1ff;
+
+    const reflected = (index & 0x100) != 0;
+    is_tan = is_tan != reflected;
+    const reflection_mask = @as(u16, 0) -% @as(u16, @intFromBool(reflected));
+    index = (index ^ reflection_mask) & 0xff;
+    const offset_bits = @as(u64, 0x3f40_0000_0000_0000) & (@as(u64, 0) -% @as(u64, @intFromBool(reflected)));
+    high.* = @as(f64, @bitCast(offset_bits)) + negateIf(high.*, reflected);
+    low.* = negateIf(low.*, reflected);
+
+    const table_index: u8 = @truncate(index);
+    // The medium reducer uses a conservative 2^-80 absolute turn bound.
+    // Excluding a 2^-15 neighborhood keeps its tangent contribution below
+    // 2^-63 relative; the older reducers retain their tighter guard.
+    const minimum_remainder: f64 = if (reduction_error_bound == 0.0)
+        0x1p-37
+    else
+        0x1p-15;
+    if (index == 0 and high.* < minimum_remainder) {
+        @branchHint(.cold);
+        return 1.0;
+    }
+
+    const ratio = tangentRatio(table_index, high.*, low.*);
+    const quotient = if (is_tan)
+        fastDiv(ratio.numerator.high, ratio.numerator.low, ratio.denominator.high, ratio.denominator.low)
+    else
+        fastDiv(ratio.denominator.high, ratio.denominator.low, ratio.numerator.high, ratio.numerator.low);
+    high.* = negateIf(quotient.high, negative);
+    low.* = negateIf(quotient.low, negative);
+
+    // The tangent polynomial, table pairs, and compensated quotient fit
+    // within 2^-65 relative. Fixed-fraction reconstruction adds less than
+    // 2^-69; include reflection and low-part slack, and the medium bound.
+    const relative_error_bound: f64 = if (reduction_error_bound == 0.0)
+        0x1.2p-65
+    else
+        0x1p-62;
+    return @abs(high.*) * relative_error_bound;
 }
 
 // The following Dint quotient and finite tangent path are derived from
@@ -876,7 +1154,7 @@ fn divideDint(result: *Dint, numerator: *const Dint, denominator: *const Dint) v
 }
 
 /// Return the direct CORE-MATH accurate tangent path.
-pub fn tanAccurate(value: f64) f64 {
+pub noinline fn tanAccurate(value: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(value);
     const absolute_bits = input_bits & magnitude_mask;
@@ -924,4 +1202,25 @@ pub fn tanAccurate(value: f64) f64 {
     }
     if (negative) numerator.sgn = 1 - numerator.sgn;
     return dintToDouble(numerator);
+}
+
+test "fast cosine encloses a wrapped full-turn remainder" {
+    const testing = @import("std").testing;
+    const result = cosFast(0x1.921fb54442d18p+25);
+    // MPFR-512 rounded to binary128; its rounding error is below 2^-113.
+    const reference: f128 = 0xf.fffffffffffffd91062f4eb457p-4;
+    try testing.expectApproxEqAbs(
+        reference,
+        @as(f128, result.high) + @as(f128, result.low),
+        @as(f128, result.error_bound),
+    );
+}
+
+test "sine preserves rounding after a reflected medium reduction" {
+    const testing = @import("std").testing;
+    const input: f64 = @bitCast(@as(u64, 0x413e_a544_0398_0ced));
+    try testing.expectEqual(
+        @as(u64, 0xbfe5_e4c7_0940_cf5e),
+        @as(u64, @bitCast(sind(input))),
+    );
 }

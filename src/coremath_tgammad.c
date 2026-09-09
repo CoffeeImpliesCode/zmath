@@ -607,22 +607,12 @@ static __attribute__((noinline)) double as_tgamma_accurate(double x){
   return res.f;
 }
 
-double cr_tgamma(double x){
-  b64u64_u t = {.f = x};
-  uint64_t ax = t.u<<1;
-  if(__builtin_expect(ax>=(0x7ffull<<53), 0)){ /* x=NaN or +/-Inf */
-    if(ax==(0x7ffull<<53)){ /* x=+/-Inf */
-      if(t.u>>63){ /* x=-Inf */
-	return x / x; /* will raise the "Invalid operation" exception */
-      }
-      return x; /* x=+Inf */
-    }
-    return x + x; /* x=NaN, where x+x ensures the "Invalid operation"
-                     exception is set if x is sNaN, and it yields a qNaN */
-  }
-
+/* Finite, nonzero, nonpole inputs are screened by the Zig wrapper. */
+double cr_tgamma_finite(double x){
   double z = x;
   if(__builtin_expect(__builtin_fabs(x)<0.25, 0)){ /* |x| < 0x1p-2 */
+    b64u64_u t = {.f = x};
+    uint64_t ax = t.u<<1;
     if(ax<0x71e0000000000000ul){ // |x| < 0x1p-112
       double r;
       // deal separately with x=2^-1024 to avoid a spurious overflow in 1/x
@@ -631,9 +621,6 @@ double cr_tgamma(double x){
         return r;
       }
       r = 1/x;
-	    if (x == 0){
-        return r;
-	    }
       // the following raises the inexact flag in case x=2^k
       if (__builtin_expect(__builtin_fma (r, x, -1.0) == 0, 0)) r -= 0.5;
       /* gamma(x) ~ 1/x - euler_gamma near x=0, thus we should raise the
@@ -680,12 +667,6 @@ double cr_tgamma(double x){
      might overflow */
   int64_t k;
   if(__builtin_expect(fx==x, 0)){ /* x is integer */
-    if(x == 0.0){
-      return 1.0/x;
-    }
-    if(x < 0.0) {
-      return 0.0 / 0.0; /* should raise the "Invalid operation" exception */
-    }
     k = fx;
     double t0h = 1, t0l = 0, x0 = 1;
     for(int i=1; i<k; i++, x0 += 1.0) t0h = mulddd(x0, t0h,t0l, &t0l);

@@ -70,6 +70,14 @@ test "hypot handles subnormal rounding and finite range extremes" {
     try expectHypotdBits(0x7fef_ffff_ffff_ffff, 0x7fef_ffff_ffff_ffff, 0x7ff0_0000_0000_0000);
 }
 
+test "hypoth rounds exact ties and adjacent near-ties" {
+    try expectHypothBits(0x3636, 0x3b74, 0x3c0a);
+    try expectHypothBits(0x364a, 0x3b8c, 0x3c16);
+    try expectHypothBits(0x3c00, 0x2800, 0x3c00);
+    try expectHypothBits(0x3c00, 0x2801, 0x3c01);
+    try expectHypothBits(0xbc00, 0xa801, 0x3c01);
+}
+
 test "hypot applies stable NaN selection and infinity precedence" {
     try expectHypothBits(0xfe55, 0x3c00, 0xfe55);
     try expectHypothBits(0x3c00, 0x7c55, 0x7e55);

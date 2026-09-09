@@ -1,14 +1,16 @@
-# zmath Correctness Roadmap Implementation Plan
+# Historical zmath Correctness Roadmap (superseded)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` or `executing-plans` to implement this plan task-by-task. Steps use checkbox syntax for tracking.
+> **HISTORICAL / SUPERSEDED — not a live plan.** This August 2026 proposal records old names, paths, and commands. Its unchecked tasks remain unchecked; do not execute them or infer completion. The old uppercase function suffixes, `q` plan, and local `zig build bench`/`oracle` commands do not describe the current API or build graph.
+>
+> Use the current [API contract](../../../API.md), [schema-3 scalar contract](../../../spec/core-math-2026-08-22.md), and sibling [corpus manifest](../../../../zmath-testing/test/corpus/manifest.toml) for names, commands, and acceptance status. `zmath-testing`, not `zmath`, owns oracle and benchmark steps.
 
-**Goal:** Build a dependency-free, fast, and correct f16/f32/f64 scalar foundation with exhaustive corner-case coverage and independent MPFR/Arb validation in `zmath-testing`.
+**Historical goal:** Build a dependency-free, fast, and correct f16/f32/f64 scalar foundation with exhaustive corner-case coverage and independent MPFR/Arb validation in `zmath-testing`.
 
-**Architecture:** The runtime library uses format-specific IEEE bit primitives and scalar kernels. `zmath-testing` owns external oracles, immutable corpora, fuzz replay, and benchmarks. Every exported numerical symbol gets a pinned manifest entry, red test, portable contract test, and oracle comparison before release.
+**Proposed architecture:** The runtime library uses format-specific IEEE bit primitives and scalar kernels. `zmath-testing` owns external oracles, immutable corpora, fuzz replay, and benchmarks. Every exported numerical symbol gets a pinned manifest entry, red test, portable contract test, and oracle comparison before release.
 
-**Tech Stack:** Zig 0.16.0, Jujutsu, devenv/Nix, MPFR, GMP, FLINT/Arb.
+**Historical tech stack:** Zig 0.16.0, Jujutsu, devenv/Nix, MPFR, GMP, FLINT/Arb.
 
-## Global Constraints
+## Proposed Global Constraints (historical)
 
 - Runtime zmath links no MPFR, GMP, FLINT, Arb, BLIS, Eigen, C++, or libc math library.
 - Public type suffixes are `h` for `f16`, `f` for `f32`, `d` for `f64`, and `q` for `f128`.
@@ -21,6 +23,8 @@
 - Commit only green Jujutsu changes.
 
 ---
+
+## Proposed tasks (not for execution)
 
 ### Task 1: Migrate public numeric naming
 
@@ -450,7 +454,7 @@ zig build run-bench -Dbench-target=ieee-nextafter-f
 jj commit -m "bench: add deterministic scalar targets"
 ```
 
-## Coverage Matrix
+## Proposed Coverage Matrix (historical)
 
 | Tier | Scope | Pass condition |
 | --- | --- | --- |
@@ -463,10 +467,10 @@ jj commit -m "bench: add deterministic scalar targets"
 | Fuzz | Seeded category-weighted bit/pair generators | No panic, hang, or invariant violation |
 | Benchmark | Fixed corpus and deterministic metadata | Build succeeds and checksum is fixed |
 
-## Plan Review
+## Plan Review (historical)
 
-- Next implementations: IEEE H/F/D completion, manifest, oracle bridge, then Exp, Log, and Sin H/F/D.
+- Proposed implementation order at the time: IEEE H/F/D completion, manifest, oracle bridge, then Exp, Log, and Sin H/F/D.
 - Corner cases: every IEEE class, payload boundary, transition, domain edge, rounding mode, hard case, property, and fuzz-replay path has a named tier.
 - Infrastructure: the oracle bridge, corpus parser, tier selection, and deterministic benchmark metadata remain in `zmath-testing`.
 - Dependency-free runtime: every external numerical dependency stays outside zmath.
-- Naming: H/F/D/Q function suffixes and h/f/d/q type suffixes are enforced before scalar transcendental exports.
+- Proposed naming at the time: H/F/D/Q function suffixes and h/f/d/q type suffixes before scalar transcendental exports. This is not the current API.

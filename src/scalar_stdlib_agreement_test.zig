@@ -98,7 +98,7 @@ test "stdlib agreement: sinh finite samples" {
         -0.001,
         1.0,
         -1.0,
-        @as(f16, std.math.pi / 2.0),
+        std.math.pi / 2.0,
         1000.0,
         maximum_finite,
     };
@@ -150,7 +150,7 @@ test "stdlib agreement: sinf finite samples" {
         -0.000_001,
         1.0,
         -1.0,
-        @as(f32, std.math.pi / 2.0),
+        std.math.pi / 2.0,
         10_000.25,
         maximum_finite,
     };

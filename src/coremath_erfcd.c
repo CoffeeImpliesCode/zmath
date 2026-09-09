@@ -99,17 +99,15 @@ static inline double cm_ldexp(double value, int exponent) {
   return bits.f;
 }
 
-/****************** code copied from cosf.c **********************************/
-
-static inline double roundeven_finite(double x) {
-  int64_t truncated = (int64_t)x;
-  double truncated_value = (double)truncated;
-  double fraction = x - truncated_value;
-  if (fraction > 0.5 || (fraction == 0.5 && (truncated & 1) != 0))
-    return truncated_value + 1.0;
-  if (fraction < -0.5 || (fraction == -0.5 && (truncated & 1) != 0))
-    return truncated_value - 1.0;
-  return truncated_value;
+/* exp_1 receives -x^2*INVLOG2 with x < 0x1.9db1bb14e15cp+4, so its
+   argument is below 2^22; exp_accurate receives xh*INVLOG2acc with
+   |xh| <= 742, so its argument is below 2^11.  Thus every caller keeps
+   |x| < 2^23.  Adding the 1.5*2^52 bias therefore rounds to nearest-even
+   at unit spacing; extracting the biased significand avoids the integer
+   conversion and tie branches. */
+static inline int64_t roundeven_finite(double x) {
+  union { double f; uint64_t u; } bits = { .f = x + 0x1.8p52 };
+  return (int64_t)bits.u - INT64_C(0x4338000000000000);
 }
 
 /****************** code copied from erf.c ***********************************/
@@ -234,42 +232,45 @@ static inline void a_mul(double *hi, double *lo, double a, double b) {
 }
 
 /* Assuming 0 <= z <= 0x1.7afb48dc96626p+2, put in h+l an approximation
-   of erf(z). Return err the maximal relative error:
-   |(h + l)/erf(z) - 1| < err*|h+l| */
+   of erf(z). Return a relative error bound err; err*|h| bounds the
+   absolute error. */
 static double
 cr_erf_fast (double *h, double *l, double z)
 {
   double th, tl;
-  if (z < 0.0625) /* z < 1/16 */
+  if (z < 0x1p-4)
   {
-    static const double c0[] = {
-      0x1.20dd750429b6dp+0, 0x1.1ae3a7862d9c4p-56,  /* degree 1 */
-      -0x1.812746b0379e7p-2, 0x1.f1a64d72722a2p-57, /* degree 3 */
-      0x1.ce2f21a042b7fp-4,                         /* degree 5 */
-      -0x1.b82ce31189904p-6,                        /* degree 7 */
-      0x1.565bbf8a0fe0bp-8,                         /* degree 9 */
-      -0x1.bf9f8d2c202e4p-11};                      /* degree 11 */
-    double z2h, z2l, z4;
-    a_mul (&z2h, &z2l, z, z);
-    z4 = z2h * z2h;
-    double c9 = __builtin_fma (c0[7], z2h, c0[6]);
-    double c5 = __builtin_fma (c0[5], z2h, c0[4]);
-    c5 = __builtin_fma (c9, z4, c5);
-    a_mul (&th, &tl, z2h, c5);
-    fast_two_sum (h, l, c0[2], th);
-    *l += tl + c0[3];
-    double h_copy = *h;
-    a_mul (&th, &tl, z2h, *h);
-    tl += __builtin_fma (z2h, *l, c0[1]);
-    fast_two_sum (h, l, c0[0], th);
-    *l += __builtin_fma (z2l, h_copy, tl);
-    a_mul (h, &tl, *h, z);
-    *l = __builtin_fma (*l, z, tl);
-    return 0x1.78p-69;
+    const double CH = 0x1.20dd750429b6dp+0;
+    const double CL = 0x1.1ae3a914fed80p-56;
+    const double square = z * z;
+    const double cubic = z * square;
+    double polynomial = 0x1.f9a326f9b89b7p-14;
+    polynomial = __builtin_fma (polynomial, square,
+                                -0x1.c02db40040b86p-11);
+    polynomial = __builtin_fma (polynomial, square,
+                                0x1.565bcd0e6a53fp-8);
+    polynomial = __builtin_fma (polynomial, square,
+                                -0x1.b82ce31288b51p-6);
+    polynomial = __builtin_fma (polynomial, square,
+                                0x1.ce2f21a042be2p-4);
+    polynomial = __builtin_fma (polynomial, square,
+                                -0x1.812746b0379e7p-2);
+    const double linear = CH * z;
+    const double linear_low =
+      __builtin_fma (CL, z, __builtin_fma (CH, z, -linear));
+    const double correction = linear_low + cubic * polynomial;
+    /* Normalize before the 1 +/- erf transforms. On this interval h > z.
+       The degree-15 Taylor tail is below 2^-10*u*z^3. Coefficient,
+       evaluation and interval-endpoint errors fit within
+       8*u*z^3 + 16*u^2*z, where u=2^-53. Thus the relative bound below,
+       multiplied by h, encloses the absolute error. */
+    fast_two_sum (h, l, linear, correction);
+    return square * 0x1p-50 + 0x1p-102;
   }
-  double v = __builtin_floor (16.0 * z);
-  uint32_t i = 16.0 * z;
-  z = (z - 0.03125) - 0.0625 * v;
+  /* z >= 1/16 here, so 16*z is positive and below 95; truncation equals
+     floor and the integer index is exactly representable as a double. */
+  const uint32_t i = (uint32_t)(16.0 * z);
+  z = (z - 0.03125) - 0.0625 * (double)i;
   const double *c = C[i-1];
   double z2 = z*z, z4 = z2*z2;
   double c9 = __builtin_fma (c[12], z, c[11]);
@@ -662,7 +663,8 @@ static inline void q_1 (double *hi, double *lo, double zh, double zl) {
 static inline void exp_1 (double *hi, double *lo, double xh, double xl) {
 
 #define INVLOG2 0x1.71547652b82fep+12 /* |INVLOG2-2^12/log(2)| < 2^-43.4 */
-  double k = roundeven_finite (xh * INVLOG2);
+  const int64_t K = roundeven_finite (xh * INVLOG2);
+  const double k = (double) K;
 
   double kh, kl;
 #define LOG2H 0x1.62e42fefa39efp-13
@@ -673,7 +675,6 @@ static inline void exp_1 (double *hi, double *lo, double xh, double xl) {
   fast_two_sum (&yh, &yl, xh - kh, xl);
   yl -= kl;
 
-  int64_t K = k; /* Note: k is an integer, this is just a conversion. */
   int64_t M = (K >> 12) + 0x3ff;
   int64_t i2 = (K >> 6) & 0x3f;
   int64_t i1 = K & 0x3f;
@@ -694,7 +695,6 @@ static inline void exp_1 (double *hi, double *lo, double xh, double xl) {
 
 /****************** end of code copied from pow.[ch] *************************/
 
-typedef union {double f; uint64_t u;} b64u64_u;
 
 /* the following contains polynomials generated by Sollya for
    erfc(1/x)*exp(1/x^2), over various ranges.
@@ -749,7 +749,7 @@ exp_accurate (double *h, double *l, int *e, double xh, double xl)
   double th, tl, yh, yl;
   /* first reduce argument: xh + xl ~ k*log(2) + yh + yl */
 #define INVLOG2acc 0x1.71547652b82fep+0 // approximates 1/log(2)
-  int k = roundeven_finite (xh * INVLOG2acc);
+  int k = (int) roundeven_finite (xh * INVLOG2acc);
   /* since |xh| <= 742, |k| <= round(742/log(2)) = 1070 */
   /* subtract k*log(2), where LOG2H+LOG2L approximates log(2) */
 #define LOG2Hacc 0x1.62e42fefa39efp-1
@@ -936,45 +936,35 @@ erfc_asympt_fast (double *h, double *l, double x)
     return 0x1p-1022; // this overestimates 0x1.d9p-68 * h
 }
 
-/* given -0x1.7744f8f74e94bp2 < x < 0x1.b39dc41e48bfdp+4,
-   put in h+l a double-double approximation of erfc(x),
-   with *absolute* error bounded by err (the returned value) */
+/* Fast finite path for -0x1.7744f8f74e94bp2 < x < 0. */
 static double
-cr_erfc_fast (double *h, double *l, double x)
+cr_erfc_fast_negative (double *h, double *l, double x)
 {
-  /* on a i7-8700 with gcc 12.2.0, for x in [-5,0], the average reciprocal
-     throughput is about 44 cycles */
-  if (x < 0) // erfc(x) = 1 - erf(x) = 1 + erf(-x)
-  {
-    double err = cr_erf_fast (h, l, -x);
-    /* h+l approximates erf(-x), with relative error bounded by err,
-       where err <= 0x1.78p-69 */
-    err = err * *h; /* convert into absolute error */
-    double t;
-    fast_two_sum (h, &t, 1.0, *h);
-    // since h <= 2, the fast_two_sum() error is bounded by 2^-105*h <= 2^-104
-    *l = t + *l;
-    /* After the fast_two_sum() call, we have |t| <= ulp(h) <= ulp(2) = 2^-51
-       thus assuming |l| <= 2^-51 after the cr_erf_fast() call,
-       we have |t| <= 2^-50 here, thus the rounding
-       error on t -= *l is bounded by ulp(2^-50) = 2^-102.
-       The absolute error is thus bounded by err + 2^-104 + 2^-102
-       = err + 0x1.4p-102.
-       The maximal value of err here is for |x| < 0.0625, where cr_erf_fast()
-       returns 0x1.78p-69, and h=1/2, yielding err = 0x1.78p-70 here.
-       Adding 0x1.4p-102 is thus exact. */
-    return err + 0x1.4p-102;
-  }
-  // now 0 <= x < 0x1.b39dc41e48bfdp+4
-#define THRESHOLD1 0x1.713786d9c7c09p+1
+  double err = cr_erf_fast (h, l, -x);
+  /* Convert the relative erf bound to an absolute error bound. */
+  err = err * *h;
+  double t;
+  fast_two_sum (h, &t, 1.0, *h);
+  // since h <= 2, the fast_two_sum() error is bounded by 2^-105*h <= 2^-104
+  *l = t + *l;
+  /* After fast_two_sum, |t| <= ulp(h) <= ulp(2) = 2^-51.
+     The erf low part is bounded by 2^-51, so rounding t+l adds at most
+     2^-102. Include the transform error 2^-104 as well. */
+  return err + 0x1.4p-102;
+}
+
+/* Fast finite path for 0 < x < 0x1.b39dc41e48bfdp+4. */
+static double
+cr_erfc_fast_positive (double *h, double *l, double x)
+{
+  #define THRESHOLD1 0x1.713786d9c7c09p+1
   /* on a i7-8700 with gcc 12.2.0, for x in [0,THRESHOLD1],
      the average reciprocal throughput is about 59 cycles */
-  else if (x <= THRESHOLD1)
+  if (x <= THRESHOLD1)
   {
     double err = cr_erf_fast (h, l, x);
-    /* h+l approximates erf(x), with relative error bounded by err,
-       where err <= 0x1.78p-69 */
-    err = err * *h; /* convert into absolute error */
+    /* Convert the relative erf bound to an absolute error bound. */
+    err = err * *h;
     double t;
     fast_two_sum (h, &t, 1.0, -*h);
     *l = t - *l;
@@ -983,17 +973,9 @@ cr_erfc_fast (double *h, double *l, double x)
        here, thus the absolute error is err */
     if (x >= 0x1.e861fbb24c00ap-2)
       return err;
-    /* for x < 0x1.e861fbb24c00ap-2, the error in fast_two_sum() is bounded
-       by 2^-105*h, and since h <= 1/2, this yields 2^-106.
-       After the fast_two_sum() call, we have |t| <= ulp(h) <= ulp(1/2) = 2^-53
-       thus assuming |l| <= 2^-53 after the cr_erf_fast() call,
-       we have |t| <= 2^-52 here, thus the rounding
-       error on t -= *l is bounded by ulp(2^-52) = 2^-104.
-       The absolute error is thus bounded by err + 2^-106 + 2^-104
-       = err + 0x1.4p-104.
-       The maximal value of err here is for x < 0.0625, where cr_erf_fast()
-       returns 0x1.78p-69, and h=1/2, yielding err = 0x1.78p-70 here.
-       Adding 0x1.4p-104 is thus exact. */
+    /* Below the Sterbenz cutoff, the transform error is at most 2^-106.
+       Both |t| and the erf low part are bounded by 2^-53, so rounding
+       t-l adds at most 2^-104. */
     return err + 0x1.4p-104;
   }
   /* Now THRESHOLD1 < x < 0x1.b39dc41e48bfdp+4 thus erfc(x) < 0.000046. */
@@ -1211,50 +1193,30 @@ cr_erfc_accurate (double x)
   return erfc_asympt_accurate (x);
 }
 
+/*
+ * The Zig wrapper has already classified the input and handled every
+ * non-finite and rounded tiny/saturation case. These entry points therefore
+ * receive finite values in the corresponding open ordinary-path interval.
+ */
 double
-cr_erfc (double x)
+zmath_core_erfcd_negative (double x)
 {
-  b64u64_u t = {.f = x};
-  uint64_t at = t.u & 0x7fffffffffffffff;
-
-  if (t.u >= 0x8000000000000000) // x = -NaN or x <= 0 (excluding +0)
-  {
-    // for x <= -0x1.7744f8f74e94bp2, erfc(x) rounds to 2 (to nearest)
-    if (t.u >= 0xc017744f8f74e94b) // x = NaN or x <= -0x1.7744f8f74e94bp2
-    {
-      if (t.u >= 0xfff0000000000000){              // -Inf or NaN
-        if (t.u == 0xfff0000000000000) return 2.0; // -Inf
-        return x + x;                              // NaN
-      }
-      return 2.0 - 0x1p-54;                        // rounds to 2 or below(2)
-    }
-
-    // for -0x1.c5bf891b4ef6ap-54 <= x <= 0, erfc(x) rounds to 1 (to nearest)
-    if (-0x1.c5bf891b4ef6ap-54 <= x)
-      return __builtin_fma (-x, 0x1p-54, 1.0);
-  }
-
-  else // x = +NaN or x >= 0 (excluding -0)
-  {
-    // for x >= 0x1.b39dc41e48bfdp+4, erfc(x) < 2^-1075: rounds to 0 or 2^-1074
-    if (at >= 0x403b39dc41e48bfd) // x = NaN or x >= 0x1.b39dc41e48bfdp+4
-    {
-      if (at >= 0x7ff0000000000000){               // +Inf or NaN
-        if (at == 0x7ff0000000000000) return 0.0;  // +Inf
-        return x + x;                              // NaN
-      }
-      return 0x1p-1074 * 0.25;                     // 0 or 2^-1074 wrt rounding
-    }
-
-    // for 0 <= x <= 0x1.c5bf891b4ef6ap-55, erfc(x) rounds to 1 (to nearest)
-    if (x <= 0x1.c5bf891b4ef6ap-55)
-      return __builtin_fma (-x, 0x1p-54, 1.0);
-  }
-
-  /* now -0x1.7744f8f74e94bp+2 < x < -0x1.c5bf891b4ef6ap-54
-     or 0x1.c5bf891b4ef6ap-55 < x < 0x1.b39dc41e48bfdp+4 */
   double h, l, err;
-  err = cr_erfc_fast (&h, &l, x);
+  err = cr_erfc_fast_negative (&h, &l, x);
+
+  double left  = h + (l - err);
+  double right = h + (l + err);
+  if (left == right)
+    return left;
+
+  return cr_erfc_accurate (x);
+}
+
+double
+zmath_core_erfcd_positive (double x)
+{
+  double h, l, err;
+  err = cr_erfc_fast_positive (&h, &l, x);
 
   double left  = h + (l - err);
   double right = h + (l + err);

@@ -1,9 +1,10 @@
 const std = @import("std");
 
 /// The narrowing engine keeps every finite operand as an integer significand
-/// multiplied by an explicit power of two. No floating operation is used after
-/// decoding. Internal alignment may compress bits below the fixed 128-bit
-/// headroom into one sticky bit; only the final destination packers round.
+/// multiplied by an explicit power of two. A hardware square root seeds the
+/// integer root, but exact integer comparisons still decide every sqrt result.
+/// Internal alignment may compress bits below the fixed 128-bit headroom
+/// into one sticky bit; only the final destination packers round.
 pub const Format = struct {
     bits: u8,
     fraction_bits: u8,
@@ -48,9 +49,9 @@ pub const Format = struct {
     }
 };
 
-pub const H = Format{ .bits = 16, .fraction_bits = 10, .exponent_bits = 5, .bias = 15 };
-pub const F = Format{ .bits = 32, .fraction_bits = 23, .exponent_bits = 8, .bias = 127 };
-pub const D = Format{ .bits = 64, .fraction_bits = 52, .exponent_bits = 11, .bias = 1023 };
+pub const binary16_format: Format = .{ .bits = 16, .fraction_bits = 10, .exponent_bits = 5, .bias = 15 };
+pub const binary32_format: Format = .{ .bits = 32, .fraction_bits = 23, .exponent_bits = 8, .bias = 127 };
+pub const binary64_format: Format = .{ .bits = 64, .fraction_bits = 52, .exponent_bits = 11, .bias = 1023 };
 
 pub const Class = enum {
     zero,
@@ -383,7 +384,7 @@ fn roundRatioAtScale(numerator: u128, denominator: u128, shift: i32) struct { va
         return .{ .value = quotient, .up = doubled > denominator or (doubled == denominator and (quotient & 1) != 0) };
     }
 
-    const shift_count: u32 = @intCast(-shift);
+    const shift_count: u32 = @abs(shift);
     if (bitLength(denominator) + shift_count > 128) {
         return .{ .value = 0, .up = false };
     }
@@ -435,18 +436,16 @@ fn compareShifted(left: u128, shift: u32, right: u128) i8 {
 }
 
 fn integerSqrt(value: u64) u64 {
-    var lower: u64 = 0;
-    var upper: u64 = @as(u64, 1) << 32;
-    var iteration: u32 = 0;
-    while (iteration < 32) : (iteration += 1) {
-        const middle = (lower + upper) >> 1;
-        if (middle == 0 or middle <= value / middle) {
-            lower = middle;
-        } else {
-            upper = middle;
-        }
-    }
-    return lower;
+    @setFloatMode(.strict);
+    // Conversion is exact below 2^53. Above it, the input error is at most
+    // 2^10 and both roots are at least 2^26, giving a root error <= 2^-17.
+    // Rounding the f64 square root adds at most 2^-21 (root <= 2^32).
+    // Thus the truncated seed differs from floor(sqrt(value)) by at most one.
+    const seed: u64 = @intFromFloat(@sqrt(@as(f64, @floatFromInt(value))));
+    const square = @as(u128, seed) * seed;
+    if (square > value) return seed - 1;
+    if (@as(u128, value) - square > (@as(u128, seed) << 1)) return seed + 1;
+    return seed;
 }
 
 const SqrtRoundResult = struct {
@@ -479,28 +478,16 @@ fn sqrtScaledPositive(base: u64, shift_half: u32) SqrtRoundResult {
 }
 
 fn sqrtScaledNegative(base: u64, denominator_shift: u32) SqrtRoundResult {
+    std.debug.assert((denominator_shift & 1) == 0);
     const root = integerSqrt(base);
-    var quotient: u128 = if (denominator_shift >= 64)
+    // The caller uses denominator_shift = 2*k. Shifting the exact integer
+    // root by k is already the exact floor of the scaled square root.
+    const quotient: u128 = if (denominator_shift >= 64)
         0
     else
         root >> @as(std.math.Log2Int(u64), @intCast(denominator_shift / 2));
-    const shift = denominator_shift;
-
-    while (true) {
-        const candidate = quotient + 1;
-        const square = candidate * candidate;
-        if (compareShifted(square, shift, base) <= 0) {
-            quotient = candidate;
-        } else {
-            break;
-        }
-    }
-    while (quotient > 0 and compareShifted(quotient * quotient, shift, base) > 0) {
-        quotient -= 1;
-    }
-
     const doubled = (quotient * 2) + 1;
-    const half_compare = compareShifted(doubled * doubled, shift, @as(u128, base) * 4);
+    const half_compare = compareShifted(doubled * doubled, denominator_shift, @as(u128, base) * 4);
     return .{ .value = quotient, .up = half_compare < 0 or (half_compare == 0 and (quotient & 1) != 0) };
 }
 
@@ -543,4 +530,29 @@ pub fn packSqrt(comptime destination: Format, significand: u64, exponent: i32) d
 pub fn finiteDyadic(comptime source: Format, value: Decoded) Dyadic {
     std.debug.assert(value.class == .finite or value.class == .zero);
     return exactDyadic(source, value);
+}
+
+test "integer square root is exact at range ends and adjacent squares" {
+    const precision_root: u64 = (@as(u64, 1) << 27) - 1;
+    const precision_square = precision_root * precision_root;
+    const maximum_root: u64 = (@as(u64, 1) << 32) - 1;
+    const maximum_square = maximum_root * maximum_root;
+    const cases = [_]struct { value: u64, root: u64 }{
+        .{ .value = 0, .root = 0 },
+        .{ .value = 1, .root = 1 },
+        .{ .value = 3, .root = 1 },
+        .{ .value = 4, .root = 2 },
+        .{ .value = 8, .root = 2 },
+        .{ .value = 9, .root = 3 },
+        .{ .value = precision_square - 1, .root = precision_root - 1 },
+        .{ .value = precision_square, .root = precision_root },
+        .{ .value = precision_square + 1, .root = precision_root },
+        .{ .value = maximum_square - 1, .root = maximum_root - 1 },
+        .{ .value = maximum_square, .root = maximum_root },
+        .{ .value = maximum_square + 1, .root = maximum_root },
+        .{ .value = ~@as(u64, 0), .root = maximum_root },
+    };
+    for (cases) |case| {
+        try std.testing.expectEqual(case.root, integerSqrt(case.value));
+    }
 }

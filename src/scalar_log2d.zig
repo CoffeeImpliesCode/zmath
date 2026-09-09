@@ -18,14 +18,13 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-const sign_mask: u64 = 0x8000_0000_0000_0000;
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
 const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
 const quiet_nan_bit: u64 = 0x0008_0000_0000_0000;
 const canonical_nan_bits: u64 = 0x7ff8_0000_0000_0000;
 const minus_infinity_bits: u64 = 0xfff0_0000_0000_0000;
 
-const B = [_]struct { c0: u16, c1: i16 }{
+const index_corrections = [_]struct { c0: u16, c1: i16 }{
     .{ .c0 = 301, .c1 = 27565 },
     .{ .c0 = 7189, .c1 = 24786 },
     .{ .c0 = 13383, .c1 = 22167 },
@@ -204,6 +203,27 @@ const l2 = [_][2]f64{
     .{ -0x1.6560f19fc3f41p-30, 0x1.0009600000000p-5 },
 };
 
+const FastReduction = struct {
+    reciprocal: f64,
+    logarithm_high: f64,
+    logarithm_low: f64,
+};
+
+const fast_reduction_table = blk: {
+    @setEvalBranchQuota(4096);
+    var table: [r1.len * 32]FastReduction = undefined;
+    for (&table, 0..) |*entry, index| {
+        const high_index = index >> 5;
+        const low_index = index & 0x1f;
+        entry.* = .{
+            .reciprocal = r1[high_index] * r2[low_index],
+            .logarithm_high = l1[high_index][1] + l2[low_index][1],
+            .logarithm_low = l1[high_index][0] + l2[low_index][0],
+        };
+    }
+    break :blk table;
+};
+
 const c = [_]f64{
     -0x1.62e41d56c6400p-2,
     0x1.47fd2632d2d32p-3,
@@ -288,7 +308,7 @@ const t4 = [_]f64{
     0x1.ffeb350000000p-1,
 };
 
-const LL = [4][17][3]f64{
+const logarithm_table = [4][17][3]f64{
     .{
         .{ 0x0.0p+0, 0x0.0p+0, 0x0.0p+0 },
         .{ 0x1.000001fda0000p-4, 0x1.5ed58a7ff2c40p-42, 0x1.512acbb219717p-96 },
@@ -421,7 +441,7 @@ fn polyDd(x_high: f64, x_low: f64, coefficients: []const [2]f64, low: *f64) f64 
     return high;
 }
 
-fn log2dRefine(value: f64, approximation: f64) f64 {
+noinline fn log2dRefine(value: f64, approximation: f64) f64 {
     @setFloatMode(.strict);
 
     var bits: u64 = @bitCast(value);
@@ -446,12 +466,12 @@ fn log2dRefine(value: f64, approximation: f64) f64 {
     const table_4_index = table_index & 0xf;
 
     const logarithm = [3]f64{
-        LL[0][table_1_index][0] + LL[1][table_2_index][0] +
-            (LL[2][table_3_index][0] + LL[3][table_4_index][0]) + exponent_float,
-        LL[0][table_1_index][1] + LL[1][table_2_index][1] +
-            (LL[2][table_3_index][1] + LL[3][table_4_index][1]),
-        LL[0][table_1_index][2] + LL[1][table_2_index][2] +
-            (LL[2][table_3_index][2] + LL[3][table_4_index][2]),
+        logarithm_table[0][table_1_index][0] + logarithm_table[1][table_2_index][0] +
+            (logarithm_table[2][table_3_index][0] + logarithm_table[3][table_4_index][0]) + exponent_float,
+        logarithm_table[0][table_1_index][1] + logarithm_table[1][table_2_index][1] +
+            (logarithm_table[2][table_3_index][1] + logarithm_table[3][table_4_index][1]),
+        logarithm_table[0][table_1_index][2] + logarithm_table[1][table_2_index][2] +
+            (logarithm_table[2][table_3_index][2] + logarithm_table[3][table_4_index][2]),
     };
 
     const table_12 = t1[table_1_index] * t2[table_2_index];
@@ -490,54 +510,68 @@ fn log2dRefine(value: f64, approximation: f64) f64 {
     return result_high + rounding_high;
 }
 
-fn log2dFinite(value: f64, input_bits: u64) f64 {
+inline fn log2dFinite(value: f64, input_bits: u64) f64 {
     @setFloatMode(.strict);
 
     var bits = input_bits;
     const exponent_field: u64 = bits >> 52;
     var exponent: i32 = @as(i32, @intCast(exponent_field)) - 0x3ff;
     if (exponent_field == 0) {
+        @branchHint(.unlikely);
         const leading_zeros: u32 = @clz(bits);
         exponent -= @as(i32, @intCast(leading_zeros)) - 12;
         bits <<= @intCast(leading_zeros - 11);
     }
     bits &= 0x000f_ffff_ffff_ffff;
-    if (bits == 0) return @floatFromInt(exponent);
+    if (bits == 0) {
+        @branchHint(.unlikely);
+        return @floatFromInt(exponent);
+    }
 
     const top_index: usize = @intCast(bits >> 47);
     const low_index: u64 = bits & 0x0000_7fff_ffff_ffff;
-    const correction = @as(i64, B[top_index].c1) * @as(i64, @intCast(low_index >> 16));
-    const table_bits = bits +% (@as(u64, B[top_index].c0) << 33) +%
+    const correction = @as(i64, index_corrections[top_index].c1) * @as(i64, @intCast(low_index >> 16));
+    const table_bits = bits +% (@as(u64, index_corrections[top_index].c0) << 33) +%
         @as(u64, @bitCast(correction));
     const table_index: usize = @intCast(table_bits >> 42);
-    const table_1_index = table_index >> 5;
-    const table_2_index = table_index & 0x1f;
     bits |= @as(u64, 0x3ff) << 52;
     const normalized: f64 = @bitCast(bits);
 
     const logarithm_2_high = 0x1.71548p+0;
     const logarithm_2_low = -0x1.ad47a2f472159p-22;
-    const reciprocal = r1[table_1_index] * r2[table_2_index];
+    const reduction = fast_reduction_table[table_index];
+    const reciprocal = reduction.reciprocal;
     const product = reciprocal * normalized;
     const product_low = @mulAdd(f64, reciprocal, normalized, -product);
     const delta_high = product - logarithm_2_high;
     const delta = delta_high + product_low;
     const delta_squared = delta * delta;
-    const polynomial = delta_squared *
-        ((c[0] + delta * c[1]) + delta_squared * (c[2] + delta * c[3]));
+    const coefficient_01 = @mulAdd(f64, delta, c[1], c[0]);
+    const coefficient_23 = @mulAdd(f64, delta, c[3], c[2]);
+    const polynomial =
+        delta_squared * @mulAdd(f64, delta_squared, coefficient_23, coefficient_01);
     const exponent_float: f64 = @floatFromInt(exponent);
-    const logarithm_tail = (l1[table_1_index][1] + l2[table_2_index][1]) + exponent_float;
+    const logarithm_tail = reduction.logarithm_high + exponent_float;
     const result_high = logarithm_tail + delta_high;
     var result_low = (logarithm_tail - result_high) + delta_high;
-    result_low += ((l1[table_1_index][0] + l2[table_2_index][0]) + product_low) +
-        delta_high * logarithm_2_low;
+    result_low += @mulAdd(
+        f64,
+        delta_high,
+        logarithm_2_low,
+        reduction.logarithm_low + product_low,
+    );
     result_low += polynomial;
 
-    const error_bound = 1.6e-22;
+    // Allow 3.2e-22 for contraction changes on |delta| < 2^-10,
+    // in addition to the inherited 1.6e-22 enclosure.
+    const error_bound = 4.8e-22;
     const lower = result_high + (result_low - error_bound);
     const upper = result_high + (result_low + error_bound);
-    if (lower == upper) return lower;
-    return log2dRefine(value, upper);
+    if (lower != upper) {
+        @branchHint(.unlikely);
+        return log2dRefine(value, upper);
+    }
+    return lower;
 }
 
 // Correctly rounded binary64 log2, ported from CORE-MATH
@@ -549,15 +583,13 @@ fn log2dFinite(value: f64, input_bits: u64) f64 {
 
 pub fn log2d(value: f64) f64 {
     const bits: u64 = @bitCast(value);
-    const magnitude = bits & magnitude_mask;
-    if (magnitude == 0) return @bitCast(minus_infinity_bits);
-    if ((bits & sign_mask) != 0) {
+    if (bits -% 1 >= infinity_bits - 1) {
+        @branchHint(.unlikely);
+        const magnitude = bits & magnitude_mask;
         if (magnitude > infinity_bits) return @bitCast(bits | quiet_nan_bit);
+        if (bits == infinity_bits) return value;
+        if (magnitude == 0) return @bitCast(minus_infinity_bits);
         return @bitCast(canonical_nan_bits);
-    }
-    if (magnitude >= infinity_bits) {
-        if (magnitude == infinity_bits) return value;
-        return @bitCast(bits | quiet_nan_bit);
     }
     return log2dFinite(value, bits);
 }

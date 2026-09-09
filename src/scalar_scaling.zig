@@ -79,13 +79,17 @@ fn scaleBits(comptime Format: type, value: Format.Float, exponent: i64) Format.F
             @as(i64, @intCast(exponent_bits >> fraction_bits)) - Format.bias;
         scale_exponent = unbiased_exponent - @as(i64, fraction_bits);
     } else {
-        var normalization_shift: i64 = 0;
-        while (significand < hidden_bit) : (normalization_shift += 1) {
-            significand <<= 1;
-        }
-        scale_exponent -= normalization_shift;
+        // Zero returned above, so 0 < significand < hidden_bit. The CLZ
+        // difference is 1..fraction_bits and normalizes without losing bits.
+        // The exponent decrement preserves the value and bounds scale_exponent
+        // to [minimum_subnormal_exponent - fraction_bits, minimum_subnormal_exponent - 1].
+        const normalization_shift: Shift = @intCast(@clz(significand) - @clz(hidden_bit));
+        significand <<= normalization_shift;
+        scale_exponent -= @as(i64, normalization_shift);
     }
 
+    // Finite inputs bound scale_exponent to
+    // [minimum_subnormal_exponent - fraction_bits, maximum_normal_scale].
     const result_scale: i64 = addExponent(scale_exponent, exponent);
     if (result_scale > maximum_normal_scale) {
         return @bitCast(sign_bits | infinity_bits);

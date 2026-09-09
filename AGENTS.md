@@ -1,57 +1,33 @@
 # zmath
 
-**Stack**: Zig 0.16.0 · SIMD / Vector math · `jj` (colocated git)  
-**Status**: Active — Foundational high-performance mathematical primitives
+Zig 0.16.0 IEEE and scalar math for `f16`, `f32`, and `f64`. SIMD is not implemented. The repository uses `jj` with colocated Git.
 
----
+## Layout
 
-## 1. Overview & Architecture
+- `src/root.zig` is the root module. `src/ieee.zig` and `src/scalar.zig` implement the current IEEE and scalar APIs.
+- Source and tests are flat under `src/`: scalar kernels use `src/scalar*.zig`, C kernels use `src/coremath_*.[ch]`, and tests use `src/*_test.zig`.
+- There is no `src/scalar/`, `src/simd/`, or `src/tests/` directory.
+- `build.zig` exposes the `zmath` module, installs a demonstration executable, and defines `run`, `test`, and `docs` steps.
+- The sibling [`zmath-testing`](../zmath-testing/) project owns oracle generation, corpus replay, and benchmarks.
 
-`zmath` provides deterministic, high-throughput scalar and SIMD mathematical functions across double, single, and half-precision floating point representations.
+## Numerical contracts
 
-```
-├── src/
-│   ├── root.zig          # Root module entry point
-│   ├── scalar/           # Scalar elementary transcendental functions
-│   ├── simd/             # Vectorized AVX2 / AVX-512 / NEON kernels
-│   └── tests/            # High-precision accuracy & boundary test suites
-├── build.zig             # Build definition & benchmark targets
-└── build.zig.zon         # Package metadata
-```
+- Handle IEEE-754 NaNs, signed zero, infinities, and subnormals according to [API.md](API.md) and the [scalar contract](spec/core-math-2026-08-22.md).
+- Use the [schema-3 corpus manifest](../zmath-testing/test/corpus/manifest.toml) for acceptance status. An export or a sampled corpus does not prove whole-domain accuracy.
+- `build.zig` requires `+fma` for x86/x86_64 C kernels and supports little-endian aarch64. It has no SIMD dispatch or baseline SSE2 fallback.
+- Do not allocate dynamically in evaluation loops. Keep scratch storage statically bounded or caller-supplied.
 
----
+## Commands
 
-## 2. Invariants & Mathematical Contracts
+Run at the repository root:
 
-1. **Numerical Accuracy & Edge Cases**:
-   - Every function must handle IEEE-754 special values (NaN, $+0$, $-0$, $+\infty$, $-\infty$, subnormals) with strict, documented behavior.
-   - Max Error (ULP) bounds must be verified against high-precision reference oracles (`mpfr`/`quadmath`).
-2. **SIMD & Fallbacks**:
-   - Vectorized routines must maintain identical numerical results to scalar fallback paths.
-   - Explicit CPU target feature gating (e.g. AVX2/FMA vs baseline SSE2).
-3. **TigerStyle & Explicitness**:
-   - Zero dynamic allocations inside mathematical evaluation loops. All scratch memory must be statically bounded or caller-supplied.
+- `zig build` installs the demonstration executable at `zig-out/bin/zmath` and makes the `zmath` module available to consumers. It does not install a compiled library artifact.
+- `zig build run` runs the demonstration. `zig build test` runs the local unit tests. `zig build docs` generates documentation from the demonstration executable.
+- `zig fmt --check .` checks formatting. `gate` runs the house gate.
+- `jj st` shows working-copy status. Use `jj`, not raw Git commands.
 
----
+Run oracle and benchmark commands in sibling `zmath-testing`, not here. Its accepted corpus profile is `x86_64-linux-gnu.2.38`, CPU `haswell`, and `ReleaseSafe`. See [API.md: Tests and benchmarks](API.md#tests-and-benchmarks) for its current build steps.
 
-## 3. Commands & Verification
+This NixOS project declares development dependencies and tools in `devenv.nix`. Do not install system or development libraries imperatively.
+Use direnv or `devenv shell`; run `direnv allow` after changing the environment.
 
-```bash
-zig build                      # Build library
-zig build test                 # Run unit and accuracy tests
-zig build bench                # Run throughput benchmark (baseline)
-zig build bench -Dcpu=native   # Benchmark with native vector extensions
-zig fmt --check .              # Verify formatting
-gate                           # Run house gate script
-jj st                          # VCS status (NEVER raw git)
-```
-
-## NixOS, Development Environment & Shared Notes
-
-- This host uses NixOS. Never install system or development libraries imperatively.
-- Declare dependencies, headers, runtime libraries, and tools in `devenv.nix`.
-- Use the `devenv.nix` environment through direnv or devenv.
-- Run `direnv allow` after an environment change.
-- Use `devenv shell` for a one-off shell.
-- Store durable project architecture, design, protocol, and experiment notes under `docs/`.
-- Store cross-project or private agent handoff notes in `~/.agents/agent-notes/`. Never commit these notes.

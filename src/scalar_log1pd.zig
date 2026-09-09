@@ -27,6 +27,7 @@
 // SOFTWARE.
 
 const data = @import("scalar_log1pd_data.zig");
+const std = @import("std");
 
 const DoubleDouble = struct {
     hi: f64,
@@ -41,18 +42,6 @@ const quiet_nan_bit: u64 = 0x0008_0000_0000_0000;
 pub fn log1pd(x: f64) f64 {
     const x_bits: u64 = @bitCast(x);
     const magnitude_bits = x_bits & 0x7fff_ffff_ffff_ffff;
-    const fraction_bits = magnitude_bits & 0x000f_ffff_ffff_ffff;
-
-    if (magnitude_bits >= infinity_bits) {
-        if (fraction_bits != 0) return fromBits(x_bits | quiet_nan_bit);
-        if ((x_bits >> 63) == 0) return x;
-        return fromBits(canonical_nan_bits);
-    }
-    if (x_bits == negative_one_bits) return fromBits(0xfff0_0000_0000_0000);
-    if ((x_bits >> 63) != 0 and x_bits > negative_one_bits) {
-        return fromBits(canonical_nan_bits);
-    }
-
     const absolute_shifted = x_bits << 1;
     var ln_high: f64 = undefined;
     var ln_low: f64 = undefined;
@@ -61,8 +50,7 @@ pub fn log1pd(x: f64) f64 {
     if (absolute_shifted < 0x7f60_0000_0000_0000) {
         if (absolute_shifted < 0x7940_0000_0000_0000) {
             if (absolute_shifted == 0) return x;
-            const absolute_x = fromBits(magnitude_bits);
-            return @mulAdd(f64, absolute_x, -0x1p-54, x);
+            return x;
         }
 
         const x_squared = x * x;
@@ -119,6 +107,21 @@ pub fn log1pd(x: f64) f64 {
             error_bound = x_cubed * 0x1.94p-52;
         }
     } else {
+        if (magnitude_bits >= infinity_bits) {
+            @branchHint(.unlikely);
+            const fraction_bits = magnitude_bits & 0x000f_ffff_ffff_ffff;
+            if (fraction_bits != 0) return fromBits(x_bits | quiet_nan_bit);
+            if ((x_bits >> 63) == 0) return x;
+            return fromBits(canonical_nan_bits);
+        }
+        if (x_bits == negative_one_bits) {
+            @branchHint(.unlikely);
+            return fromBits(0xfff0_0000_0000_0000);
+        }
+        if ((x_bits >> 63) != 0 and x_bits > negative_one_bits) {
+            @branchHint(.unlikely);
+            return fromBits(canonical_nan_bits);
+        }
         const coefficients = [_]f64{
             -0x1.000000000003dp-1,
             0x1.5555555554cf5p-2,
@@ -183,11 +186,14 @@ pub fn log1pd(x: f64) f64 {
 
     const lower_bound = ln_high + (ln_low - error_bound);
     const upper_bound = ln_high + (ln_low + error_bound);
-    if (lower_bound != upper_bound) return log1pRefine(x, lower_bound);
+    if (lower_bound != upper_bound) {
+        @branchHint(.unlikely);
+        return log1pRefine(x, lower_bound);
+    }
     return lower_bound;
 }
 
-fn log1pRefine(x: f64, approximation: f64) f64 {
+noinline fn log1pRefine(x: f64, approximation: f64) f64 {
     const near_zero_coefficients = [5][2]f64{
         .{ 0x1.5555555555555p-2, 0x1.5555555555556p-56 },
         .{ -0x1p-2, 0x1.25558eff3c1efp-86 },
@@ -229,14 +235,14 @@ fn log1pRefine(x: f64, approximation: f64) f64 {
 
         const x_squared_high = x * x;
         const x_squared_low = @mulAdd(f64, x, x, -x_squared_high);
-        const x_cubed = mulDDD(x, x_squared_high, x_squared_low);
+        const x_cubed = mulDdd(x, x_squared_high, x_squared_low);
         var polynomial_low = x *
             ((near_zero_low_coefficients[0] + x * near_zero_low_coefficients[1]) +
                 x_squared_high *
                     (near_zero_low_coefficients[2] + x * near_zero_low_coefficients[3]));
-        const polynomial_high = polyDDD(x, &near_zero_coefficients, &polynomial_low);
+        const polynomial_high = polyDdd(x, &near_zero_coefficients, &polynomial_low);
         const polynomial_product =
-            mulDD(polynomial_high, polynomial_low, x_cubed.hi, x_cubed.lo);
+            mulDd(polynomial_high, polynomial_low, x_cubed.hi, x_cubed.lo);
         const scaled_x_squared_high = x_squared_high * -0.5;
         const scaled_x_squared_low = x_squared_low * -0.5;
         result_high = x;
@@ -315,9 +321,9 @@ fn log1pRefine(x: f64, approximation: f64) f64 {
                     (reduced_low_coefficients[2] +
                         reduced.hi * reduced_low_coefficients[3]));
         const polynomial_high =
-            polyDD(reduced.hi, reduced.lo, &reduced_coefficients, &polynomial_low);
+            polyDd(reduced.hi, reduced.lo, &reduced_coefficients, &polynomial_low);
         const polynomial_product =
-            mulDD(reduced.hi, reduced.lo, polynomial_high, polynomial_low);
+            mulDd(reduced.hi, reduced.lo, polynomial_high, polynomial_low);
 
         if (exponent != 0) {
             const exponent_f64: f64 = @floatFromInt(exponent);
@@ -398,7 +404,7 @@ fn addDoubleDouble(
     return .{ .hi = high_sum.hi, .lo = (x_low + y_low) + high_sum.lo };
 }
 
-fn mulDD(x_high: f64, x_low: f64, y_high: f64, y_low: f64) DoubleDouble {
+fn mulDd(x_high: f64, x_low: f64, y_high: f64, y_low: f64) DoubleDouble {
     const high_product = y_high * x_high;
     return .{
         .hi = high_product,
@@ -407,7 +413,7 @@ fn mulDD(x_high: f64, x_low: f64, y_high: f64, y_low: f64) DoubleDouble {
     };
 }
 
-fn mulDDD(x: f64, y_high: f64, y_low: f64) DoubleDouble {
+fn mulDdd(x: f64, y_high: f64, y_low: f64) DoubleDouble {
     const high_product = y_high * x;
     return .{
         .hi = high_product,
@@ -415,7 +421,7 @@ fn mulDDD(x: f64, y_high: f64, y_low: f64) DoubleDouble {
     };
 }
 
-fn polyDD(
+fn polyDd(
     x_high: f64,
     x_low: f64,
     coefficients: *const [5][2]f64,
@@ -427,7 +433,7 @@ fn polyDD(
     var low_accumulator = coefficients[index][1] + initial.lo;
     while (index != 0) {
         index -= 1;
-        const product = mulDD(x_high, x_low, high, low_accumulator);
+        const product = mulDd(x_high, x_low, high, low_accumulator);
         const total = fastSum(
             coefficients[index][0],
             coefficients[index][1],
@@ -441,14 +447,14 @@ fn polyDD(
     return high;
 }
 
-fn polyDDD(x: f64, coefficients: *const [5][2]f64, low: *f64) f64 {
+fn polyDdd(x: f64, coefficients: *const [5][2]f64, low: *f64) f64 {
     var index: usize = 4;
     const initial = fastTwoSum(coefficients[index][0], low.*);
     var high = initial.hi;
     var low_accumulator = coefficients[index][1] + initial.lo;
     while (index != 0) {
         index -= 1;
-        const product = mulDDD(x, high, low_accumulator);
+        const product = mulDdd(x, high, low_accumulator);
         const total = fastSum(
             coefficients[index][0],
             coefficients[index][1],
@@ -473,7 +479,9 @@ fn roundEvenFinite(value: f64) i64 {
         if (magnitude_bits <= 0x3fe0_0000_0000_0000) return 0;
         return if ((value_bits >> 63) != 0) -1 else 1;
     }
-    if (exponent >= 52) return @intFromFloat(value);
+    // Only log1pRefine calls this function. Its scaled approximation has
+    // magnitude below 2^27 for every finite input greater than -1.
+    std.debug.assert(exponent < 52);
 
     const significand = (magnitude_bits & 0x000f_ffff_ffff_ffff) |
         0x0010_0000_0000_0000;

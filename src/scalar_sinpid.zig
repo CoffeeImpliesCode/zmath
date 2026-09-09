@@ -24,6 +24,7 @@
 // SOFTWARE.
 
 const data = @import("scalar_sinpid_data.zig");
+const scalar_tiny = @import("scalar_tiny.zig");
 
 const sign_mask: u64 = 0x8000_0000_0000_0000;
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
@@ -229,27 +230,20 @@ pub fn sinpid(value: f64) f64 {
     const bits: u64 = @bitCast(value);
     const magnitude = bits & magnitude_mask;
     if (magnitude == 0) return value;
+    if (magnitude < scalar_tiny.magnitude_limit) {
+        // Since 1 - cos(t) <= t^2 / 2, |sin(pi*x) - pi*x| <= |pi*x|^3 / 6
+        // < 2^4*|x|^3 < |x|*2^-2038, inside the integer-stage allowance.
+        return scalar_tiny.scale(.pi, value);
+    }
 
     const exponent: i32 = @intCast(magnitude >> 52);
-    const significand_bits = (bits & 0x000f_ffff_ffff_ffff) | (@as(u64, 1) << 52);
-    const sign: i64 = if ((bits & sign_mask) == 0) 0 else -1;
-    var mantissa: i64 = @intCast(significand_bits);
-    mantissa = (mantissa ^ sign) - sign;
-    const shift: i32 = 1063 - exponent;
-
-    if (shift < 0) {
-        if (exponent == 0x7ff) {
-            if ((bits << 12) == 0) return @bitCast(canonical_nan_bits);
-            return @bitCast(bits | quiet_nan_bit);
-        }
-        const reduction_shift = -shift - 1;
-        if (reduction_shift > 10) return copySign(0.0, bits);
-        const mantissa_bits: u64 = @bitCast(mantissa);
-        const index = (mantissa_bits << @intCast(reduction_shift)) & 0xfff;
-        if ((index & 0x7ff) == 0) return copySign(0.0, bits);
-        const table = sincosN(@intCast(index));
-        return table.sin_high + table.sin_low;
+    if (exponent == 0x7ff) {
+        if ((bits << 12) == 0) return @bitCast(canonical_nan_bits);
+        return @bitCast(bits | quiet_nan_bit);
     }
+
+    // At |x| >= 2^52 every binary64 value is an integer, so sinpi is zero.
+    if (magnitude >= (0x433 << 52)) return copySign(0.0, bits);
 
     if (magnitude <= 0x3fa2_0000_0000_0000) {
         const pi_high = 0x1.921fb54442d18p+1;
@@ -289,6 +283,22 @@ pub fn sinpid(value: f64) f64 {
         const upper = (low + epsilon) + high;
         if (lower == upper) return lower;
         return sinpiZero(value);
+    }
+
+    const significand_bits = (bits & 0x000f_ffff_ffff_ffff) | (@as(u64, 1) << 52);
+    const sign: i64 = if ((bits & sign_mask) == 0) 0 else -1;
+    var mantissa: i64 = @intCast(significand_bits);
+    mantissa = (mantissa ^ sign) - sign;
+    const shift: i32 = 1063 - exponent;
+
+    if (shift < 0) {
+        const reduction_shift = -shift - 1;
+        if (reduction_shift > 10) return copySign(0.0, bits);
+        const mantissa_bits: u64 = @bitCast(mantissa);
+        const index = (mantissa_bits << @intCast(reduction_shift)) & 0xfff;
+        if ((index & 0x7ff) == 0) return copySign(0.0, bits);
+        const table = sincosN(@intCast(index));
+        return table.sin_high + table.sin_low;
     }
 
     const integer_shift = exponent - 1011;

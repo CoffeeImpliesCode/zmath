@@ -1,14 +1,16 @@
-# Scalar Acceptance Roadmap Implementation Plan
+# Historical Scalar Acceptance Roadmap (superseded)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use `subagent-driven-development` or `executing-plans` to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **HISTORICAL / SUPERSEDED — not a live plan.** This August 2026 schema-2 snapshot had six accepted rows. It records past tasks, commands, counts, and verification. Keep its recorded evidence and checkbox states as history. Do not execute its steps or use its row statuses as current acceptance policy.
+>
+> The live sources are the [API contract](../../../API.md), [schema-3 scalar contract](../../../spec/core-math-2026-08-22.md), and sibling [corpus manifest](../../../../zmath-testing/test/corpus/manifest.toml). Use the API contract for current `zmath-testing` steps; `zmath` has no `bench` step.
 
-**Goal:** Convert zmath's broad C23 scalar implementation from reflection-tested API surface into a reproducible, manifest-backed, target-qualified numerical release foundation.
+**Historical goal:** Convert zmath's broad C23 scalar implementation from reflection-tested API surface into a reproducible, manifest-backed, target-qualified numerical release foundation.
 
-**Architecture:** `zmath` remains a dependency-free runtime. The sibling `zmath-testing` project owns manifest parsing, immutable corpora, MPFR/Arb production and proof, and benchmark artifacts. The implementation sequence starts by reconciling the contract, then creates a strict schema-v2 corpus pipeline, then accepts one function-format pair at a time. No SIMD, complex, vector, matrix, geometry, or algebra work begins until the scalar acceptance pipeline is reproducible.
+**Historical architecture:** `zmath` remains a dependency-free runtime. The sibling `zmath-testing` project owns manifest parsing, immutable corpora, MPFR/Arb production and proof, and benchmark artifacts. This plan proposed schema v2 and six incremental acceptances before non-scalar work.
 
-**Tech Stack:** Zig 0.16.0, Jujutsu, Nix/devenv, MPFR 512-bit, Arb 512-bit via FLINT, vendored CORE-MATH C kernels.
+**Historical tech stack:** Zig 0.16.0, Jujutsu, Nix/devenv, MPFR 512-bit, Arb 512-bit via FLINT, vendored CORE-MATH C kernels.
 
-## Global Constraints
+## Global Constraints (historical snapshot)
 
 - Runtime `zmath` must not link MPFR, GMP, FLINT, Arb, BLIS, Eigen, C++, libc math, `fenv`, or `errno` behavior.
 - Public floating formats are only `f16`, `f32`, and `f64`; `q`, `f128`, and bfloat16 remain rejected.
@@ -16,25 +18,25 @@
 - Every acceptance transition requires exact special-value behavior, caller round-to-nearest/ties-to-even with gradual underflow, MPFR `MPFR_RNDN` at exactly 512 bits, and a unique matching Arb rounding proof at exactly 512 bits.
 - Every corpus and benchmark input set is repository-relative, immutable, deterministic, and has an explicit selection rule and count.
 - `unsupported` means no acceptance claim. Export presence, local unit tests, source provenance, or a passing build never changes row status.
-- The accepted manifest has 315 sorted schema-v2 rows. Exactly six pairs are accepted: `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, and `sin/h`. The remaining 309 rows are `unsupported`.
-- The accepted corpus profile is exactly target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`. Do not claim support for another profile.
+- The then-accepted manifest had 315 sorted schema-v2 rows. Six pairs were accepted: `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, and `sin/h`. The other 309 rows were `unsupported` at that time.
+- That corpus profile was target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`. These historical statuses do not qualify any other profile.
 - Implementation, manifest acceptance, corpus evidence, and whole-domain proof are separate facts. F and D selected corpora are not exhaustive whole-domain proof.
-- Schema-v2 `bounded` rows permit any non-negative `max_ulp`, including zero. `correct` rows require `max_ulp = 0`.
+- Under schema v2, `bounded` rows permitted any non-negative `max_ulp`, including zero. `correct` rows required `max_ulp = 0`.
 
-## Current integration state
+## Recorded integration state (August 2026)
 
-The source, strict schema-v2 manifest, corpus loader, deterministic replay lane,
-and benchmark metadata for the six accepted pairs are integrated.
-This roadmap now records re-verification of that work.
-It does not invent historical red runs or retroactive failure evidence.
-All six roadmap tasks now have execution evidence, recorded below.
-Exact-power measurements remain observations, not full-domain resource bounds.
+At that time, the source, strict schema-v2 manifest, corpus loader, deterministic replay lane,
+and benchmark metadata for the six accepted pairs were recorded as integrated.
+This roadmap recorded their re-verification, not the current manifest status.
+It did not invent historical red runs or retroactive failure evidence.
+All six tasks had execution evidence recorded below.
+Exact-power measurements were observations, not full-domain resource bounds.
 
-The broad C23 campaign and evaluator branch remains preserved at the
-`preserve-c23-campaigns` bookmark.
-Only strict manifest and schema rejection regressions move into this roadmap.
-The obsolete approximate `atan2` split and its invalid audit constants are superseded by the canonical implementation and migrated regression cases.
-The current `lgamma` contract governs zero and finite negative-integer poles.
+The broad C23 campaign and evaluator branch were then recorded at the
+`preserve-c23-campaigns` bookmark. This does not describe the branch's current state.
+Only strict manifest and schema rejection regressions entered this historical lane.
+The obsolete approximate `atan2` split and its invalid audit constants had been superseded by the canonical implementation and migrated regression cases.
+The then-current `lgamma` contract governed zero and finite negative-integer poles.
 
 ---
 
@@ -46,7 +48,7 @@ The current `lgamma` contract governs zero and finite negative-integer poles.
 - Modify: `~/projects/zmath-testing/test/corpus/manifest.toml`
 - Test: `~/projects/zmath-testing/test/integration/infrastructure.zig`
 
-**Decision:** Keep schema version 2 and the canonical 315 sorted typed rows. The manifest accepts exactly six pairs: `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, and `sin/h`. The remaining 309 rows stay `unsupported` until their own implementation and evidence exist.
+**Decision at the time:** Keep schema version 2 and the 315 sorted typed rows. The manifest then accepted exactly six pairs: `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, and `sin/h`. The other 309 rows were `unsupported`.
 
 **Interfaces:**
 - Root manifest keys are exactly: `schema_version`, `core_math_repository`, `core_math_revision`, `mpfr_precision_bits`, `arb_precision_bits`, `rounding`, `formats`, `reserved_formats`, `rejected_formats`, `operation_spelling`, `columns`, `hexadecimal`, `uncertainty_policy`, and `special_policy`.
@@ -59,7 +61,7 @@ The current `lgamma` contract governs zero and finite negative-integer poles.
   - Run `zig build test` in `~/projects/zmath-testing`.
   - Reverification passed. No historical red result is inferred.
 - [x] **Step 3: Make the specification unambiguous**
-  - Reconcile the current six accepted rows, the 309 unsupported rows, exact `operation_spelling`, provenance, target profile, and evidence boundaries.
+  - Reconcile the then-current six accepted rows, the 309 unsupported rows, exact `operation_spelling`, provenance, target profile, and evidence boundaries.
 - [x] **Step 4: Use the checked-in sorted schema-v2 manifest**
   - Keep all 315 descriptors in deterministic order.
   - Keep the six accepted rows at `status = "correct"`, `oracle = "mpfr_arb"`, and `max_ulp = 0`.
@@ -140,8 +142,8 @@ The current `lgamma` contract governs zero and finite negative-integer poles.
 - Modify: `~/projects/zmath-testing/test/corpus/README.md`
 
 **Interfaces:**
-- Each accepted row is `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, or `sin/h`.
-- Each accepted row uses `status = "correct"`, `oracle = "mpfr_arb"`, `special_policy = "zmath_c23_v1"`, and `max_ulp = 0`.
+- The six accepted rows in this snapshot were `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, and `sin/h`.
+- Each used `status = "correct"`, `oracle = "mpfr_arb"`, `special_policy = "zmath_c23_v1"`, and `max_ulp = 0`.
 
 - [x] **Step 1: Generate immutable corpus artifacts**
   - Enumerate all 65,536 H inputs for `exp/h`, `log/h`, and `sin/h`.
@@ -154,11 +156,11 @@ The current `lgamma` contract governs zero and finite negative-integer poles.
 - [x] **Step 3: Fix runtime only when an oracle row proves a defect**
   - Touch only the exact kernel or wrapper owning a checked-in mismatch. Preserve pure-value behavior and caller-RNE requirements.
 - [x] **Step 4: Keep one manifest status per accepted proof**
-  - The current manifest accepts all six pairs independently. Do not change adjacent statuses when a future pair changes.
+  - The then-current manifest accepted all six pairs independently. The plan did not change adjacent statuses when a pair changed.
 - [x] **Step 5: Verify the accepted corpus matrix**
   - Run `zig build test` in `zmath`.
   - Run `zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe` in `zmath-testing`.
-  - Confirm exact zero-ULP evidence for all six accepted rows and `unsupported` status for the remaining 309 rows.
+  - At the time, confirm zero-ULP evidence for the six then-accepted rows and `unsupported` status for the other 309 rows.
 
 ### Task 5: Re-verify the accepted `log/f` pair
 
@@ -187,11 +189,11 @@ pub fn logf(value: f32) f32;
   - Modify `src/scalar.zig` only if a checked-in failing corpus row demonstrates a mismatch.
   - Add the exact regression input to `src/scalar_log_test.zig` before changing the kernel.
 - [x] **Step 5: Keep exactly one accepted row**
-  - The current manifest sets only `log/f` in this pair's transition to `correct`, `mpfr_arb`, and zero ULP.
+  - The then-current manifest set `log/f` alone to `correct`, `mpfr_arb`, and zero ULP in this pair's transition.
 - [x] **Step 6: Verify no adjacent status changed**
   - Run `zig build test` in `zmath`.
   - Run `zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe` in `zmath-testing`.
-  - Confirm `log/f` is accepted. Confirm `log/d`, `sin/f`, and `sin/d` stay unsupported.
+  - At the time, confirm `log/f` was accepted and `log/d`, `sin/f`, and `sin/d` were unsupported.
 
 ### Task 6: Re-verify target qualification and scalar benchmarks
 
@@ -229,7 +231,7 @@ zig build run-bench -Dbench-target=scalar-log-f -Dtarget=x86_64-linux-gnu.2.38 -
   - Run local tests, the qualified oracle command, and the qualified scalar benchmark.
   - Confirm runtime remains dependency-free. Confirm external numerical libraries link only into oracle artifacts.
 
-## Recorded verification
+## Recorded verification (August 2026 snapshot, not current)
 
 Toolchain: Zig 0.16.0. Accepted corpus profile:
 `x86_64-linux-gnu.2.38`, exact populated `haswell` features, `ReleaseSafe`.
@@ -250,46 +252,46 @@ Toolchain: Zig 0.16.0. Accepted corpus profile:
 | Library without FMA; unknown benchmark; unqualified benchmark/oracle | Rejected |
 | Formatting and library build | Passed |
 
-New red-to-green evidence:
+Recorded red-to-green evidence from August 2026:
 
 - Missing embedded-global metadata was accepted before its guard was restored.
 - The finite-input overflow regression failed with `UNCERTAIN`; the repaired
-  bridge proves the exact overflow rounding interval at 512 bits.
+  bridge proved the exact overflow rounding interval at 512 bits.
 - A forced `fclose` failure exposed a second close attempt. The repaired
-  producer reports `FileWriteFailed` and leaves no temporary or final artifact.
+  producer reported `FileWriteFailed` and left no temporary or final artifact.
 - The exploratory target first failed to link, then exposed incompatible C/Zig
-  coverage tables. Its Exp-only Zig campaign now runs with a separately linked,
-  uninstrumented oracle bridge. It makes no C-kernel coverage claim.
+  coverage tables. Its Exp-only Zig campaign ran with a separately linked,
+  uninstrumented oracle bridge and made no C-kernel coverage claim.
 
-Power measurements cover 36 subnormal/degree-±64 scenarios in each release mode.
-Outputs and checksums agree. Massif observed whole-program stack peaks of
+Power measurements covered 36 subnormal/degree-±64 scenarios in each release mode.
+Outputs and checksums agreed. Massif observed whole-program stack peaks of
 362,832 bytes in ReleaseSafe and 362,976 bytes in ReleaseFast, with zero heap
 bytes. Native four-call `compoundn` batches reached 14.678 seconds and 3.233
 seconds respectively on a shared host. These are samples, not latency bounds
-or a controlled comparison between modes. Power rows remain unsupported.
+or a controlled comparison between modes. Power rows were unsupported in this snapshot.
 
-Detailed commands, benchmark samples, counts, and measurement caveats are in
-`zmath-testing/test/corpus/README.md`. The eight measured runtime executables
-had no dynamic section and no MPFR/GMP/Arb/FLINT symbols.
+The detailed commands, benchmark samples, counts, and measurement caveats were
+recorded in `zmath-testing/test/corpus/README.md` at the time. The eight measured
+runtime executables had no dynamic section and no MPFR/GMP/Arb/FLINT symbols.
 
-## Deferred Scope
+## Deferred Scope (historical snapshot, not current)
 
-- SIMD dispatch, AVX2/AVX-512/NEON kernels, and native CPU benchmarking remain deferred.
-- Complex numbers, vectors, quaternions, matrices, linear algebra, geometry, and algebra modules remain deferred.
-- Oracle bridge support for binary, ternary, integer-parameter, and C-backed C23 families remains deferred.
-- Whole-domain proof for F and D scalar families remains deferred. Their selected corpora are not exhaustive.
+- SIMD dispatch, AVX2/AVX-512/NEON kernels, and native CPU benchmarking were deferred in this plan.
+- Complex numbers, vectors, quaternions, matrices, linear algebra, geometry, and algebra modules were deferred in this plan.
+- Oracle bridge support for binary, ternary, integer-parameter, and C-backed C23 families was deferred at the time. This is not a claim about the current harness.
+- Whole-domain proof for F and D scalar families was deferred. Their selected corpora were not exhaustive.
 
-The broad C23 campaign and evaluator branch stays at the
+At the time, the broad C23 campaign and evaluator branch were recorded at the
 `preserve-c23-campaigns` bookmark.
-Only strict manifest and schema rejection regressions migrated into this lane.
-Do not migrate descriptor runtime or broad campaign changes.
-The deferred work starts only after the accepted scalar lanes have re-verification
-evidence and the exact-power resource envelope has measured evidence.
+Only strict manifest and schema rejection regressions entered this lane.
+This plan excluded descriptor runtime and broad campaign changes.
+It conditioned deferred work on re-verification of the six then-accepted scalar lanes
+and measured evidence for exact-power resource use. See the current contract and manifest above instead.
 
-## Plan Self-Review
+## Plan Self-Review (historical)
 
-- **Spec coverage:** schema v2, all 315 row descriptors, six accepted pairs, 309 unsupported rows, corpus artifacts, MPFR/Arb proof, target/mode metadata, benchmark metadata, and exact-power resource limits map to Tasks 1-6.
+- **Spec coverage:** schema v2, all 315 row descriptors, six accepted pairs, 309 unsupported rows, corpus artifacts, MPFR/Arb proof, target/mode metadata, benchmark metadata, and exact-power resource limits mapped to Tasks 1-6 at the time.
 - **Evidence boundaries:** implementation, manifest acceptance, stored corpus evidence, and whole-domain proof remain separate. F and D samples do not establish exhaustive proof.
-- **Dependency order:** no future status transition precedes contract reconciliation, parser migration, immutable corpus loading, deterministic oracle execution, or target qualification.
-- **Scope:** the plan preserves the dependency-free runtime boundary and excludes premature SIMD, broad C23 campaign migration, and planned non-scalar modules.
+- **Dependency order:** the plan placed contract reconciliation, parser migration, immutable corpus loading, deterministic oracle execution, and target qualification before later status transitions.
+- **Scope:** this plan preserved the dependency-free runtime boundary and excluded SIMD, broad C23 campaign migration, and non-scalar modules.
 

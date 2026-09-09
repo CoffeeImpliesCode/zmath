@@ -95,6 +95,180 @@ test "scaleBh rounds positive and negative underflow in every mode" {
     }
 }
 
+test "scaleBh promotes nonzero subnormals exactly in every mode" {
+    const modes = [_]ieee.RoundMode{
+        .nearest_even,
+        .toward_zero,
+        .toward_positive,
+        .toward_negative,
+    };
+    for (modes) |mode| {
+        try expectBits(0x0400, ieee.scaleBh(mode, ieee.fromBitsh(0x0001), 10));
+        try expectBits(0x8400, ieee.scaleBh(mode, ieee.fromBitsh(0x8001), 10));
+        try expectBits(0x0400, ieee.scaleBh(mode, ieee.fromBitsh(0x0200), 1));
+        try expectBits(0x07fe, ieee.scaleBh(mode, ieee.fromBitsh(0x03ff), 1));
+        try expectBits(0x03ff, ieee.scaleBh(mode, ieee.fromBitsh(0x03ff), 0));
+    }
+}
+
+test "scaleBh rounds subnormal ties by parity in every mode" {
+    const cases = [_]struct {
+        mode: ieee.RoundMode,
+        even_positive_bits: u16,
+        even_negative_bits: u16,
+        odd_positive_bits: u16,
+        odd_negative_bits: u16,
+    }{
+        .{
+            .mode = .nearest_even,
+            .even_positive_bits = 0x0200,
+            .even_negative_bits = 0x8200,
+            .odd_positive_bits = 0x0202,
+            .odd_negative_bits = 0x8202,
+        },
+        .{
+            .mode = .toward_zero,
+            .even_positive_bits = 0x0200,
+            .even_negative_bits = 0x8200,
+            .odd_positive_bits = 0x0201,
+            .odd_negative_bits = 0x8201,
+        },
+        .{
+            .mode = .toward_positive,
+            .even_positive_bits = 0x0201,
+            .even_negative_bits = 0x8200,
+            .odd_positive_bits = 0x0202,
+            .odd_negative_bits = 0x8201,
+        },
+        .{
+            .mode = .toward_negative,
+            .even_positive_bits = 0x0200,
+            .even_negative_bits = 0x8201,
+            .odd_positive_bits = 0x0201,
+            .odd_negative_bits = 0x8202,
+        },
+    };
+
+    for (cases) |case| {
+        try expectBits(
+            case.even_positive_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x0401), -1),
+        );
+        try expectBits(
+            case.even_negative_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x8401), -1),
+        );
+        try expectBits(
+            case.odd_positive_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x0403), -1),
+        );
+        try expectBits(
+            case.odd_negative_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x8403), -1),
+        );
+    }
+}
+
+test "scaleBh rounds a subnormal carry into the minimum normal in every mode" {
+    const cases = [_]struct {
+        mode: ieee.RoundMode,
+        positive_bits: u16,
+        negative_bits: u16,
+    }{
+        .{ .mode = .nearest_even, .positive_bits = 0x0400, .negative_bits = 0x8400 },
+        .{ .mode = .toward_zero, .positive_bits = 0x03ff, .negative_bits = 0x83ff },
+        .{ .mode = .toward_positive, .positive_bits = 0x0400, .negative_bits = 0x83ff },
+        .{ .mode = .toward_negative, .positive_bits = 0x03ff, .negative_bits = 0x8400 },
+    };
+
+    for (cases) |case| {
+        try expectBits(case.positive_bits, ieee.scaleBh(case.mode, ieee.fromBitsh(0x07ff), -1));
+        try expectBits(case.negative_bits, ieee.scaleBh(case.mode, ieee.fromBitsh(0x87ff), -1));
+    }
+}
+
+test "scaleBh keeps special values and saturates extreme exponents in every mode" {
+    const cases = [_]struct {
+        mode: ieee.RoundMode,
+        positive_overflow_bits: u16,
+        negative_overflow_bits: u16,
+        positive_underflow_bits: u16,
+        negative_underflow_bits: u16,
+    }{
+        .{
+            .mode = .nearest_even,
+            .positive_overflow_bits = 0x7c00,
+            .negative_overflow_bits = 0xfc00,
+            .positive_underflow_bits = 0x0000,
+            .negative_underflow_bits = 0x8000,
+        },
+        .{
+            .mode = .toward_zero,
+            .positive_overflow_bits = 0x7bff,
+            .negative_overflow_bits = 0xfbff,
+            .positive_underflow_bits = 0x0000,
+            .negative_underflow_bits = 0x8000,
+        },
+        .{
+            .mode = .toward_positive,
+            .positive_overflow_bits = 0x7c00,
+            .negative_overflow_bits = 0xfbff,
+            .positive_underflow_bits = 0x0001,
+            .negative_underflow_bits = 0x8000,
+        },
+        .{
+            .mode = .toward_negative,
+            .positive_overflow_bits = 0x7bff,
+            .negative_overflow_bits = 0xfc00,
+            .positive_underflow_bits = 0x0000,
+            .negative_underflow_bits = 0x8001,
+        },
+    };
+
+    for (cases) |case| {
+        try expectBits(
+            case.positive_overflow_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x0001), 2_147_483_647),
+        );
+        try expectBits(
+            case.negative_overflow_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x8001), 2_147_483_647),
+        );
+        try expectBits(
+            case.positive_underflow_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x0001), -2_147_483_648),
+        );
+        try expectBits(
+            case.negative_underflow_bits,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x8001), -2_147_483_648),
+        );
+        try expectBits(
+            0x0000,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x0000), -2_147_483_648),
+        );
+        try expectBits(
+            0x8000,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x8000), 2_147_483_647),
+        );
+        try expectBits(
+            0x7c00,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x7c00), -2_147_483_648),
+        );
+        try expectBits(
+            0xfc00,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0xfc00), 2_147_483_647),
+        );
+        try expectBits(
+            0x7e55,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0x7e55), 2_147_483_647),
+        );
+        try expectBits(
+            0xff55,
+            ieee.scaleBh(case.mode, ieee.fromBitsh(0xfd55), -2_147_483_648),
+        );
+    }
+}
+
 test "roundIntegralh rounds positive and negative ties in every mode" {
     const positive_tie = ieee.fromBitsh(0x4100);
     const negative_tie = ieee.fromBitsh(0xc100);

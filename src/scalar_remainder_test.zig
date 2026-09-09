@@ -236,6 +236,133 @@ test "f64 remainder operations implement C23 special values" {
     });
 }
 
+test "f64 quotient chunks preserve residual bits across the 11-bit boundary" {
+    const divisor = common.D.fromBits(0x0010_0000_0000_0001);
+    inline for (.{ 10, 11, 12 }) |gap| {
+        const fraction = 1 + (@as(u64, 5) << (52 - gap));
+        const dividend = common.D.fromBits((@as(u64, gap + 1) << 52) | fraction);
+        try expectBits(common.D, 0x000f_ffff_ffff_fffc, remainder.fmodd(dividend, divisor));
+        try expectBits(common.D, 0x8000_0000_0000_0005, remainder.remainderd(dividend, divisor));
+        const selected = remainder.remquod(dividend, divisor);
+        try expectBits(common.D, 0x8000_0000_0000_0005, selected.value);
+        try std.testing.expectEqual(@as(i32, 5), selected.quotient);
+
+        const selected_negative = remainder.remquod(-dividend, divisor);
+        try expectBits(common.D, 5, selected_negative.value);
+        try std.testing.expectEqual(@as(i32, -5), selected_negative.quotient);
+    }
+}
+
+test "f32 quotient chunks carry through the 40-bit boundary" {
+    const divisor = common.F.fromBits(0x0080_0001);
+    inline for (.{ 39, 40, 41 }) |gap| {
+        const dividend = common.F.fromBits((@as(u32, gap + 1) << 23) | 11);
+        const complement = @as(u32, 10) << (gap - 23);
+        try expectBits(common.F, 0x0080_0001 - complement, remainder.fmodf(dividend, divisor));
+        try expectBits(common.F, 0x8000_0000 | complement, remainder.remainderf(dividend, divisor));
+        const selected = remainder.remquof(dividend, divisor);
+        try expectBits(common.F, 0x8000_0000 | complement, selected.value);
+        try std.testing.expectEqual(@as(i32, 0), selected.quotient);
+    }
+}
+
+test "f64 ties at a quotient chunk boundary use the preceding quotient parity" {
+    const divisor = common.D.fromBits(0x0010_0000_0000_0000);
+    inline for (.{ 10, 11, 12 }) |gap| {
+        const exponent = @as(u64, gap + 1) << 52;
+        const half_unit = @as(u64, 1) << (51 - gap);
+        const even_dividend = common.D.fromBits(exponent | (9 * half_unit));
+        const odd_dividend = common.D.fromBits(exponent | (11 * half_unit));
+        const even = remainder.remquod(even_dividend, divisor);
+        const odd = remainder.remquod(odd_dividend, divisor);
+        try expectBits(common.D, 0x0008_0000_0000_0000, even.value);
+        try std.testing.expectEqual(@as(i32, 4), even.quotient);
+        try expectBits(common.D, 0x8008_0000_0000_0000, odd.value);
+        try std.testing.expectEqual(@as(i32, 6), odd.quotient);
+    }
+}
+
+test "f64 full-width divisor and maximal exponent gap retain quotient low bits" {
+    // 2^2045 times (2^53-1) modulo 9*2^49 leaves 2^49 and quotient low bits 7.
+    const dividend = common.D.fromBits(0x7fef_ffff_ffff_ffff);
+    const divisor = common.D.fromBits(0x0012_0000_0000_0000);
+    try expectBits(common.D, 0x0002_0000_0000_0000, remainder.fmodd(dividend, divisor));
+    try expectBits(common.D, 0x0002_0000_0000_0000, remainder.remainderd(dividend, divisor));
+    const selected = remainder.remquod(dividend, divisor);
+    try expectBits(common.D, 0x0002_0000_0000_0000, selected.value);
+    try std.testing.expectEqual(@as(i32, 7), selected.quotient);
+}
+
+test "negative exponent offsets select zero or one nearest quotient" {
+    const divisor = common.D.fromBits(0x0020_0000_0000_0000);
+    const tie = common.D.fromBits(0x0010_0000_0000_0000);
+    const above_half = common.D.fromBits(0x0018_0000_0000_0000);
+    const zero = remainder.remquod(tie, divisor);
+    try expectBits(common.D, 0x0010_0000_0000_0000, zero.value);
+    try std.testing.expectEqual(@as(i32, 0), zero.quotient);
+
+    try expectBits(common.D, 0x0018_0000_0000_0000, remainder.fmodd(above_half, divisor));
+    const one = remainder.remquod(above_half, divisor);
+    try expectBits(common.D, 0x8008_0000_0000_0000, one.value);
+    try std.testing.expectEqual(@as(i32, 1), one.quotient);
+    const negative = remainder.remquod(-above_half, divisor);
+    try expectBits(common.D, 0x0008_0000_0000_0000, negative.value);
+    try std.testing.expectEqual(@as(i32, -1), negative.quotient);
+}
+
+test "extreme exponent gaps preserve low quotient bits and signed subnormals" {
+    const h_dividend = common.H.fromBits(0x7bff);
+    const h_divisor = common.H.fromBits(0x0003);
+    try expectBits(common.H, 2, remainder.fmodh(h_dividend, h_divisor));
+    try expectBits(common.H, 0x8001, remainder.remainderh(h_dividend, h_divisor));
+    const half = remainder.remquoh(-h_dividend, h_divisor);
+    try expectBits(common.H, 1, half.value);
+    try std.testing.expectEqual(@as(i32, -3), half.quotient);
+
+    const f_dividend = common.F.fromBits(0x7f7f_fffe);
+    const f_divisor = common.F.fromBits(0x0000_0003);
+    try expectBits(common.F, 1, remainder.fmodf(f_dividend, f_divisor));
+    try expectBits(common.F, 1, remainder.remainderf(f_dividend, f_divisor));
+    const single = remainder.remquof(-f_dividend, f_divisor);
+    try expectBits(common.F, 0x8000_0001, single.value);
+    try std.testing.expectEqual(@as(i32, -5), single.quotient);
+
+    const d_dividend = common.D.fromBits(0x7fef_ffff_ffff_ffff);
+    const d_divisor = common.D.fromBits(0x0000_0000_0000_0003);
+    try expectBits(common.D, 2, remainder.fmodd(d_dividend, d_divisor));
+    try expectBits(
+        common.D,
+        0x8000_0000_0000_0001,
+        remainder.remainderd(d_dividend, d_divisor),
+    );
+    const double = remainder.remquod(-d_dividend, d_divisor);
+    try expectBits(common.D, 1, double.value);
+    try std.testing.expectEqual(@as(i32, -3), double.quotient);
+    const exact = remainder.remquod(-d_dividend, common.D.fromBits(1));
+    try expectBits(common.D, 0x8000_0000_0000_0000, exact.value);
+    try std.testing.expectEqual(@as(i32, 0), exact.quotient);
+    try expectBits(
+        common.D,
+        0x8000_0000_0000_0000,
+        remainder.fmodd(-d_dividend, common.D.fromBits(1)),
+    );
+
+    const tiny_negative = common.D.fromBits(0x8000_0000_0000_0001);
+    try expectBits(
+        common.D,
+        0x8000_0000_0000_0001,
+        remainder.fmodd(tiny_negative, d_dividend),
+    );
+    try expectBits(
+        common.D,
+        0x8000_0000_0000_0001,
+        remainder.remainderd(tiny_negative, d_dividend),
+    );
+    const zero_quotient = remainder.remquod(tiny_negative, d_dividend);
+    try expectBits(common.D, 0x8000_0000_0000_0001, zero_quotient.value);
+    try std.testing.expectEqual(@as(i32, 0), zero_quotient.quotient);
+}
+
 test "remainder public signatures use shared RemquoResult" {
     comptime {
         std.debug.assert(@TypeOf(remainder.fmodh) == fn (f16, f16) f16);

@@ -23,7 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-const S1 = [_]f32{
+const tangent_s1 = [_]f32{
     0x0p+0,
     0x1.fffffep-20,
     0x1.fffffep-19,
@@ -2074,7 +2074,7 @@ const S1 = [_]f32{
     @bitCast(@as(u32, 0x7fc00000)),
 };
 
-const C1 = [_]f32{
+const tangent_c1 = [_]f32{
     0x1p+0,
     0x1p+0,
     0x1p+0,
@@ -4125,7 +4125,7 @@ const C1 = [_]f32{
     @bitCast(@as(u32, 0x7fc00000)),
 };
 
-const S2 = [_]f32{
+const tangent_s2 = [_]f32{
     0x0p+0,
     0x1.fffffep-25,
     0x1.fffffep-24,
@@ -6176,7 +6176,7 @@ const S2 = [_]f32{
     0.0,
 };
 
-const C2 = [_]f32{
+const tangent_c2 = [_]f32{
     0x1p+0,
     0x1p+0,
     0x1p+0,
@@ -8269,8 +8269,18 @@ pub fn tanh(value: f16) f16 {
     if (bits == 0xe807) return @bitCast(@as(u16, 0xc015));
     if (bits == 0x6f4d) return @bitCast(@as(u16, 0xbe1a));
 
-    const s = @mulAdd(f32, S1[index_1], C2[index_2], C1[index_1] * S2[index_2]);
-    const c = @mulAdd(f32, C1[index_1], C2[index_2], -S1[index_1] * S2[index_2]);
+    const s = @mulAdd(
+        f32,
+        tangent_s1[index_1],
+        tangent_c2[index_2],
+        tangent_c1[index_1] * tangent_s2[index_2],
+    );
+    const c = @mulAdd(
+        f32,
+        tangent_c1[index_1],
+        tangent_c2[index_2],
+        -tangent_s1[index_1] * tangent_s2[index_2],
+    );
     return @floatCast(s / c);
 }
 // Correctly rounded hyperbolic tangent for binary16, binary32, and binary64 values.
@@ -8303,6 +8313,8 @@ pub fn tanh(value: f16) f16 {
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const half_tables = @import("scalar_half_tables.zig");
+
 const sign_mask_h: u16 = 0x8000;
 const magnitude_mask_h: u16 = 0x7fff;
 const infinity_bits_h: u16 = 0x7c00;
@@ -8312,11 +8324,6 @@ const infinity_bits_f: u32 = 0x7f80_0000;
 const sign_mask_d: u64 = 0x8000_0000_0000_0000;
 const magnitude_mask_d: u64 = 0x7fff_ffff_ffff_ffff;
 const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
-
-fn signedOneH(value: f16) f16 {
-    const bits: u16 = @bitCast(value);
-    return if ((bits & sign_mask_h) == 0) 1.0 else -1.0;
-}
 
 fn signedOneF(value: f32) f32 {
     const bits: u32 = @bitCast(value);
@@ -8331,16 +8338,16 @@ pub fn tanhh(value: f16) f16 {
     @setFloatMode(.strict);
     const input_bits: u16 = @bitCast(value);
     const magnitude = input_bits & magnitude_mask_h;
-    if (magnitude > infinity_bits_h) return @bitCast(quietNaNBits(u16, input_bits, 0x0200));
-    if (magnitude == infinity_bits_h) return signedOneH(value);
-    if (magnitude >= 0x4482) return @floatCast(@as(f32, signedOneH(value)) * 0x1.fffff2p-1);
-    if (magnitude <= 0x2744) {
-        if (magnitude == 0) return value;
-        const value_f: f32 = @floatCast(value);
-        return @floatCast(@mulAdd(f32, value_f, -0x1p-12, value_f));
+    if (magnitude > infinity_bits_h) {
+        return @bitCast(quietNaNBits(u16, input_bits, 0x0200));
     }
-    // The pinned binary32 kernel is exact after binary16 rounding for this range.
-    return @floatCast(tanhf(@floatCast(value)));
+    if (magnitude >= 0x4482) {
+        return @bitCast((input_bits & sign_mask_h) | 0x3c00);
+    }
+    if (magnitude <= 0x2744) return value;
+
+    const index: usize = @intCast(magnitude - 0x2745);
+    return @bitCast(half_tables.tanh_bits[index] | (input_bits & sign_mask_h));
 }
 
 pub fn tanhf(value: f32) f32 {
@@ -8427,7 +8434,7 @@ fn mulDddAcc(xh: f64, xl: f64, c: f64, low: *f64) f64 {
     return fastTwoSum(product_high, product_high_rest, low);
 }
 
-fn polyDd(xh: f64, xl: f64, comptime n: usize, coefficients: *const [n][2]f64, low: *f64) f64 {
+fn polyDd(comptime n: usize, xh: f64, xl: f64, coefficients: *const [n][2]f64, low: *f64) f64 {
     var index: usize = n - 1;
     // SAFETY: fastTwoSum writes sum_low before polyDd reads it.
     var sum_low: f64 = undefined;
@@ -8460,13 +8467,7 @@ fn asExpAccurate(x: f64, t: f64, th: f64, tl: f64, low: *f64) f64 {
     const corrected_delta_low = (delta - delta_high) + delta_low + delta_low_low;
     var polynomial_low = delta_high * (0x1.5555555555555p-5 +
         delta_high * (0x1.11111113e93e9p-7 + delta_high * 0x1.6c16c169400a7p-10));
-    var result_high = polyDd(
-        delta_high,
-        corrected_delta_low,
-        3,
-        &coefficients,
-        &polynomial_low,
-    );
+    var result_high = polyDd(3, delta_high, corrected_delta_low, &coefficients, &polynomial_low);
     result_high = mulDdAcc(
         delta_high,
         corrected_delta_low,
@@ -8644,7 +8645,7 @@ fn asTanhZero(value: f64) f64 {
     var correction = value_squared * (low_coefficients[0] + value_squared *
         (low_coefficients[1] + value_squared * (low_coefficients[2] +
             value_squared * (low_coefficients[3] + value_squared * low_coefficients[4]))));
-    var high = polyDd(value_squared, value_squared_low, 9, &high_coefficients, &correction);
+    var high = polyDd(9, value_squared, value_squared_low, &high_coefficients, &correction);
     high = mulDddAcc(high, correction, value, &correction);
     high = mulDdAcc(high, correction, value_squared, value_squared_low, &correction);
     // SAFETY: fastTwoSum writes low before the value is read.
@@ -8676,12 +8677,12 @@ fn asTanhDatabase(value: f64, fallback: f64) f64 {
         .{ 0x1.33dfeb0fa4bfep-1, 0x1.1372f9ee76e99p-1, 0x1p-55 },
         .{ 0x1.49f24ac5cac35p-1, 0x1.22c495ff06104p-1, -0x1p-104 },
     };
-    var first: i32 = 0;
-    var last: i32 = database.len - 1;
+    var first: isize = 0;
+    var last: isize = database.len - 1;
+    const absolute = @abs(value);
     while (first <= last) {
-        const middle: i32 = @divTrunc(first + last, 2);
+        const middle: isize = @divTrunc(first + last, 2);
         const row = database[@intCast(middle)];
-        const absolute = @abs(value);
         if (row[0] < absolute) first = middle + 1 else if (row[0] == absolute) {
             const sign = signedOneD(value);
             return sign * row[1] + sign * row[2];
@@ -8700,6 +8701,35 @@ pub fn tanhd(value: f64) f64 {
         if (magnitude == infinity_bits_d) return sign;
         return sign * (1.0 - 0x1p-55);
     }
+    if (magnitude < 0x3fd0_0000_0000_0000) {
+        if (magnitude <= 0x3e4d_12ed_0af1_a27f) {
+            if (magnitude == 0) return value;
+            return @mulAdd(f64, value, -0x1p-55, value);
+        }
+        const coefficients = [_]f64{
+            -0x1.5555555555555p-2,  0x1.1111111110f33p-3,  -0x1.ba1ba1b9b8ea6p-5,
+            0x1.664f4838e0a43p-6,   -0x1.226e17d1bc09bp-7, 0x1.d6c64dfba2565p-9,
+            -0x1.7bdd094d327afp-10, 0x1.1535ad0c31d0ep-11,
+        };
+        const value_squared = value * value;
+        const value_cubed = value_squared * value;
+        const value_fourth = value_squared * value_squared;
+        const value_eighth = value_fourth * value_fourth;
+        var polynomial_one = coefficients[4] + value_squared * coefficients[5];
+        polynomial_one += value_fourth * (coefficients[6] + value_squared * coefficients[7]);
+        var polynomial_zero = coefficients[0] + value_squared * coefficients[1];
+        polynomial_zero += value_fourth * (coefficients[2] + value_squared * coefficients[3]);
+        polynomial_zero += value_eighth * polynomial_one;
+        polynomial_zero *= value_cubed;
+        // SAFETY: fastTwoSum writes polynomial_low before the value is read.
+        var polynomial_low: f64 = undefined;
+        const polynomial_high = fastTwoSum(value, polynomial_zero, &polynomial_low);
+        const bound = value_cubed * 0x1.ap-52;
+        const lower = polynomial_high + (polynomial_low - bound);
+        const upper = polynomial_high + (polynomial_low + bound);
+        if (lower == upper) return lower;
+        return asTanhZero(value);
+    }
     const scale = -0x1.71547652b82fep+13;
     const rounded = @mulAdd(f64, @as(f64, @bitCast(magnitude)), scale, 0x1.8000004p+25);
     const rounded_bits: u64 = @bitCast(rounded);
@@ -8717,35 +8747,6 @@ pub fn tanhd(value: f64) f64 {
     // SAFETY: Each non-returning branch assigns table_low before final use.
     var table_low: f64 = undefined;
     if (magnitude < 0x400d_76c8_b439_5810) {
-        if (magnitude < 0x3fd0_0000_0000_0000) {
-            if (magnitude <= 0x3e4d_12ed_0af1_a27f) {
-                if (magnitude == 0) return value;
-                return @mulAdd(f64, value, -0x1p-55, value);
-            }
-            const coefficients = [_]f64{
-                -0x1.5555555555555p-2,  0x1.1111111110f33p-3,  -0x1.ba1ba1b9b8ea6p-5,
-                0x1.664f4838e0a43p-6,   -0x1.226e17d1bc09bp-7, 0x1.d6c64dfba2565p-9,
-                -0x1.7bdd094d327afp-10, 0x1.1535ad0c31d0ep-11,
-            };
-            const value_squared = value * value;
-            const value_cubed = value_squared * value;
-            const value_fourth = value_squared * value_squared;
-            const value_eighth = value_fourth * value_fourth;
-            var polynomial_one = coefficients[4] + value_squared * coefficients[5];
-            polynomial_one += value_fourth * (coefficients[6] + value_squared * coefficients[7]);
-            var polynomial_zero = coefficients[0] + value_squared * coefficients[1];
-            polynomial_zero += value_fourth * (coefficients[2] + value_squared * coefficients[3]);
-            polynomial_zero += value_eighth * polynomial_one;
-            polynomial_zero *= value_cubed;
-            // SAFETY: fastTwoSum writes polynomial_low before the value is read.
-            var polynomial_low: f64 = undefined;
-            const polynomial_high = fastTwoSum(value, polynomial_zero, &polynomial_low);
-            const bound = value_cubed * 0x1.ap-52;
-            const lower = polynomial_high + (polynomial_low - bound);
-            const upper = polynomial_high + (polynomial_low + bound);
-            if (lower == upper) return lower;
-            return asTanhZero(value);
-        }
         const table_zero_low = tanhd_t0[index_zero][0];
         const table_one_low = tanhd_t1[index_one][0];
         table_low = table_zero_high * table_one_low + table_one_high * table_zero_low +

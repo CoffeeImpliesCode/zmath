@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const atanhh_data = @import("scalar_atanhh_data.zig");
+
 const sign_mask_h: u16 = 0x8000;
 const magnitude_mask_h: u16 = 0x7fff;
 const infinity_bits_h: u16 = 0x7c00;
@@ -56,12 +58,175 @@ fn copySignD(magnitude: f64, bits: u64) f64 {
     return @bitCast((magnitude_bits & ~sign_mask_d) | (bits & sign_mask_d));
 }
 
-const tr = [_]f64{ 0x1.fc07f02p-1, 0x1.f44659ep-1, 0x1.ecc07b3p-1, 0x1.e573ac9p-1, 0x1.de5d6e4p-1, 0x1.d77b655p-1, 0x1.d0cb58fp-1, 0x1.ca4b305p-1, 0x1.c3f8f02p-1, 0x1.bdd2b8ap-1, 0x1.b7d6c3ep-1, 0x1.b20364p-1, 0x1.ac5701bp-1, 0x1.a6d01a7p-1, 0x1.a16d3f9p-1, 0x1.9c2d14fp-1, 0x1.970e4f8p-1, 0x1.920fb4ap-1, 0x1.8d3018dp-1, 0x1.886e5f1p-1, 0x1.83c977bp-1, 0x1.7f405fdp-1, 0x1.7ad2209p-1, 0x1.767dce4p-1, 0x1.724287fp-1, 0x1.6e1f76bp-1, 0x1.6a13cd1p-1, 0x1.661ec6ap-1, 0x1.623fa77p-1, 0x1.5e75bb9p-1, 0x1.5ac056bp-1, 0x1.571ed3cp-1, 0x1.5390949p-1, 0x1.5015015p-1, 0x1.4cab887p-1, 0x1.49539e4p-1, 0x1.460cbc8p-1, 0x1.42d6626p-1, 0x1.3fb014p-1, 0x1.3c995a4p-1, 0x1.3991c2cp-1, 0x1.3698df4p-1, 0x1.33ae45bp-1, 0x1.30d1901p-1, 0x1.2e025cp-1, 0x1.2b404adp-1, 0x1.288b013p-1, 0x1.25e2271p-1, 0x1.2345679p-1, 0x1.20b470cp-1, 0x1.1e2ef3bp-1, 0x1.1bb4a4p-1, 0x1.1945381p-1, 0x1.16e0689p-1, 0x1.1485f0ep-1, 0x1.12358e7p-1, 0x1.0fef011p-1, 0x1.0db20a9p-1, 0x1.0b7e6ecp-1, 0x1.0953f39p-1, 0x1.073260ap-1, 0x1.05197f8p-1, 0x1.03091b5p-1, 0x1.010101p-1 };
-const tl = [_]f64{ 0x1.fe02a69106789p-9, 0x1.7b91b1155b11bp-7, 0x1.39e87ba1ebd6p-6, 0x1.b42dd713971bfp-6, 0x1.16536ee637ae1p-5, 0x1.51b073c96183fp-5, 0x1.8c345da019b21p-5, 0x1.c5e5492abc743p-5, 0x1.fec912fbbeabbp-5, 0x1.1b72ad33f67ap-4, 0x1.371fc1f6e8f74p-4, 0x1.526e5e5a1b438p-4, 0x1.6d60fe601d21dp-4, 0x1.87fa06438c911p-4, 0x1.a23bc223ab563p-4, 0x1.bc28673a58cd6p-4, 0x1.d5c216b8fbb91p-4, 0x1.ef0adcaec5936p-4, 0x1.040259530d041p-3, 0x1.1058bf8d24ad5p-3, 0x1.1c898c09d99fbp-3, 0x1.2895a13e286a3p-3, 0x1.347dd9a447d55p-3, 0x1.404308716a7e4p-3, 0x1.4be5f963b78a1p-3, 0x1.5767718015a6cp-3, 0x1.62c82f3a5c795p-3, 0x1.6e08eab13a1e4p-3, 0x1.792a55fe147a2p-3, 0x1.842d1d9928b17p-3, 0x1.8f11e873a62c7p-3, 0x1.99d958207e08bp-3, 0x1.a484090c1bb0ap-3, 0x1.af129324b786bp-3, 0x1.b9858970710fbp-3, 0x1.c3dd7a6ddad4dp-3, 0x1.ce1af0b65f3ebp-3, 0x1.d83e725022f3ep-3, 0x1.e2488197c6c26p-3, 0x1.ec399d3d68ccp-3, 0x1.f6123fac028acp-3, 0x1.ffd2e07e7f498p-3, 0x1.04bdf9e3b26d2p-2, 0x1.0986f4fa93521p-2, 0x1.0e4498651cc8cp-2, 0x1.12f719595efbcp-2, 0x1.179eabb0a99a1p-2, 0x1.1c3b81e933c25p-2, 0x1.20cdcd0e0ab6ep-2, 0x1.2555bcf50f7cbp-2, 0x1.29d37ff34b08bp-2, 0x1.2e47437640268p-2, 0x1.32b1338401d71p-2, 0x1.37117b5c147b6p-2, 0x1.3b6844a13fc23p-2, 0x1.3fb5b857f6f42p-2, 0x1.43f9fe2f7ce67p-2, 0x1.48353d11488dfp-2, 0x1.4c679b014ee3ap-2, 0x1.50913cc03686bp-2, 0x1.54b2468259498p-2, 0x1.58cadb57d7989p-2, 0x1.5cdb1dcaa1765p-2, 0x1.60e32f46788d9p-2 };
-const ln2n = [_]f64{ 0x1.62e42fedb2a44p-2, 0x1.62e42feeab21ap-1, 0x1.0a2b23f33e789p+0, 0x1.62e42fef27604p+0, 0x1.bb9d3beb1048p+0, 0x1.0a2b23f37c97ep+1, 0x1.3687a9f1710bcp+1, 0x1.62e42fef657fap+1, 0x1.8f40b5ed59f38p+1, 0x1.bb9d3beb4e676p+1, 0x1.e7f9c1e942db4p+1, 0x1.0a2b23f39ba79p+2, 0x1.205966f295e18p+2, 0x1.3687a9f1901b7p+2, 0x1.4cb5ecf08a556p+2, 0x1.62e42fef848f5p+2, 0x1.791272ee7ec93p+2, 0x1.8f40b5ed79032p+2, 0x1.a56ef8ec733d1p+2, 0x1.bb9d3beb6d77p+2, 0x1.d1cb7eea67b0fp+2, 0x1.e7f9c1e961eaep+2, 0x1.fe2804e85c24dp+2, 0x1.0a2b23f3ab2f6p+3 };
+const tr = [_]f64{
+    0x1.fc07f02p-1,
+    0x1.f44659ep-1,
+    0x1.ecc07b3p-1,
+    0x1.e573ac9p-1,
+    0x1.de5d6e4p-1,
+    0x1.d77b655p-1,
+    0x1.d0cb58fp-1,
+    0x1.ca4b305p-1,
+    0x1.c3f8f02p-1,
+    0x1.bdd2b8ap-1,
+    0x1.b7d6c3ep-1,
+    0x1.b20364p-1,
+    0x1.ac5701bp-1,
+    0x1.a6d01a7p-1,
+    0x1.a16d3f9p-1,
+    0x1.9c2d14fp-1,
+    0x1.970e4f8p-1,
+    0x1.920fb4ap-1,
+    0x1.8d3018dp-1,
+    0x1.886e5f1p-1,
+    0x1.83c977bp-1,
+    0x1.7f405fdp-1,
+    0x1.7ad2209p-1,
+    0x1.767dce4p-1,
+    0x1.724287fp-1,
+    0x1.6e1f76bp-1,
+    0x1.6a13cd1p-1,
+    0x1.661ec6ap-1,
+    0x1.623fa77p-1,
+    0x1.5e75bb9p-1,
+    0x1.5ac056bp-1,
+    0x1.571ed3cp-1,
+    0x1.5390949p-1,
+    0x1.5015015p-1,
+    0x1.4cab887p-1,
+    0x1.49539e4p-1,
+    0x1.460cbc8p-1,
+    0x1.42d6626p-1,
+    0x1.3fb014p-1,
+    0x1.3c995a4p-1,
+    0x1.3991c2cp-1,
+    0x1.3698df4p-1,
+    0x1.33ae45bp-1,
+    0x1.30d1901p-1,
+    0x1.2e025cp-1,
+    0x1.2b404adp-1,
+    0x1.288b013p-1,
+    0x1.25e2271p-1,
+    0x1.2345679p-1,
+    0x1.20b470cp-1,
+    0x1.1e2ef3bp-1,
+    0x1.1bb4a4p-1,
+    0x1.1945381p-1,
+    0x1.16e0689p-1,
+    0x1.1485f0ep-1,
+    0x1.12358e7p-1,
+    0x1.0fef011p-1,
+    0x1.0db20a9p-1,
+    0x1.0b7e6ecp-1,
+    0x1.0953f39p-1,
+    0x1.073260ap-1,
+    0x1.05197f8p-1,
+    0x1.03091b5p-1,
+    0x1.010101p-1,
+};
+const tl = [_]f64{
+    0x1.fe02a69106789p-9,
+    0x1.7b91b1155b11bp-7,
+    0x1.39e87ba1ebd6p-6,
+    0x1.b42dd713971bfp-6,
+    0x1.16536ee637ae1p-5,
+    0x1.51b073c96183fp-5,
+    0x1.8c345da019b21p-5,
+    0x1.c5e5492abc743p-5,
+    0x1.fec912fbbeabbp-5,
+    0x1.1b72ad33f67ap-4,
+    0x1.371fc1f6e8f74p-4,
+    0x1.526e5e5a1b438p-4,
+    0x1.6d60fe601d21dp-4,
+    0x1.87fa06438c911p-4,
+    0x1.a23bc223ab563p-4,
+    0x1.bc28673a58cd6p-4,
+    0x1.d5c216b8fbb91p-4,
+    0x1.ef0adcaec5936p-4,
+    0x1.040259530d041p-3,
+    0x1.1058bf8d24ad5p-3,
+    0x1.1c898c09d99fbp-3,
+    0x1.2895a13e286a3p-3,
+    0x1.347dd9a447d55p-3,
+    0x1.404308716a7e4p-3,
+    0x1.4be5f963b78a1p-3,
+    0x1.5767718015a6cp-3,
+    0x1.62c82f3a5c795p-3,
+    0x1.6e08eab13a1e4p-3,
+    0x1.792a55fe147a2p-3,
+    0x1.842d1d9928b17p-3,
+    0x1.8f11e873a62c7p-3,
+    0x1.99d958207e08bp-3,
+    0x1.a484090c1bb0ap-3,
+    0x1.af129324b786bp-3,
+    0x1.b9858970710fbp-3,
+    0x1.c3dd7a6ddad4dp-3,
+    0x1.ce1af0b65f3ebp-3,
+    0x1.d83e725022f3ep-3,
+    0x1.e2488197c6c26p-3,
+    0x1.ec399d3d68ccp-3,
+    0x1.f6123fac028acp-3,
+    0x1.ffd2e07e7f498p-3,
+    0x1.04bdf9e3b26d2p-2,
+    0x1.0986f4fa93521p-2,
+    0x1.0e4498651cc8cp-2,
+    0x1.12f719595efbcp-2,
+    0x1.179eabb0a99a1p-2,
+    0x1.1c3b81e933c25p-2,
+    0x1.20cdcd0e0ab6ep-2,
+    0x1.2555bcf50f7cbp-2,
+    0x1.29d37ff34b08bp-2,
+    0x1.2e47437640268p-2,
+    0x1.32b1338401d71p-2,
+    0x1.37117b5c147b6p-2,
+    0x1.3b6844a13fc23p-2,
+    0x1.3fb5b857f6f42p-2,
+    0x1.43f9fe2f7ce67p-2,
+    0x1.48353d11488dfp-2,
+    0x1.4c679b014ee3ap-2,
+    0x1.50913cc03686bp-2,
+    0x1.54b2468259498p-2,
+    0x1.58cadb57d7989p-2,
+    0x1.5cdb1dcaa1765p-2,
+    0x1.60e32f46788d9p-2,
+};
+const ln2n = [_]f64{
+    0x1.62e42fedb2a44p-2,
+    0x1.62e42feeab21ap-1,
+    0x1.0a2b23f33e789p+0,
+    0x1.62e42fef27604p+0,
+    0x1.bb9d3beb1048p+0,
+    0x1.0a2b23f37c97ep+1,
+    0x1.3687a9f1710bcp+1,
+    0x1.62e42fef657fap+1,
+    0x1.8f40b5ed59f38p+1,
+    0x1.bb9d3beb4e676p+1,
+    0x1.e7f9c1e942db4p+1,
+    0x1.0a2b23f39ba79p+2,
+    0x1.205966f295e18p+2,
+    0x1.3687a9f1901b7p+2,
+    0x1.4cb5ecf08a556p+2,
+    0x1.62e42fef848f5p+2,
+    0x1.791272ee7ec93p+2,
+    0x1.8f40b5ed79032p+2,
+    0x1.a56ef8ec733d1p+2,
+    0x1.bb9d3beb6d77p+2,
+    0x1.d1cb7eea67b0fp+2,
+    0x1.e7f9c1e961eaep+2,
+    0x1.fe2804e85c24dp+2,
+    0x1.0a2b23f3ab2f6p+3,
+};
 const b = [_]f64{ 0x1.fffffffce5a6ap-2, -0x1.0001f81ec0ab8p-2, 0x1.555a0f53d79a5p-3 };
 const atanhf_small_c = [_]f64{ 0x1.5555555555527p-2, 0x1.9999999ba4ee8p-3, 0x1.24922c280990ap-3, 0x1.c8236aae809c6p-4 };
-const atanhf_refine_c = [_]f64{ 0x1p-1, -0x1.000000000001bp-2, 0x1.55555555555bap-3, -0x1.fffffff26d72ep-4, 0x1.99999989035p-4, -0x1.555c39cb9ee8p-4, 0x1.24992d8b014a1p-4 };
+const atanhf_refine_c = [_]f64{
+    0x1p-1,
+    -0x1.000000000001bp-2,
+    0x1.55555555555bap-3,
+    -0x1.fffffff26d72ep-4,
+    0x1.99999989035p-4,
+    -0x1.555c39cb9ee8p-4,
+    0x1.24992d8b014a1p-4,
+};
 fn atanhfSpecial(bits: u32) f32 {
     const doubled = bits << 1;
     if (doubled == 0x7f00_0000) return copySignF(@bitCast(infinity_bits_f), bits);
@@ -76,10 +241,8 @@ pub fn atanhf(value: f32) f32 {
     const doubled = bits << 1;
     if (doubled < 0x7a30_0000 or doubled >= 0x7f00_0000) {
         if (doubled >= 0x7f00_0000) return atanhfSpecial(bits);
-        if (doubled < 0x7371_3744) {
-            if (doubled == 0) return value;
-            return @mulAdd(f32, value, 0x1p-25, value);
-        }
+        // The directed-rounding nudge is below half an ulp in nearest-even.
+        if (doubled < 0x7371_3744) return value;
         const z: f64 = @floatCast(value);
         const z2 = z * z;
         const z4 = z2 * z2;
@@ -113,13 +276,17 @@ pub fn atanhf(value: f32) f32 {
     if (upper != lower) {
         const zn4 = zn2 * zn2;
         const zd4 = zd2 * zd2;
-        const fn_value = zn * (((atanhf_refine_c[0] + zn * atanhf_refine_c[1]) + zn2 * (atanhf_refine_c[2] + zn * atanhf_refine_c[3])) +
-            zn4 * ((atanhf_refine_c[4] + zn * atanhf_refine_c[5]) + zn2 * atanhf_refine_c[6]));
+        const fn_value = zn * (((atanhf_refine_c[0] + zn * atanhf_refine_c[1]) +
+            zn2 * (atanhf_refine_c[2] + zn * atanhf_refine_c[3])) +
+            zn4 * ((atanhf_refine_c[4] + zn * atanhf_refine_c[5]) +
+                zn2 * atanhf_refine_c[6]));
         var refined = fn_value + 0x1.0ca86c3898dp-50 * @as(f64, @floatFromInt(nz));
         refined += tl[jn];
         const en = @as(f64, @floatFromInt(nz)) * 0x1.62e42fefa3ap-2;
-        const fd = zd * (((atanhf_refine_c[0] + zd * atanhf_refine_c[1]) + zd2 * (atanhf_refine_c[2] + zd * atanhf_refine_c[3])) +
-            zd4 * ((atanhf_refine_c[4] + zd * atanhf_refine_c[5]) + zd2 * atanhf_refine_c[6]));
+        const fd = zd * (((atanhf_refine_c[0] + zd * atanhf_refine_c[1]) +
+            zd2 * (atanhf_refine_c[2] + zd * atanhf_refine_c[3])) +
+            zd4 * ((atanhf_refine_c[4] + zd * atanhf_refine_c[5]) +
+                zd2 * atanhf_refine_c[6]));
         refined = fd + tl[jd] - refined + en;
         upper = @floatCast(sign * refined);
     }
@@ -148,21 +315,269 @@ const atanhd_cl_zero = [_]f64{
     0x1.5aca6d6d720d6p-6, // degree 35
     0x1.99ea5700d53a5p-5,
 };
-const atanhd_c_small = [_]f64{ 0x1.999999999999ap-3, 0x1.2492492492244p-3, 0x1.c71c71c79715fp-4, 0x1.745d16f777723p-4, 0x1.3b13ca4174634p-4, 0x1.110c9724989bdp-4, 0x1.e2d17608a5b2ep-5, 0x1.a0b56308cba0bp-5, 0x1.fb6341208ad2ep-5 };
-const atanhd_B = [_][2]i32{ .{ 301, 27565 }, .{ 7189, 24786 }, .{ 13383, 22167 }, .{ 18923, 19696 }, .{ 23845, 17361 }, .{ 28184, 15150 }, .{ 31969, 13054 }, .{ 35231, 11064 }, .{ 37996, 9173 }, .{ 40288, 7372 }, .{ 42129, 5657 }, .{ 43542, 4020 }, .{ 44546, 2457 }, .{ 45160, 962 }, .{ 45399, -468 }, .{ 45281, -1838 }, .{ 44821, -3151 }, .{ 44032, -4412 }, .{ 42929, -5622 }, .{ 41522, -6786 }, .{ 39825, -7905 }, .{ 37848, -8982 }, .{ 35602, -10020 }, .{ 33097, -11020 }, .{ 30341, -11985 }, .{ 27345, -12916 }, .{ 24115, -13816 }, .{ 20661, -14685 }, .{ 16989, -15526 }, .{ 13107, -16339 }, .{ 9022, -17126 }, .{ 4740, -17889 } };
-const atanhd_r1 = [_]f64{ 0x1p+0, 0x1.f5076p-1, 0x1.ea4bp-1, 0x1.dfc98p-1, 0x1.d5818p-1, 0x1.cb72p-1, 0x1.c199cp-1, 0x1.b7f76p-1, 0x1.ae8ap-1, 0x1.a5504p-1, 0x1.9c492p-1, 0x1.93738p-1, 0x1.8ace6p-1, 0x1.8258ap-1, 0x1.7a114p-1, 0x1.71f76p-1, 0x1.6a09ep-1, 0x1.6247ep-1, 0x1.5ab08p-1, 0x1.5342cp-1, 0x1.4bfdap-1, 0x1.44e08p-1, 0x1.3dea6p-1, 0x1.371a8p-1, 0x1.306fep-1, 0x1.29e9ep-1, 0x1.2387ap-1, 0x1.1d488p-1, 0x1.172b8p-1, 0x1.11302p-1, 0x1.0b558p-1, 0x1.059bp-1, 0x1p-1 };
-const atanhd_r2 = [_]f64{ 0x1p+0, 0x1.ffa74p-1, 0x1.ff4eap-1, 0x1.fef62p-1, 0x1.fe9dap-1, 0x1.fe452p-1, 0x1.fdeccp-1, 0x1.fd946p-1, 0x1.fd3c2p-1, 0x1.fce3ep-1, 0x1.fc8bcp-1, 0x1.fc33ap-1, 0x1.fbdbap-1, 0x1.fb83ap-1, 0x1.fb2bcp-1, 0x1.fad3ep-1, 0x1.fa7c2p-1, 0x1.fa246p-1, 0x1.f9ccap-1, 0x1.f975p-1, 0x1.f91d8p-1, 0x1.f8c6p-1, 0x1.f86e8p-1, 0x1.f8172p-1, 0x1.f7bfep-1, 0x1.f768ap-1, 0x1.f7116p-1, 0x1.f6ba4p-1, 0x1.f6632p-1, 0x1.f60c2p-1, 0x1.f5b52p-1, 0x1.f55e4p-1, 0x1.f5076p-1 };
-const atanhd_l1 = [_][2]f64{ .{ 0x0p+0, 0x0p+0 }, .{ -0x1.532c1269e2038p-27, 0x1.62e5p-7 }, .{ 0x1.ce42d81b54e84p-27, 0x1.62e3cp-6 }, .{ -0x1.25826f815ec3dp-26, 0x1.0a2acp-5 }, .{ 0x1.0db1b1e7cee11p-26, 0x1.62e4ap-5 }, .{ -0x1.1f3a8c6c95003p-26, 0x1.bb9dcp-5 }, .{ -0x1.774cd4fb8c30dp-26, 0x1.0a2b2p-4 }, .{ 0x1.452e56c030a0ap-29, 0x1.3687fp-4 }, .{ 0x1.6b63c4966a79ap-28, 0x1.62e41p-4 }, .{ -0x1.b20a21ccb525ep-28, 0x1.8f40ap-4 }, .{ 0x1.4006cfb3d8f85p-26, 0x1.bb9d1p-4 }, .{ -0x1.cdb026b310c41p-26, 0x1.e7f9bp-4 }, .{ -0x1.69124fdc0f16dp-26, 0x1.0a2b08p-3 }, .{ -0x1.084656cdc2727p-26, 0x1.205958p-3 }, .{ -0x1.376fa8b0357fdp-26, 0x1.3687cp-3 }, .{ 0x1.e56ae55a47b4ap-28, 0x1.4cb5e8p-3 }, .{ 0x1.070ff8834eeb4p-26, 0x1.62e44p-3 }, .{ 0x1.623516109f4fep-26, 0x1.79129p-3 }, .{ -0x1.ec656b95fbdacp-29, 0x1.8f40bp-3 }, .{ 0x1.f0ca2e729f51p-28, 0x1.a56ed8p-3 }, .{ -0x1.7d260a858354ap-26, 0x1.bb9d68p-3 }, .{ 0x1.e7279075503d3p-27, 0x1.d1cb9p-3 }, .{ 0x1.39e1a0a503873p-27, 0x1.e7f9dp-3 }, .{ 0x1.cd86d7b87c3d6p-26, 0x1.fe27d8p-3 }, .{ 0x1.060ab88de341ep-26, 0x1.0a2b24p-2 }, .{ 0x1.20a860d3f939p-28, 0x1.154244p-2 }, .{ -0x1.dacee95fc2f1p-27, 0x1.205974p-2 }, .{ 0x1.45de3a86e0acap-26, 0x1.2b707p-2 }, .{ 0x1.c164cbfb991afp-27, 0x1.3687bp-2 }, .{ 0x1.d3f66b24225efp-26, 0x1.419ec4p-2 }, .{ 0x1.fc023efa144bap-26, 0x1.4cb5f8p-2 }, .{ 0x1.086a8af6f26cp-28, 0x1.57cd28p-2 }, .{ -0x1.05c610ca86c39p-30, 0x1.62e43p-2 } };
-const atanhd_l2 = [_][2]f64{ .{ 0x0p+0, 0x0p+0 }, .{ -0x1.37e152a129e4ep-28, 0x1.632p-12 }, .{ -0x1.3f6c916b8be9cp-26, 0x1.63p-11 }, .{ 0x1.20505936739d5p-26, 0x1.0a24p-10 }, .{ -0x1.23e2e8cb541bap-26, 0x1.62dcp-10 }, .{ -0x1.acb7983ac4f5ep-32, 0x1.bbap-10 }, .{ 0x1.6f7c7689c63aep-28, 0x1.0a2ap-9 }, .{ 0x1.f5ca695b4c58bp-30, 0x1.368cp-9 }, .{ -0x1.c6c18bd953226p-27, 0x1.62e6p-9 }, .{ 0x1.7a516c34846bdp-26, 0x1.8f46p-9 }, .{ -0x1.f3b83dd8b853p-27, 0x1.bbap-9 }, .{ -0x1.c3459046e4e57p-31, 0x1.e8p-9 }, .{ 0x1.b5c7e34cb79f6p-38, 0x1.0a2cp-8 }, .{ -0x1.2487e9af9a692p-27, 0x1.205cp-8 }, .{ 0x1.f21bbc4ad79cep-26, 0x1.3687p-8 }, .{ -0x1.550ffc857b731p-29, 0x1.4cb7p-8 }, .{ 0x1.87458ec1b7b34p-27, 0x1.62e2p-8 }, .{ 0x1.103d4fe83ee81p-26, 0x1.7911p-8 }, .{ 0x1.810483d3b398cp-27, 0x1.8f44p-8 }, .{ -0x1.2085cb340608ep-27, 0x1.a573p-8 }, .{ 0x1.12698a119c42fp-26, 0x1.bb9dp-8 }, .{ -0x1.edb8c172b4c33p-26, 0x1.d1ccp-8 }, .{ -0x1.8b55b87a5e238p-26, 0x1.e7fep-8 }, .{ 0x1.be5e17763f78ap-26, 0x1.fe2bp-8 }, .{ -0x1.c2d496790073ep-30, 0x1.0a2a8p-7 }, .{ 0x1.6542f523abeecp-26, 0x1.1541p-7 }, .{ -0x1.b7fdbe5b193f8p-26, 0x1.205ap-7 }, .{ 0x1.fa4d42fe30c7cp-26, 0x1.2b7p-7 }, .{ 0x1.0d46ad04adc86p-26, 0x1.36888p-7 }, .{ -0x1.1c22d02d17c4cp-26, 0x1.419fp-7 }, .{ 0x1.a7d1e330dcccep-30, 0x1.4cb7p-7 }, .{ 0x1.187025e656ba3p-31, 0x1.57cdp-7 }, .{ -0x1.532c1269e2038p-27, 0x1.62e5p-7 } };
+const atanhd_c_small = [_]f64{
+    0x1.999999999999ap-3,
+    0x1.2492492492244p-3,
+    0x1.c71c71c79715fp-4,
+    0x1.745d16f777723p-4,
+    0x1.3b13ca4174634p-4,
+    0x1.110c9724989bdp-4,
+    0x1.e2d17608a5b2ep-5,
+    0x1.a0b56308cba0bp-5,
+    0x1.fb6341208ad2ep-5,
+};
+const atanhd_b = [_][2]i32{
+    .{ 301, 27565 },
+    .{ 7189, 24786 },
+    .{ 13383, 22167 },
+    .{ 18923, 19696 },
+    .{ 23845, 17361 },
+    .{ 28184, 15150 },
+    .{ 31969, 13054 },
+    .{ 35231, 11064 },
+    .{ 37996, 9173 },
+    .{ 40288, 7372 },
+    .{ 42129, 5657 },
+    .{ 43542, 4020 },
+    .{ 44546, 2457 },
+    .{ 45160, 962 },
+    .{ 45399, -468 },
+    .{ 45281, -1838 },
+    .{ 44821, -3151 },
+    .{ 44032, -4412 },
+    .{ 42929, -5622 },
+    .{ 41522, -6786 },
+    .{ 39825, -7905 },
+    .{ 37848, -8982 },
+    .{ 35602, -10020 },
+    .{ 33097, -11020 },
+    .{ 30341, -11985 },
+    .{ 27345, -12916 },
+    .{ 24115, -13816 },
+    .{ 20661, -14685 },
+    .{ 16989, -15526 },
+    .{ 13107, -16339 },
+    .{ 9022, -17126 },
+    .{ 4740, -17889 },
+};
+const atanhd_r1 = [_]f64{
+    0x1p+0,
+    0x1.f5076p-1,
+    0x1.ea4bp-1,
+    0x1.dfc98p-1,
+    0x1.d5818p-1,
+    0x1.cb72p-1,
+    0x1.c199cp-1,
+    0x1.b7f76p-1,
+    0x1.ae8ap-1,
+    0x1.a5504p-1,
+    0x1.9c492p-1,
+    0x1.93738p-1,
+    0x1.8ace6p-1,
+    0x1.8258ap-1,
+    0x1.7a114p-1,
+    0x1.71f76p-1,
+    0x1.6a09ep-1,
+    0x1.6247ep-1,
+    0x1.5ab08p-1,
+    0x1.5342cp-1,
+    0x1.4bfdap-1,
+    0x1.44e08p-1,
+    0x1.3dea6p-1,
+    0x1.371a8p-1,
+    0x1.306fep-1,
+    0x1.29e9ep-1,
+    0x1.2387ap-1,
+    0x1.1d488p-1,
+    0x1.172b8p-1,
+    0x1.11302p-1,
+    0x1.0b558p-1,
+    0x1.059bp-1,
+    0x1p-1,
+};
+const atanhd_r2 = [_]f64{
+    0x1p+0,
+    0x1.ffa74p-1,
+    0x1.ff4eap-1,
+    0x1.fef62p-1,
+    0x1.fe9dap-1,
+    0x1.fe452p-1,
+    0x1.fdeccp-1,
+    0x1.fd946p-1,
+    0x1.fd3c2p-1,
+    0x1.fce3ep-1,
+    0x1.fc8bcp-1,
+    0x1.fc33ap-1,
+    0x1.fbdbap-1,
+    0x1.fb83ap-1,
+    0x1.fb2bcp-1,
+    0x1.fad3ep-1,
+    0x1.fa7c2p-1,
+    0x1.fa246p-1,
+    0x1.f9ccap-1,
+    0x1.f975p-1,
+    0x1.f91d8p-1,
+    0x1.f8c6p-1,
+    0x1.f86e8p-1,
+    0x1.f8172p-1,
+    0x1.f7bfep-1,
+    0x1.f768ap-1,
+    0x1.f7116p-1,
+    0x1.f6ba4p-1,
+    0x1.f6632p-1,
+    0x1.f60c2p-1,
+    0x1.f5b52p-1,
+    0x1.f55e4p-1,
+    0x1.f5076p-1,
+};
+const atanhd_l1 = [_][2]f64{
+    .{ 0x0p+0, 0x0p+0 },
+    .{ -0x1.532c1269e2038p-27, 0x1.62e5p-7 },
+    .{ 0x1.ce42d81b54e84p-27, 0x1.62e3cp-6 },
+    .{ -0x1.25826f815ec3dp-26, 0x1.0a2acp-5 },
+    .{ 0x1.0db1b1e7cee11p-26, 0x1.62e4ap-5 },
+    .{ -0x1.1f3a8c6c95003p-26, 0x1.bb9dcp-5 },
+    .{ -0x1.774cd4fb8c30dp-26, 0x1.0a2b2p-4 },
+    .{ 0x1.452e56c030a0ap-29, 0x1.3687fp-4 },
+    .{ 0x1.6b63c4966a79ap-28, 0x1.62e41p-4 },
+    .{ -0x1.b20a21ccb525ep-28, 0x1.8f40ap-4 },
+    .{ 0x1.4006cfb3d8f85p-26, 0x1.bb9d1p-4 },
+    .{ -0x1.cdb026b310c41p-26, 0x1.e7f9bp-4 },
+    .{ -0x1.69124fdc0f16dp-26, 0x1.0a2b08p-3 },
+    .{ -0x1.084656cdc2727p-26, 0x1.205958p-3 },
+    .{ -0x1.376fa8b0357fdp-26, 0x1.3687cp-3 },
+    .{ 0x1.e56ae55a47b4ap-28, 0x1.4cb5e8p-3 },
+    .{ 0x1.070ff8834eeb4p-26, 0x1.62e44p-3 },
+    .{ 0x1.623516109f4fep-26, 0x1.79129p-3 },
+    .{ -0x1.ec656b95fbdacp-29, 0x1.8f40bp-3 },
+    .{ 0x1.f0ca2e729f51p-28, 0x1.a56ed8p-3 },
+    .{ -0x1.7d260a858354ap-26, 0x1.bb9d68p-3 },
+    .{ 0x1.e7279075503d3p-27, 0x1.d1cb9p-3 },
+    .{ 0x1.39e1a0a503873p-27, 0x1.e7f9dp-3 },
+    .{ 0x1.cd86d7b87c3d6p-26, 0x1.fe27d8p-3 },
+    .{ 0x1.060ab88de341ep-26, 0x1.0a2b24p-2 },
+    .{ 0x1.20a860d3f939p-28, 0x1.154244p-2 },
+    .{ -0x1.dacee95fc2f1p-27, 0x1.205974p-2 },
+    .{ 0x1.45de3a86e0acap-26, 0x1.2b707p-2 },
+    .{ 0x1.c164cbfb991afp-27, 0x1.3687bp-2 },
+    .{ 0x1.d3f66b24225efp-26, 0x1.419ec4p-2 },
+    .{ 0x1.fc023efa144bap-26, 0x1.4cb5f8p-2 },
+    .{ 0x1.086a8af6f26cp-28, 0x1.57cd28p-2 },
+    .{ -0x1.05c610ca86c39p-30, 0x1.62e43p-2 },
+};
+const atanhd_l2 = [_][2]f64{
+    .{ 0x0p+0, 0x0p+0 },
+    .{ -0x1.37e152a129e4ep-28, 0x1.632p-12 },
+    .{ -0x1.3f6c916b8be9cp-26, 0x1.63p-11 },
+    .{ 0x1.20505936739d5p-26, 0x1.0a24p-10 },
+    .{ -0x1.23e2e8cb541bap-26, 0x1.62dcp-10 },
+    .{ -0x1.acb7983ac4f5ep-32, 0x1.bbap-10 },
+    .{ 0x1.6f7c7689c63aep-28, 0x1.0a2ap-9 },
+    .{ 0x1.f5ca695b4c58bp-30, 0x1.368cp-9 },
+    .{ -0x1.c6c18bd953226p-27, 0x1.62e6p-9 },
+    .{ 0x1.7a516c34846bdp-26, 0x1.8f46p-9 },
+    .{ -0x1.f3b83dd8b853p-27, 0x1.bbap-9 },
+    .{ -0x1.c3459046e4e57p-31, 0x1.e8p-9 },
+    .{ 0x1.b5c7e34cb79f6p-38, 0x1.0a2cp-8 },
+    .{ -0x1.2487e9af9a692p-27, 0x1.205cp-8 },
+    .{ 0x1.f21bbc4ad79cep-26, 0x1.3687p-8 },
+    .{ -0x1.550ffc857b731p-29, 0x1.4cb7p-8 },
+    .{ 0x1.87458ec1b7b34p-27, 0x1.62e2p-8 },
+    .{ 0x1.103d4fe83ee81p-26, 0x1.7911p-8 },
+    .{ 0x1.810483d3b398cp-27, 0x1.8f44p-8 },
+    .{ -0x1.2085cb340608ep-27, 0x1.a573p-8 },
+    .{ 0x1.12698a119c42fp-26, 0x1.bb9dp-8 },
+    .{ -0x1.edb8c172b4c33p-26, 0x1.d1ccp-8 },
+    .{ -0x1.8b55b87a5e238p-26, 0x1.e7fep-8 },
+    .{ 0x1.be5e17763f78ap-26, 0x1.fe2bp-8 },
+    .{ -0x1.c2d496790073ep-30, 0x1.0a2a8p-7 },
+    .{ 0x1.6542f523abeecp-26, 0x1.1541p-7 },
+    .{ -0x1.b7fdbe5b193f8p-26, 0x1.205ap-7 },
+    .{ 0x1.fa4d42fe30c7cp-26, 0x1.2b7p-7 },
+    .{ 0x1.0d46ad04adc86p-26, 0x1.36888p-7 },
+    .{ -0x1.1c22d02d17c4cp-26, 0x1.419fp-7 },
+    .{ 0x1.a7d1e330dcccep-30, 0x1.4cb7p-7 },
+    .{ 0x1.187025e656ba3p-31, 0x1.57cdp-7 },
+    .{ -0x1.532c1269e2038p-27, 0x1.62e5p-7 },
+};
 const atanhd_db = [_][3]f64{
     .{ 0x1.2dbb7b1c91363p-2, 0x1.36f33d51c264dp-2, 0x1p-56 },
     .{ 0x1.c493dc899e4a5p-2, 0x1.e611aa58ab608p-2, -0x1p-56 },
 };
-const atanhd_t1 = [_]f64{ 0x1p+0, 0x1.ea4afap-1, 0x1.d5818ep-1, 0x1.c199bep-1, 0x1.ae89f98p-1, 0x1.9c4918p-1, 0x1.8ace54p-1, 0x1.7a1147p-1, 0x1.6a09e68p-1, 0x1.5ab07ep-1, 0x1.4bfdad8p-1, 0x1.3dea65p-1, 0x1.306fe08p-1, 0x1.2387a7p-1, 0x1.172b84p-1, 0x1.0b5587p-1, 0x1p-1 };
-const atanhd_t2 = [_]f64{ 0x1p+0, 0x1.fe9d968p-1, 0x1.fd3c228p-1, 0x1.fbdba38p-1, 0x1.fa7c18p-1, 0x1.f91d8p-1, 0x1.f7bfdbp-1, 0x1.f663278p-1, 0x1.f507658p-1, 0x1.f3ac948p-1, 0x1.f252b38p-1, 0x1.f0f9c2p-1, 0x1.efa1bfp-1, 0x1.ee4aaap-1, 0x1.ecf483p-1, 0x1.eb9f488p-1 };
-const atanhd_t3 = [_]f64{ 0x1p+0, 0x1.ffe9d2p-1, 0x1.ffd3a58p-1, 0x1.ffbd798p-1, 0x1.ffa74e8p-1, 0x1.ff91248p-1, 0x1.ff7afb8p-1, 0x1.ff64d38p-1, 0x1.ff4eac8p-1, 0x1.ff38868p-1, 0x1.ff22618p-1, 0x1.ff0c3dp-1, 0x1.fef61ap-1, 0x1.fedff78p-1, 0x1.fec9d68p-1, 0x1.feb3b6p-1 };
-const atanhd_t4 = [_]f64{ 0x1p+0, 0x1.fffe9dp-1, 0x1.fffd3ap-1, 0x1.fffbd78p-1, 0x1.fffa748p-1, 0x1.fff9118p-1, 0x1.fff7ae8p-1, 0x1.fff64cp-1, 0x1.fff4e9p-1, 0x1.fff386p-1, 0x1.fff2238p-1, 0x1.fff0c08p-1, 0x1.ffef5d8p-1, 0x1.ffedfa8p-1, 0x1.ffec98p-1, 0x1.ffeb35p-1 };
-const atanhd_LL = [_][17][3]f64{
+const atanhd_t1 = [_]f64{
+    0x1p+0,
+    0x1.ea4afap-1,
+    0x1.d5818ep-1,
+    0x1.c199bep-1,
+    0x1.ae89f98p-1,
+    0x1.9c4918p-1,
+    0x1.8ace54p-1,
+    0x1.7a1147p-1,
+    0x1.6a09e68p-1,
+    0x1.5ab07ep-1,
+    0x1.4bfdad8p-1,
+    0x1.3dea65p-1,
+    0x1.306fe08p-1,
+    0x1.2387a7p-1,
+    0x1.172b84p-1,
+    0x1.0b5587p-1,
+    0x1p-1,
+};
+const atanhd_t2 = [_]f64{
+    0x1p+0,
+    0x1.fe9d968p-1,
+    0x1.fd3c228p-1,
+    0x1.fbdba38p-1,
+    0x1.fa7c18p-1,
+    0x1.f91d8p-1,
+    0x1.f7bfdbp-1,
+    0x1.f663278p-1,
+    0x1.f507658p-1,
+    0x1.f3ac948p-1,
+    0x1.f252b38p-1,
+    0x1.f0f9c2p-1,
+    0x1.efa1bfp-1,
+    0x1.ee4aaap-1,
+    0x1.ecf483p-1,
+    0x1.eb9f488p-1,
+};
+const atanhd_t3 = [_]f64{
+    0x1p+0,
+    0x1.ffe9d2p-1,
+    0x1.ffd3a58p-1,
+    0x1.ffbd798p-1,
+    0x1.ffa74e8p-1,
+    0x1.ff91248p-1,
+    0x1.ff7afb8p-1,
+    0x1.ff64d38p-1,
+    0x1.ff4eac8p-1,
+    0x1.ff38868p-1,
+    0x1.ff22618p-1,
+    0x1.ff0c3dp-1,
+    0x1.fef61ap-1,
+    0x1.fedff78p-1,
+    0x1.fec9d68p-1,
+    0x1.feb3b6p-1,
+};
+const atanhd_t4 = [_]f64{
+    0x1p+0,
+    0x1.fffe9dp-1,
+    0x1.fffd3ap-1,
+    0x1.fffbd78p-1,
+    0x1.fffa748p-1,
+    0x1.fff9118p-1,
+    0x1.fff7ae8p-1,
+    0x1.fff64cp-1,
+    0x1.fff4e9p-1,
+    0x1.fff386p-1,
+    0x1.fff2238p-1,
+    0x1.fff0c08p-1,
+    0x1.ffef5d8p-1,
+    0x1.ffedfa8p-1,
+    0x1.ffec98p-1,
+    0x1.ffeb35p-1,
+};
+const atanhd_ll = [_][17][3]f64{
     .{
         .{ 0x0p+0, 0x0p+0, 0x0p+0 },
         .{ 0x1.62e432b24p-6, -0x1.745af34bb54b8p-42, -0x1.17e3ec05cde7p-97 },
@@ -241,10 +656,18 @@ const atanhd_LL = [_][17][3]f64{
     },
 };
 const atanhd_ch_refine = [_][2]f64{
-    .{ 0x1p-1, 0x1.24b67ee516e3bp-111 }, .{ -0x1p-2, -0x1.932ce43199a8dp-110 }, .{ 0x1.5555555555555p-3, 0x1.55540c15cf91fp-57 },
+    .{ 0x1p-1, 0x1.24b67ee516e3bp-111 },
+    .{ -0x1p-2, -0x1.932ce43199a8dp-110 },
+    .{ 0x1.5555555555555p-3, 0x1.55540c15cf91fp-57 },
 };
 const atanhd_cl_refine = [_]f64{ -0x1p-3, 0x1.9999999a0754fp-4, -0x1.55555555c3157p-4 };
-const atanhd_c_refine = [_]f64{ -0x1p+0, 0x1.555555555553p+0, -0x1.fffffffffffap+0, 0x1.99999e33a6366p+1, -0x1.555559ef9525fp+2 };
+const atanhd_c_refine = [_]f64{
+    -0x1p+0,
+    0x1.555555555553p+0,
+    -0x1.fffffffffffap+0,
+    0x1.99999e33a6366p+1,
+    -0x1.555559ef9525fp+2,
+};
 fn fastTwoSum(x: f64, y: f64, low: *f64) f64 {
     const sum = x + y;
     const z = sum - x;
@@ -290,7 +713,7 @@ fn mulDoubleDoubleD(x_high: f64, x_low: f64, c: f64, low: *f64) f64 {
     return high;
 }
 
-fn polyDd(x_high: f64, x_low: f64, comptime n: usize, coefficients: *const [n][2]f64, low: *f64) f64 {
+fn polyDd(comptime n: usize, x_high: f64, x_low: f64, coefficients: *const [n][2]f64, low: *f64) f64 {
     var index: usize = n - 1;
     var high: f64 = undefined;
     var coefficient_low: f64 = undefined;
@@ -314,7 +737,7 @@ fn asAtanhZero(value: f64) f64 {
     const y2 = x_squared * (atanhd_cl_zero[0] + x_squared * (atanhd_cl_zero[1] + x_squared *
         (atanhd_cl_zero[2] + x_squared * (atanhd_cl_zero[3] + x_squared * atanhd_cl_zero[4]))));
     var y2_work = y2;
-    var y1 = polyDd(x_squared, x_squared_low, 13, &atanhd_ch_zero, &y2_work);
+    var y1 = polyDd(13, x_squared, x_squared_low, &atanhd_ch_zero, &y2_work);
     y1 = mulDoubleDoubleD(y1, y2_work, value, &y2_work);
     y1 = mulDoubleDoubleAcc(x_squared, x_squared_low, y1, y2_work, &y2_work);
     var y1_low: f64 = undefined;
@@ -361,9 +784,9 @@ fn asAtanhRefine(value: f64, zh: f64, zl: f64, a: f64) f64 {
     const el1 = l2l * exponent_f;
     const el0 = l2h * exponent_f;
     var L: [3]f64 = undefined;
-    L[0] = atanhd_LL[0][idx1][0] + atanhd_LL[1][idx2][0] + (atanhd_LL[2][idx3][0] + atanhd_LL[3][idx4][0]) + el0;
-    L[1] = atanhd_LL[0][idx1][1] + atanhd_LL[1][idx2][1] + (atanhd_LL[2][idx3][1] + atanhd_LL[3][idx4][1]);
-    L[2] = atanhd_LL[0][idx1][2] + atanhd_LL[1][idx2][2] + (atanhd_LL[2][idx3][2] + atanhd_LL[3][idx4][2]);
+    L[0] = atanhd_ll[0][idx1][0] + atanhd_ll[1][idx2][0] + (atanhd_ll[2][idx3][0] + atanhd_ll[3][idx4][0]) + el0;
+    L[1] = atanhd_ll[0][idx1][1] + atanhd_ll[1][idx2][1] + (atanhd_ll[2][idx3][1] + atanhd_ll[3][idx4][1]);
+    L[2] = atanhd_ll[0][idx1][2] + atanhd_ll[1][idx2][2] + (atanhd_ll[2][idx3][2] + atanhd_ll[3][idx4][2]);
     const t12 = atanhd_t1[idx1] * atanhd_t2[idx2];
     const t34 = atanhd_t3[idx3] * atanhd_t4[idx4];
     var product_low: f64 = undefined;
@@ -382,7 +805,7 @@ fn asAtanhRefine(value: f64, zh: f64, zl: f64, a: f64) f64 {
     xl += th * zl_normalized;
     xh = addDoubleDouble(xh, xl, sh, sl, &xl);
     sl = xh * (atanhd_cl_refine[0] + xh * (atanhd_cl_refine[1] + xh * atanhd_cl_refine[2]));
-    sh = polyDd(xh, xl, 3, &atanhd_ch_refine, &sl);
+    sh = polyDd(3, xh, xl, &atanhd_ch_refine, &sl);
     sh = mulDoubleDoubleAcc(xh, xl, sh, sl, &sl);
     sh = addDoubleDouble(sh, sl, el1, el2, &sl);
     sh = addDoubleDouble(sh, sl, L[1], L[2], &sl);
@@ -407,26 +830,30 @@ fn asAtanhRefine(value: f64, zh: f64, zl: f64, a: f64) f64 {
     return result;
 }
 
-const atanhd_main_c = [_]f64{ -0x1p+0, 0x1.555555555553p+0, -0x1.fffffffffffap+0, 0x1.99999e33a6366p+1, -0x1.555559ef9525fp+2 };
+const atanhd_main_c = [_]f64{
+    -0x1p+0,
+    0x1.555555555553p+0,
+    -0x1.fffffffffffap+0,
+    0x1.99999e33a6366p+1,
+    -0x1.555559ef9525fp+2,
+};
 
 /// Return correctly rounded binary64 atanh with caller-selected nearest-even mode.
 pub fn atanhd(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);
     const absolute_bits = bits & magnitude_mask_d;
-    if (absolute_bits == 0x3ff0_0000_0000_0000) return copySignD(@bitCast(infinity_bits_d), bits);
-    if (absolute_bits > 0x3ff0_0000_0000_0000 and absolute_bits < infinity_bits_d)
-        return @bitCast(@as(u64, 0x7ff8_0000_0000_0000));
-    if (absolute_bits >= infinity_bits_d) {
+    if (absolute_bits >= 0x3ff0_0000_0000_0000) {
+        if (absolute_bits == 0x3ff0_0000_0000_0000) {
+            return @bitCast((bits & sign_mask_d) | infinity_bits_d);
+        }
         if (absolute_bits > infinity_bits_d) return @bitCast(bits | quiet_nan_bit_d);
         return @bitCast(@as(u64, 0x7ff8_0000_0000_0000));
     }
 
     if (absolute_bits < 0x3fd0_0000_0000_0000) {
-        if (absolute_bits < 0x3e4d_12ed_0af1_a27f) {
-            if (absolute_bits == 0) return value;
-            return @mulAdd(f64, value, 0x1p-55, value);
-        }
+        // The directed-rounding nudge is below half an ulp in nearest-even.
+        if (absolute_bits < 0x3e4d_12ed_0af1_a27f) return value;
         const x_squared = value * value;
         const x4 = x_squared * x_squared;
         const x3 = x_squared * value;
@@ -466,10 +893,14 @@ pub fn atanhd(value: f64) f64 {
     const normalized_th_bits = th_bits & (~@as(u64, 0) >> 12);
     const table_i: u64 = normalized_th_bits >> (52 - 5);
     const d = normalized_th_bits & (~@as(u64, 0) >> 17);
-    const b_entry = atanhd_B[@intCast(table_i)];
+    const b_entry = atanhd_b[@intCast(table_i)];
     var j_numerator = normalized_th_bits + (@as(u64, @intCast(b_entry[0])) << 33);
     const d_product = d >> 16;
-    if (b_entry[1] >= 0) j_numerator +%= @as(u64, @intCast(b_entry[1])) * d_product else j_numerator -%= @as(u64, @intCast(-b_entry[1])) * d_product;
+    if (b_entry[1] >= 0) {
+        j_numerator +%= @as(u64, @intCast(b_entry[1])) * d_product;
+    } else {
+        j_numerator -%= @as(u64, @intCast(-b_entry[1])) * d_product;
+    }
     const j: u64 = j_numerator >> (52 - 10);
     const idx1_main: usize = @intCast(j >> 5);
     const idx2_main: usize = @intCast(j & 0x1f);
@@ -486,7 +917,9 @@ pub fn atanhd(value: f64) f64 {
     var lh = (atanhd_l1[idx1_main][1] + atanhd_l2[idx2_main][1]) + l2h * @as(f64, @floatFromInt(exponent));
     var ll: f64 = undefined;
     lh = fastTwoSum(lh, rx - 0.5, &ll);
-    ll += l2l * @as(f64, @floatFromInt(exponent)) + (atanhd_l1[idx1_main][0] + atanhd_l2[idx2_main][0]) + dx_low + 0.5 * reduction_low / th;
+    ll += l2l * @as(f64, @floatFromInt(exponent)) +
+        (atanhd_l1[idx1_main][0] + atanhd_l2[idx2_main][0]) +
+        dx_low + 0.5 * reduction_low / th;
     ll += f;
     const value_sign: f64 = if ((bits & sign_mask_d) == 0) 1.0 else -1.0;
     lh *= value_sign;
@@ -508,6 +941,28 @@ pub fn atanhh(value: f16) f16 {
     if (absolute_bits > infinity_bits_h) return @bitCast(bits | quiet_nan_bit_h);
     if (absolute_bits == infinity_bits_h) return @bitCast(@as(u16, 0x7e00));
     if (absolute_bits == 0x3c00) return copySignH(@bitCast(infinity_bits_h), bits);
+    if (absolute_bits > 0x3c00) return @bitCast(@as(u16, 0x7e00));
+
+    if (absolute_bits >= 0x3800) {
+        const table_index: usize = @intCast(absolute_bits - 0x3800);
+        const sign: f32 = if ((bits & sign_mask_h) == 0) 1.0 else -1.0;
+        return @floatCast(sign * atanhh_data.t1[table_index]);
+    }
+
+    if (absolute_bits <= 0x2744) return value;
+
+    if (absolute_bits == 0x2d3c) {
+        const sign: f32 = if ((bits & sign_mask_h) == 0) 1.0 else -1.0;
+        return @floatCast(sign * 0x1.4fbffep-4);
+    }
+
     const widened: f32 = @floatCast(value);
-    return @floatCast(atanhf(widened));
+    const squared = widened * widened;
+    const fourth = squared * squared;
+    const c9 = @mulAdd(f32, 0x1.43b244p-3, squared, 0x1.871ffp-4);
+    const c5 = @mulAdd(f32, 0x1.2785fcp-3, squared, 0x1.997ceep-3);
+    const c1 = @mulAdd(f32, 0x1.55558ep-2, squared, 0x1.000004p+0);
+    const c5_combined = @mulAdd(f32, c9, fourth, c5);
+    const c1_combined = @mulAdd(f32, c5_combined, fourth, c1);
+    return @floatCast(widened * c1_combined);
 }

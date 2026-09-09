@@ -210,6 +210,19 @@ test "Atan2 binary64 axis-adjacent and magnitude boundaries" {
     try expectAtan2dBits(0x7fef_ffff_ffff_ffff, 0x7fef_ffff_ffff_ffff, 0x3fe9_21fb_5444_2d18);
 }
 
+test "Atan2 binary64 wide quotient honors subnormal midpoint" {
+    try expectAtan2dBits(
+        0x0000_0000_0000_0003,
+        0x4000_0000_0000_0000,
+        0x0000_0000_0000_0001,
+    );
+    try expectAtan2dBits(
+        0x8000_0000_0000_0003,
+        0x4000_0000_0000_0000,
+        0x8000_0000_0000_0001,
+    );
+}
+
 test "Atan2 binary64 forced ambiguity reports unresolved" {
     const positive = scalar.testing.forcedAmbiguity(1.0, 1.0);
     const negative = scalar.testing.forcedAmbiguity(-1.0, -1.0);

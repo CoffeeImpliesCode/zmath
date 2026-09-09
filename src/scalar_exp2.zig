@@ -55,7 +55,7 @@ pub fn exp2h(value: f16) f16 {
     return @floatCast(table_1 * table_2);
 }
 
-fn exp2fSpecial(value: f32, bits: u32) f32 {
+noinline fn exp2fSpecial(value: f32, bits: u32) f32 {
     const magnitude = bits & magnitude_mask_f;
     if (magnitude > infinity_bits_f) return @bitCast(bits | quiet_nan_bit_f);
     if (magnitude == infinity_bits_f) {
@@ -70,75 +70,67 @@ fn exp2fSpecial(value: f32, bits: u32) f32 {
     return @floatCast(result);
 }
 
+noinline fn exp2fAccurate(scale: f64, rounded_value: f64, rounded_squared: f64) f32 {
+    @setFloatMode(.strict);
+    const accurate_coefficients = [_]f64{
+        0x1.62e42fefa39efp-1,
+        0x1.ebfbdff82c58fp-3,
+        0x1.c6b08d702e0edp-5,
+        0x1.3b2ab6fb92e5ep-7,
+        0x1.5d886e6d54203p-10,
+        0x1.430976b8ce6efp-13,
+    };
+    const result = scale + (scale * rounded_value) *
+        ((accurate_coefficients[0] + rounded_value * accurate_coefficients[1]) +
+            rounded_squared * ((accurate_coefficients[2] + rounded_value * accurate_coefficients[3]) +
+                rounded_squared * (accurate_coefficients[4] + rounded_value * accurate_coefficients[5])));
+    return @floatCast(result);
+}
+
 fn exp2fFinite(value: f32, bits: u32) f32 {
     @setFloatMode(.strict);
 
-    const exponent: i32 = @as(i32, @intCast((bits >> 23) & 0xff)) - 127;
-    if ((bits & 0x0000_ffff) == 0 and exponent >= 0 and exponent < 9) {
-        const shift: u5 = @intCast(9 + exponent);
-        if ((bits << shift) == 0) {
-            const negative_mask: i32 = if ((bits & sign_mask_f) != 0) -1 else 0;
-            var significand: i32 = @intCast(((bits & 0x007f_ffff) | 0x0080_0000) >> @intCast(23 - exponent));
-            significand = (significand ^ negative_mask) - negative_mask + 127;
-            if (significand > 0 and significand < 255) {
-                const result_bits: u32 = @as(u32, @intCast(significand)) << 23;
-                return @bitCast(result_bits);
-            }
-            if (significand <= 0 and significand > -23) {
-                const result_bits: u32 = @as(u32, 1) << @intCast(22 + significand);
-                return @bitCast(result_bits);
-            }
-        }
-    }
-
     const unsigned_magnitude = bits << 1;
     if (unsigned_magnitude >= 0x8600_0000 or unsigned_magnitude < 0x6500_0000) {
-        if (unsigned_magnitude < 0x6500_0000) return 1.0 + value;
+        if (unsigned_magnitude < 0x6500_0000) return 1.0;
         if (!(bits >= 0xc300_0000 and bits < 0xc315_0000)) return exp2fSpecial(value, bits);
     }
 
-    const offset: f64 = 0x1.8p46;
-    const value_wide: f64 = value;
-    const rounded_value = value_wide - ((value_wide + offset) - offset);
-    const rounded_squared = rounded_value * rounded_value;
-    const table_bits: u32 = @bitCast(value + @as(f32, 0x1.8p17));
-    const table_index: usize = @intCast(table_bits & 0x3f);
-    const table_scale_bits: u64 = @bitCast(data.exp2f_table[table_index]);
-    const exponent_bits = (@as(u64, table_bits >> 6) << 52);
-    const scale: f64 = @bitCast(table_scale_bits +% exponent_bits);
+    // The binary32 bias supplies the same 1/64 grid as a binary64 reduction.
+    const scale_biased: f32 = value + @as(f32, 0x1.8p17);
+    const scale_biased_bits: u32 = @bitCast(scale_biased);
+    const table_index: u6 = @truncate(scale_biased_bits);
+    const scale_bits = data.exp2f_scale_table[table_index] +%
+        (@as(u64, scale_biased_bits) << 46);
+    const scale: f64 = @bitCast(scale_bits);
+
+    // Both subtractions are exact in binary32. A nonzero nearest
+    // grid point and value satisfy Sterbenz; a zero grid leaves value.
+    const rounded_grid: f32 = scale_biased - @as(f32, 0x1.8p17);
+    const rounded_value_narrow: f32 = value - rounded_grid;
+    const rounded_value: f64 = rounded_value_narrow;
     const fast_coefficients = [_]f64{
         1.0,
         0x1.62e42fef4c4e7p-1,
         0x1.ebfd1b232f475p-3,
         0x1.c6b19384ecd93p-5,
     };
-    var result = scale * ((fast_coefficients[0] + rounded_value * fast_coefficients[1]) +
-        rounded_squared * (fast_coefficients[2] + rounded_value * fast_coefficients[3]));
-    const error_bound: f64 = 0x1.3d8p-33;
-    var upper: f32 = @floatCast(result);
-    const lower: f32 = @floatCast(result - result * error_bound);
-
-    if (upper != lower) {
-        if (unsigned_magnitude <= 0x79e7_526e) {
-            if (bits == 0x3b42_9d37) return @as(f32, 0x1.00870ap+0) - @as(f32, 0x1p-25);
-            if (bits == 0xbcf3_a937) return @as(f32, 0x1.f58d62p-1) - @as(f32, 0x1p-26);
-            if (bits == 0xb8d3_d026) return @as(f32, 0x1.fff6d2p-1) + @as(f32, 0x1p-26);
-        }
-        const accurate_coefficients = [_]f64{
-            0x1.62e42fefa39efp-1,
-            0x1.ebfbdff82c58fp-3,
-            0x1.c6b08d702e0edp-5,
-            0x1.3b2ab6fb92e5ep-7,
-            0x1.5d886e6d54203p-10,
-            0x1.430976b8ce6efp-13,
-        };
-        result = scale + (scale * rounded_value) *
-            ((accurate_coefficients[0] + rounded_value * accurate_coefficients[1]) +
-                rounded_squared * ((accurate_coefficients[2] + rounded_value * accurate_coefficients[3]) +
-                    rounded_squared * (accurate_coefficients[4] + rounded_value * accurate_coefficients[5])));
-        upper = @floatCast(result);
+    var polynomial = @mulAdd(f64, fast_coefficients[3], rounded_value, fast_coefficients[2]);
+    polynomial = @mulAdd(f64, polynomial, rounded_value, fast_coefficients[1]);
+    polynomial = @mulAdd(f64, polynomial, rounded_value, fast_coefficients[0]);
+    const result = scale * polynomial;
+    // Horner changes the original evaluation by less than 16u, u=2^-53.
+    // Its total relative error remains below 2^-32. Every binary32
+    // midpoint has 28 low binary64 bits clear; 2^21 adjacent encodings
+    // enclose the error on either side, including binade transitions.
+    const result_bits: u64 = @bitCast(result);
+    if (((result_bits +% 0x0020_0000) & 0x0fff_ffff) > 0x0040_0000) return @floatCast(result);
+    if (unsigned_magnitude <= 0x79e7_526e) {
+        if (bits == 0x3b42_9d37) return @as(f32, 0x1.00870ap+0) - @as(f32, 0x1p-25);
+        if (bits == 0xbcf3_a937) return @as(f32, 0x1.f58d62p-1) - @as(f32, 0x1p-26);
+        if (bits == 0xb8d3_d026) return @as(f32, 0x1.fff6d2p-1) + @as(f32, 0x1p-26);
     }
-    return upper;
+    return exp2fAccurate(scale, rounded_value, rounded_value * rounded_value);
 }
 
 // Correctly rounded binary32 exp2, ported from CORE-MATH
@@ -150,13 +142,6 @@ fn exp2fFinite(value: f32, bits: u32) f32 {
 
 pub fn exp2f(value: f32) f32 {
     const bits: u32 = @bitCast(value);
-    const magnitude = bits & magnitude_mask_f;
-    if (magnitude > infinity_bits_f) return @bitCast(bits | quiet_nan_bit_f);
-    if (magnitude == infinity_bits_f) {
-        if ((bits & sign_mask_f) != 0) return 0.0;
-        return @bitCast(infinity_bits_f);
-    }
-    if (magnitude == 0) return 1.0;
     return exp2fFinite(value, bits);
 }
 
@@ -167,13 +152,16 @@ pub fn exp2f(value: f32) f32 {
 const Exp2dDoubleDouble = data.DoubleDouble;
 
 fn exp2dRoundEvenFinite(value: f64) i64 {
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_value: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_value;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) return truncated + 1;
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) return truncated - 1;
-    return truncated;
+    @setFloatMode(.strict);
+
+    // All callers prove |value| < 2^23. Under RNE, the fixed-exponent
+    // addition rounds to the nearest even integer and the bit delta is its
+    // signed two's-complement representation.
+    const rounding_constant: f64 = 0x1.8p52;
+    const biased = value + rounding_constant;
+    const biased_bits: u64 = @bitCast(biased);
+    const rounding_bits: u64 = @bitCast(rounding_constant);
+    return @bitCast(biased_bits -% rounding_bits);
 }
 
 fn exp2dFastTwoSum(x: f64, y: f64) Exp2dDoubleDouble {
@@ -238,10 +226,10 @@ fn exp2dToDenormal(value: f64) f64 {
 
 fn exp2dDatabaseLookup(value: f64, fallback: f64) f64 {
     const value_bits: u64 = @bitCast(value);
-    var lower: i32 = 0;
-    var upper: i32 = @intCast(data.exp2d_database.len - 1);
+    var lower: isize = 0;
+    var upper: isize = @intCast(data.exp2d_database.len - 1);
     while (lower <= upper) {
-        const middle: i32 = @divTrunc(lower + upper, 2);
+        const middle: isize = @divTrunc(lower + upper, 2);
         const middle_index: usize = @intCast(middle);
         const database_bits: u64 = @bitCast(data.exp2d_database[middle_index]);
         if (database_bits < value_bits) {
@@ -272,7 +260,7 @@ fn exp2dDatabaseLookup(value: f64, fallback: f64) f64 {
     return fallback;
 }
 
-fn exp2dAccurate(value: f64) f64 {
+noinline fn exp2dAccurate(value: f64) f64 {
     @setFloatMode(.strict);
 
     const value_bits: u64 = @bitCast(value);
@@ -303,7 +291,7 @@ fn exp2dAccurate(value: f64) f64 {
         if ((rounded_integer & 0xfff) == 0) {
             const sum = exp2dFastTwoSum(table_product.high, polynomial.high);
             const low_sum = exp2dFastTwoSum(sum.low, polynomial.low);
-            var result = Exp2dDoubleDouble{ .high = sum.high, .low = low_sum.high };
+            var result: Exp2dDoubleDouble = .{ .high = sum.high, .low = low_sum.high };
             var low_bits: u64 = @bitCast(result.low);
             if ((low_bits & 0x000f_ffff_ffff_ffff) == 0 and ((low_bits >> 52) & 0x7ff) != 0) {
                 const error_bits: u64 = @bitCast(low_sum.low);
@@ -381,33 +369,43 @@ pub fn exp2d(value: f64) f64 {
         }
     }
 
-    if (unsigned_magnitude <= 0x792e_2a8e_ca57_05fc) {
-        const tiny = if ((bits & sign_mask_d) == 0) @as(f64, 0x1p-54) else -@as(f64, 0x1p-54);
-        return 1.0 + tiny;
-    }
+    if (unsigned_magnitude <= 0x792e_2a8e_ca57_05fc) return 1.0;
 
     const scaled_value = 4096.0 * value;
-    const rounded_integer = exp2dRoundEvenFinite(scaled_value);
-    const reduced = scaled_value - @as(f64, @floatFromInt(rounded_integer));
+    const biased = scaled_value + 0x1.8p52;
+    const biased_bits: u64 = @bitCast(biased);
+    const rounded_integer: i64 = @bitCast(biased_bits -% 0x4338_0000_0000_0000);
+    const reduced = scaled_value - (biased - 0x1.8p52);
     const table_0_index: usize = @intCast((rounded_integer >> 6) & 0x3f);
     const table_1_index: usize = @intCast(rounded_integer & 0x3f);
     const exponent = rounded_integer >> 12;
     const table_0 = data.exp2d_table_0[table_0_index];
     const table_1 = data.exp2d_table_1[table_1_index];
-    const table_product = exp2dMultiplyDoubleDouble(table_0.high, table_0.low, table_1.high, table_1.low);
+    const table_high = table_0.high * table_1.high;
+    const table_error = @mulAdd(f64, table_0.high, table_1.high, -table_high);
+    const table_low = @mulAdd(
+        f64,
+        table_0.low,
+        table_1.high,
+        @mulAdd(f64, table_0.high, table_1.low, table_error),
+    );
+    const table_product: Exp2dDoubleDouble = .{ .high = table_high, .low = table_low };
     const reduced_squared = reduced * reduced;
-    const polynomial = (0x1.62e42fefa39efp-13 + reduced * 0x1.ebfbdff82c58fp-27) +
-        reduced_squared * (0x1.c6b08d73b3e01p-41 + reduced * 0x1.3b2ab6fdda001p-55);
+    const linear = @mulAdd(f64, reduced, 0x1.ebfbdff82c58fp-27, 0x1.62e42fefa39efp-13);
+    const cubic = @mulAdd(f64, reduced, 0x1.3b2ab6fdda001p-55, 0x1.c6b08d73b3e01p-41);
+    const polynomial = @mulAdd(f64, reduced_squared, cubic, linear);
     var high = table_product.high;
     const table_times_reduced = table_product.high * reduced;
     var low = table_product.low + table_times_reduced * polynomial;
     const error_bound: f64 = 1.64e-19;
 
     if (bits <= 0xc08f_f000_0000_0000) {
+        // Integer inputs reduce to 1+0 and pass this same enclosure.
         const upper = high + (low + error_bound);
         const lower = high + (low - error_bound);
         if (upper != lower) return exp2dAccurate(value);
-        return exp2dScaleNormal(lower, exponent);
+        high = lower;
+        return exp2dScaleNormal(high, exponent);
     }
 
     const scale_bits = @as(u64, @bitCast(@as(i64, 1) - exponent)) << 52;
@@ -415,8 +413,12 @@ pub fn exp2d(value: f64) f64 {
     const sum = exp2dFastTwoSum(scale, high);
     high = sum.high;
     low += sum.low;
-    const upper = high + (low + error_bound);
-    const lower = high + (low - error_bound);
+    // Cover low-part addition and endpoint rounding after the coarse
+    // subnormal scale has enlarged the low part.
+    const denormal_error = @mulAdd(f64, @abs(low), 0x1p-51, error_bound);
+    const upper = high + (low + denormal_error);
+    const lower = high + (low - denormal_error);
     if (upper != lower) return exp2dAccurate(value);
-    return exp2dToDenormal(lower);
+    high = lower;
+    return exp2dToDenormal(high);
 }

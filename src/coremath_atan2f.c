@@ -84,58 +84,23 @@ cr_atan2f_tiny (float y, float x)
   return res;
 }
 
-float cr_atan2f(float y, float x){
-  static const double cn[] =
-    {0x1p+0, 0x1.40e0698f94c35p+1, 0x1.248c5da347f0dp+1, 0x1.d873386572976p-1, 0x1.46fa40b20f1dp-3,
-     0x1.33f5e041eed0fp-7, 0x1.546bbf28667c5p-14};
-  static const double cd[] =
-    {0x1p+0, 0x1.6b8b143a3f6dap+1, 0x1.8421201d18ed5p+1, 0x1.8221d086914ebp+0, 0x1.670657e3a07bap-2,
-     0x1.0f4951fd1e72dp-5, 0x1.b3874b8798286p-11};
-  static const double m[] = {0, 1};
+/* The Zig wrapper supplies finite, nonzero operands. */
+float zmath_core_atan2f_finite(float y, float x){
 #define pi 0x1.921fb54442d18p+1
 #define pi2 0x1.921fb54442d18p+0
 #define pi2l 0x1.1a62633145c07p-54
-  static const double off[] = {0.0f, pi2, pi, pi2, -0.0f, -pi2, -pi, -pi2};
-  static const double offl[] = {0.0f, pi2l, 2*pi2l, pi2l, -0.0f, -pi2l, -2*pi2l, -pi2l};
-  static const double sgn[] = {1,-1};
   b32u32_u tx = {.f = x}, ty = {.f = y};
   uint32_t ux = tx.u, uy = ty.u, ax = ux&(~0u>>1), ay = uy&(~0u>>1);
-  if(__builtin_expect(ay >= (0xff<<23)||ax >= (0xff<<23), 0)){ // x or y is nan or inf
-    /* we use x+y below so that the invalid exception is set
-       for (x,y) = (qnan,snan) or (snan,qnan) */
-    if(ay > (0xff<<23)) return x + y; // case y nan
-    if(ax > (0xff<<23)) return x + y; // case x nan
-    uint32_t yinf = ay==(0xff<<23), xinf = ax==(0xff<<23);
-    if(yinf&xinf){
-      if(ux>>31)
-	return 0x1.2d97c7f3321d2p+1*sgn[uy>>31]; // +/-3pi/4
-      else
-	return 0x1.921fb54442d18p-1*sgn[uy>>31]; // +/-pi/4
-    }
-    if(xinf){
-      if(ux>>31)
-	return pi*sgn[uy>>31];
-      else
-	return 0.0*sgn[uy>>31];
-    }
-    if(yinf){
-      return pi2*sgn[uy>>31];
-    }
-  }
-  if(__builtin_expect(ay==0, 0)){
-    if(__builtin_expect(!ax,0)){
-      uint32_t i = (uy>>31)*4 + (ux>>31)*2;
-      if(ux>>31)
-	return off[i] + offl[i];
-      else
-	return off[i];
-    }
-    if(!(ux>>31)) return 0.0*sgn[uy>>31];
-  }
-  uint32_t gt = ay>ax, i = (uy>>31)*4 + (ux>>31)*2 + gt;
+  uint32_t gt = ay > ax;
+  uint32_t swap = (ux ^ uy) & (0u - gt);
+  b32u32_u numerator = {.u = uy ^ swap}, denominator = {.u = ux ^ swap};
+  b64u64_u sign = {.u = UINT64_C(0x3ff0000000000000) | ((uint64_t)(uy >> 31) << 63)};
+  double offset = (gt ? pi2 : ((ux >> 31) ? pi : 0.0)) * sign.f;
+  double offset_low = (gt ? pi2l : ((ux >> 31) ? 2*pi2l : 0.0)) * sign.f;
+  double reduce_sign = gt ? -1.0 : 1.0;
 
   double zx = x, zy = y;
-  double z = (m[gt]*zx + m[1-gt]*zy)/(m[gt]*zy + m[1-gt]*zx);
+  double z = (double)numerator.f / (double)denominator.f;
   // z = x/y if |y| > |x|, and z = y/x otherwise
   double r;
   int d = (int)ax-(int)ay;
@@ -144,17 +109,17 @@ float cr_atan2f(float y, float x){
     /* z2 cannot underflow, since for |y|=0x1p-149 and |x|=0x1.fffffep+127
        we get |z| > 2^-277 thus z2 > 2^-554, but z4 and z8 might underflow,
        which might give spurious underflow exceptions. */
-    double cn0 = cn[0] + z2*cn[1];
-    double cn2 = cn[2] + z2*cn[3];
-    double cn4 = cn[4] + z2*cn[5];
-    double cn6 = cn[6];
+    double cn0 = 0x1p+0 + z2*0x1.40e0698f94c35p+1;
+    double cn2 = 0x1.248c5da347f0dp+1 + z2*0x1.d873386572976p-1;
+    double cn4 = 0x1.46fa40b20f1dp-3 + z2*0x1.33f5e041eed0fp-7;
+    double cn6 = 0x1.546bbf28667c5p-14;
     cn0 += z4*cn2;
     cn4 += z4*cn6;
     cn0 += z8*cn4;
-    double cd0 = cd[0] + z2*cd[1];
-    double cd2 = cd[2] + z2*cd[3];
-    double cd4 = cd[4] + z2*cd[5];
-    double cd6 = cd[6];
+    double cd0 = 0x1p+0 + z2*0x1.6b8b143a3f6dap+1;
+    double cd2 = 0x1.8421201d18ed5p+1 + z2*0x1.8221d086914ebp+0;
+    double cd4 = 0x1.670657e3a07bap-2 + z2*0x1.0f4951fd1e72dp-5;
+    double cd6 = 0x1.b3874b8798286p-11;
     cd0 += z4*cd2;
     cd4 += z4*cd6;
     cd0 += z8*cd4;
@@ -162,8 +127,8 @@ float cr_atan2f(float y, float x){
   } else {
     r = 1;
   }
-  z *= sgn[gt];
-  r = z*r + off[i];
+  z *= reduce_sign;
+  r = z*r + offset;
   b64u64_u res = {.f = r};
   if(__builtin_expect(((res.u + 8)&0xfffffff) <= 16, 0)){
     /* check tiny y/x */
@@ -196,10 +161,10 @@ float cr_atan2f(float y, float x){
        {0x1.a5cf2e9cf76e5p-14, -0x1.887eb4a63b665p-68}, {-0x1.420c270719e32p-16, 0x1.efd595b27888bp-71},
        {0x1.3ba2d69b51677p-19, -0x1.4fb06829cdfc7p-73}, {-0x1.29b7e6f676385p-23, -0x1.a783b6de718fbp-77}};
     double pl, ph = polydd(z2h, z2l, 32, c, &pl);
-    zh *= sgn[gt];
-    zl *= sgn[gt];
+    zh *= reduce_sign;
+    zl *= reduce_sign;
     ph = muldd(zh,zl,ph,pl,&pl);
-    double sh = ph + off[i], sl = ((off[i] - sh) + ph) + pl + offl[i];
+    double sh = ph + offset, sl = ((offset - sh) + ph) + pl + offset_low;
     float rf = sh;
     double th = rf, dh = sh - th, tm = dh + sl;
     b64u64_u tth = {.f = th};

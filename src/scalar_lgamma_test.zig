@@ -70,6 +70,25 @@ test "lgamma returns positive infinity at negative integer poles" {
     try expectLgammaD(0xbff0_0000_0000_0000, 0x7ff0_0000_0000_0000, -1);
     try expectLgammaD(0xc000_0000_0000_0000, 0x7ff0_0000_0000_0000, -1);
     try expectLgammaD(0xc028_0000_0000_0000, 0x7ff0_0000_0000_0000, -1);
+    // A binary32 magnitude of 2^23 and a binary64 magnitude of 2^1020 are the
+    // first huge-integer poles of each C kernel.
+    try expectLgammaF(0xcb00_0000, 0x7f80_0000, -1);
+    try expectLgammaD(0xcfb0_0000_0000_0000, 0x7ff0_0000_0000_0000, -1);
+    try expectLgammaD(0xc1e0_0000_0000_0000, 0x7ff0_0000_0000_0000, -1);
+}
+
+test "lgamma f64 reflects sign on either side of negative poles" {
+    const cases = .{
+        .{ @as(u64, 0xc008_0000_0000_0001), @as(i2, 1) },
+        .{ @as(u64, 0xc007_ffff_ffff_ffff), @as(i2, -1) },
+        .{ @as(u64, 0xc000_0000_0000_0001), @as(i2, -1) },
+        .{ @as(u64, 0xbfff_ffff_ffff_ffff), @as(i2, 1) },
+    };
+    inline for (cases) |input| {
+        const result = scalar.lgammad(@bitCast(input[0]));
+        try std.testing.expectEqual(input[1], result.sign);
+        try std.testing.expect(@abs(result.value) < std.math.inf(f64));
+    }
 }
 
 test "lgamma maps both infinities to positive infinity" {

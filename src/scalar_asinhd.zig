@@ -121,8 +121,8 @@ fn asAsinhZero(x: f64, x_squared_high: f64, x_squared_low: f64) f64 {
 fn asAsinhDatabase(x: f64, fallback: f64) f64 {
     @setFloatMode(.strict);
     const absolute_value = if (x < 0.0) -x else x;
-    var lower: i32 = 0;
-    var upper: i32 = @intCast(data.db.len - 1);
+    var lower: isize = 0;
+    var upper: isize = @intCast(data.db.len - 1);
     while (lower <= upper) {
         const middle = @divTrunc(lower + upper, 2);
         const middle_index: usize = @intCast(middle);
@@ -145,7 +145,7 @@ fn asAsinhRefine(x: f64, z_high: f64, z_low: f64, a: f64) f64 {
     const t2 = data.t2;
     const t3 = data.t3;
     const t4 = data.t4;
-    const ll = data.LL;
+    const ll = data.ll;
     const high_coefficients = [3][2]f64{
         .{ 0x1p-1, 0x1.24b67ee516e3bp-111 },              .{ -0x1p-2, -0x1.932ce43199a8dp-110 },
         .{ 0x1.5555555555555p-3, 0x1.55540c15cf91fp-57 },
@@ -230,8 +230,8 @@ pub fn asinhd(value: f64) f64 {
     const absolute_value: f64 = @bitCast(magnitude);
     if (magnitude < 0x3fbb_0000_0000_0000) {
         if (magnitude < 0x3e57_1374_4912_3ef7) {
-            const result = @mulAdd(f64, -0x1p-60, value, value);
-            return result;
+            // The exact result rounds to the input encoding in this region.
+            return value;
         }
         const square_high = value * value;
         const square_low = @mulAdd(f64, value, value, -square_high);
@@ -302,8 +302,8 @@ pub fn asinhd(value: f64) f64 {
     const exponent_index: usize = @intCast(normalized_bits >> (52 - 5));
     const residual = normalized_bits & 0x0000_7fff_ffff_ffff;
     const index_numerator: i128 = @as(i128, normalized_bits) +
-        (@as(i128, data.B[exponent_index].c0) << 33) +
-        @as(i128, data.B[exponent_index].c1) * @as(i128, @intCast(residual >> 16));
+        (@as(i128, data.b[exponent_index].c0) << 33) +
+        @as(i128, data.b[exponent_index].c1) * @as(i128, @intCast(residual >> 16));
     const table_index: u64 = @intCast(index_numerator >> (52 - 10));
     normalized_bits |= @as(u64, 0x3ff) << 52;
     const normalized_value: f64 = @bitCast(normalized_bits);
@@ -317,7 +317,9 @@ pub fn asinhd(value: f64) f64 {
     const log2_high = 0x1.62e42fefa38p-1;
     const log2_low = 0x1.ef35793c7673p-45;
     var log_high = log2_high * @as(f64, @floatFromInt(exponent)) + (data.l1[index_1][1] + data.l2[index_2][1]);
-    var log_low = log2_low * @as(f64, @floatFromInt(exponent)) + data.l1[index_1][0] + data.l2[index_2][0] + absolute_low / absolute_high + polynomial;
+    var log_low = log2_low * @as(f64, @floatFromInt(exponent)) +
+        data.l1[index_1][0] + data.l2[index_2][0] +
+        absolute_low / absolute_high + polynomial;
     log_low += delta;
     const sign: f64 = if (value < 0.0) -1.0 else 1.0;
     log_high *= sign;

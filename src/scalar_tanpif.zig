@@ -28,14 +28,11 @@ const infinity_bits: u32 = 0x7f80_0000;
 const quiet_nan_bit: u32 = 0x0040_0000;
 const canonical_nan_bits: u32 = 0x7fc0_0000;
 
-fn roundEvenFinite(value: f64) i64 {
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_value: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_value;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) return truncated + 1;
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) return truncated - 1;
-    return truncated;
+inline fn roundEvenSmall(value: f64) f64 {
+    // The callers bound |value| below 2^29. Adding 2^52 rounds to an
+    // integer with ties-to-even, and subtracting the exact bias restores it.
+    const rounded = value + 0x1.8p52;
+    return rounded - 0x1.8p52;
 }
 
 fn copySign(value: f32, sign_source: f32) f32 {
@@ -55,15 +52,17 @@ pub fn tanpif(value: f32) f32 {
     if (magnitude > infinity_bits) return @bitCast(bits | quiet_nan_bit);
     if (magnitude == infinity_bits) return @bitCast(canonical_nan_bits);
 
+    // The cutoff bounds |4*value| below 2^26, so both reductions fit the
+    // bias method's exact |value| < 2^29 range.
     if (exponent > (150 << 23)) return @bitCast(bits & 0x8000_0000);
     const value_times_four: f32 = 4.0 * value;
-    const rounded_times_four: f32 = @floatFromInt(roundEvenFinite(@floatCast(value_times_four)));
+    const rounded_times_four: f32 = @floatCast(roundEvenSmall(@floatCast(value_times_four)));
     const delta_times_four: f32 = value_times_four - rounded_times_four;
-    const rounded_value: f32 = @floatFromInt(roundEvenFinite(@floatCast(value)));
+    const rounded_value: f32 = @floatCast(roundEvenSmall(@floatCast(value)));
     const reduced: f32 = value - rounded_value;
 
     if (delta_times_four == 0.0) {
-        var quadrant: i64 = @intFromFloat(value_times_four);
+        var quadrant: i64 = @intFromFloat(@min(@max(value_times_four, -0x1p+26), 0x1p+26));
         if ((quadrant & 1) != 0) return copySign(1.0, reduced);
         quadrant &= 6;
         if (quadrant == 0) return copySign(0.0, value);

@@ -29,13 +29,13 @@ const b32u32_u = extern union {
     u: u32,
 };
 
-fn my_copysignf(x: f32, y: f32) f32 {
+fn myCopysignf(x: f32, y: f32) f32 {
     const x_bits: u32 = @bitCast(x);
     const y_bits: u32 = @bitCast(y);
     return @bitCast((x_bits & 0x7fff_ffff) | (y_bits & 0x8000_0000));
 }
 
-fn my_copysign(x: f64, y: f64) f64 {
+fn myCopysign(x: f64, y: f64) f64 {
     const x_bits: u64 = @bitCast(x);
     const y_bits: u64 = @bitCast(y);
     return @bitCast((x_bits & 0x7fff_ffff_ffff_ffff) | (y_bits & 0x8000_0000_0000_0000));
@@ -51,8 +51,8 @@ pub fn erfh(arg_xf16: f16) f16 {
     _ = &xf16;
     var x: f32 = @floatCast(xf16);
     _ = &x;
-    const static_local_C = struct {
-        const C: [56][8]f64 = [56][8]f64{
+    const static_local_table = struct {
+        const coefficients: [56][8]f64 = [56][8]f64{
             [8]f64{
                 0.4926134732179379,
                 0.905793136775116,
@@ -615,7 +615,7 @@ pub fn erfh(arg_xf16: f16) f16 {
             },
         };
     };
-    _ = &static_local_C;
+    _ = &static_local_table;
     var ax: f32 = @abs(@as(f32, x));
     _ = &ax;
     var t: b32u32_u = b32u32_u{
@@ -629,16 +629,12 @@ pub fn erfh(arg_xf16: f16) f16 {
     var z: f64 = @floatCast(ax);
     _ = &z;
     if (ux > 0x407a_d444) {
-        var os: f32 = my_copysignf(1.0, x);
+        var os: f32 = myCopysignf(1.0, x);
         _ = &os;
         if (ux > 0x7f80_0000) return @bitCast(input_bits | 0x0200);
         if (ux == 0x7f80_0000) return @floatCast(os);
         return @floatCast(os - (0x1p-25 * os));
     }
-    var v: f64 = @floor(@as(f64, @as(f64, 16.0) * z));
-    _ = &v;
-    var i: u32 = @intFromFloat(@as(f32, 16.0) * ax);
-    _ = &i;
     if (ux < 0x3ee0_0000) {
         const static_local_c = struct {
             const c: [8]f64 = [8]f64{
@@ -672,8 +668,13 @@ pub fn erfh(arg_xf16: f16) f16 {
         c0 += z8 * c4;
         return @floatCast(s * c0);
     }
+    // The small polynomial needs no table index, so derive it only here. The
+    // index truncates toward zero on a non-negative input, so it is also the
+    // floor of the range reduction and converts back to f64 exactly.
+    const i: u32 = @intFromFloat(@as(f32, 16.0) * ax);
+    const v: f64 = @floatFromInt(i);
     z = (z - @as(f64, 0.03125)) - (@as(f64, 0.0625) * v);
-    var c: [*c]const f64 = @ptrCast(@alignCast(&static_local_C.C[i -% @as(u32, 7)]));
+    var c: [*c]const f64 = @ptrCast(@alignCast(&static_local_table.coefficients[i -% @as(u32, 7)]));
     _ = &c;
     var z2: f64 = z * z;
     _ = &z2;
@@ -690,5 +691,5 @@ pub fn erfh(arg_xf16: f16) f16 {
     c0 += z2 * c2;
     c4 += z2 * c6;
     c0 += z4 * c4;
-    return @floatCast(my_copysign(c0, s));
+    return @floatCast(myCopysign(c0, s));
 }

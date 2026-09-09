@@ -164,8 +164,8 @@ fn asSinhDatabase(value: f64, fallback: f64) f64 {
     @setFloatMode(.strict);
     const absolute_bits = @as(u64, @bitCast(value)) & magnitude_mask;
     const absolute_value: f64 = @bitCast(absolute_bits);
-    var lower: i32 = 0;
-    var upper: i32 = @intCast(data.database.len - 1);
+    var lower: isize = 0;
+    var upper: isize = @intCast(data.database.len - 1);
     while (lower <= upper) {
         const middle = @divTrunc(lower + upper, 2);
         const middle_index: usize = @intCast(middle);
@@ -218,17 +218,11 @@ pub fn sinhd(value: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(value);
     const absolute_bits = input_bits & magnitude_mask;
-    const scale = 0x1.71547652b82fep+12;
-    const absolute_value: f64 = @bitCast(absolute_bits);
-    const rounded_product = @mulAdd(f64, absolute_value, scale, 0x1.8000002p+26);
-    const rounded_bits: u64 = @bitCast(rounded_product);
-    const reduction_mask: u64 = ~@as(u64, (1 << 26) - 1);
-    const reduction = @as(f64, @bitCast(rounded_bits & reduction_mask)) - 0x1.8p+26;
 
     if (absolute_bits < 0x3fd0_0000_0000_0000) {
         if (absolute_bits < 0x3e57_1374_4912_3ef7) {
-            if (absolute_bits == 0) return value;
-            return @mulAdd(f64, value, 0x1p-55, value);
+            // The exact result rounds to the input encoding in this region.
+            return value;
         }
         const coefficients = [5]f64{
             0x1.5555555555555p-3,
@@ -250,7 +244,6 @@ pub fn sinhd(value: f64) f64 {
         if (lower == upper) return lower;
         return asSinhZero(value);
     }
-
     if (absolute_bits > 0x4086_33ce_8fb9_f87d) {
         if (absolute_bits >= infinity_bits) {
             if (absolute_bits == infinity_bits) return value;
@@ -259,19 +252,18 @@ pub fn sinhd(value: f64) f64 {
         return @bitCast((input_bits & sign_mask) | infinity_bits);
     }
 
+    const scale = 0x1.71547652b82fep+12;
+    const absolute_value: f64 = @bitCast(absolute_bits);
+    const rounded_product = @mulAdd(f64, absolute_value, scale, 0x1.8000002p+26);
+    const rounded_bits: u64 = @bitCast(rounded_product);
+    const reduction_mask: u64 = ~@as(u64, (1 << 26) - 1);
+    const reduction = @as(f64, @bitCast(rounded_bits & reduction_mask)) - 0x1.8p+26;
     const integer_index: i64 = @intCast((rounded_bits << 14) >> 40);
-    const negative_integer_index = -integer_index;
     const positive_table_1_index: usize = @intCast(integer_index & 0x3f);
     const positive_table_0_index: usize = @intCast((integer_index >> 6) & 0x3f);
     const positive_exponent: i64 = integer_index >> 12;
-    const negative_table_1_index: usize = @intCast(negative_integer_index & 0x3f);
-    const negative_table_0_index: usize = @intCast((negative_integer_index >> 6) & 0x3f);
-    const negative_exponent: i64 = negative_integer_index >> 12;
     const positive_scale: f64 = @bitCast(
         @as(u64, @bitCast(@as(i64, 1022 + positive_exponent))) << 52,
-    );
-    const negative_scale: f64 = @bitCast(
-        @as(u64, @bitCast(@as(i64, 1022 + negative_exponent))) << 52,
     );
     const table_0_high = data.t0[positive_table_0_index][1];
     const table_0_low = data.t0[positive_table_0_index][0];
@@ -285,22 +277,11 @@ pub fn sinhd(value: f64) f64 {
     const reduced = (absolute_value - log2_high * reduction) + log2_low * reduction;
     const reduced_squared = reduced * reduced;
     const coefficients = [4]f64{ 0x1p+0, 0x1p-1, 0x1.5555555aaaaaep-3, 0x1.55555551c98cp-5 };
-    const negative_reduced = -reduced;
-    const negative_table_0_high = data.t0[negative_table_0_index][1];
-    const negative_table_0_low = data.t0[negative_table_0_index][0];
-    const negative_table_1_high = data.t1[negative_table_1_index][1];
-    const negative_table_1_low = data.t1[negative_table_1_index][0];
-    const negative_table_high = negative_table_0_high * negative_table_1_high;
     const positive_high = table_high * positive_scale;
     const positive_low = table_low * positive_scale;
-    const reduced_positive = reduced;
-    const reduced_negative = negative_reduced;
-    const positive_polynomial = reduced_positive *
-        ((coefficients[0] + reduced_positive * coefficients[1]) +
-            reduced_squared * (coefficients[2] + reduced_positive * coefficients[3]));
-    const negative_polynomial = reduced_negative *
-        ((coefficients[0] + reduced_negative * coefficients[1]) +
-            reduced_squared * (coefficients[2] + reduced_negative * coefficients[3]));
+    const positive_polynomial = reduced *
+        ((coefficients[0] + reduced * coefficients[1]) +
+            reduced_squared * (coefficients[2] + reduced * coefficients[3]));
 
     if (absolute_bits > 0x4014_0000_0000_0000) {
         if (absolute_bits > 0x4042_5e4f_7b27_37fa) {
@@ -335,11 +316,24 @@ pub fn sinhd(value: f64) f64 {
             return accurate_high;
         }
 
+        const negative_integer_index = -integer_index;
+        const negative_table_1_index: usize = @intCast(negative_integer_index & 0x3f);
+        const negative_table_0_index: usize = @intCast((negative_integer_index >> 6) & 0x3f);
+        const negative_exponent: i64 = negative_integer_index >> 12;
+        const negative_scale: f64 = @bitCast(
+            @as(u64, @bitCast(@as(i64, 1022 + negative_exponent))) << 52,
+        );
+        const negative_table_0_high = data.t0[negative_table_0_index][1];
+        const negative_table_0_low = data.t0[negative_table_0_index][0];
+        const negative_table_1_high = data.t1[negative_table_1_index][1];
+        const negative_table_1_low = data.t1[negative_table_1_index][0];
+        const negative_table_high = negative_table_0_high * negative_table_1_high;
         const negative_table_product_high = negative_table_high * negative_scale;
         const negative_table_low_unscaled = negative_table_0_high * negative_table_1_low +
             negative_table_1_high * negative_table_0_low +
             @mulAdd(f64, negative_table_0_high, negative_table_1_high, -negative_table_high);
         const negative_table_product_low = negative_table_low_unscaled * negative_scale;
+        const negative_reduced = -reduced;
         const negative_even = 0x1p+0 + reduced_squared * 0x1.5555555aaaaaep-3;
         const negative_odd = 0x1p-1 + reduced_squared * 0x1.55555551c98cp-5;
         const negative_exponential = negative_table_product_high +
@@ -390,16 +384,29 @@ pub fn sinhd(value: f64) f64 {
         return high;
     }
 
+    const negative_integer_index = -integer_index;
+    const negative_table_1_index: usize = @intCast(negative_integer_index & 0x3f);
+    const negative_table_0_index: usize = @intCast((negative_integer_index >> 6) & 0x3f);
+    const negative_exponent: i64 = negative_integer_index >> 12;
+    const negative_scale: f64 = @bitCast(
+        @as(u64, @bitCast(@as(i64, 1022 + negative_exponent))) << 52,
+    );
+    const negative_table_0_high = data.t0[negative_table_0_index][1];
+    const negative_table_0_low = data.t0[negative_table_0_index][0];
+    const negative_table_1_high = data.t1[negative_table_1_index][1];
+    const negative_table_1_low = data.t1[negative_table_1_index][0];
     const negative_high_unscaled = negative_table_0_high * negative_table_1_high;
     const negative_low_unscaled = negative_table_0_high * negative_table_1_low +
         negative_table_1_high * negative_table_0_low +
         @mulAdd(f64, negative_table_0_high, negative_table_1_high, -negative_high_unscaled);
     const negative_high_scaled = negative_high_unscaled * negative_scale;
     const negative_low_scaled = negative_low_unscaled * negative_scale;
-    const positive_high_scaled = table_high * positive_scale;
-    const positive_low_scaled = table_low * positive_scale;
-    const positive_high_result = positive_high_scaled;
-    const positive_low_result = positive_low_scaled + positive_high_scaled * positive_polynomial;
+    const negative_reduced = -reduced;
+    const negative_polynomial = negative_reduced *
+        ((coefficients[0] + negative_reduced * coefficients[1]) +
+            reduced_squared * (coefficients[2] + negative_reduced * coefficients[3]));
+    const positive_high_result = positive_high;
+    const positive_low_result = positive_low + positive_high * positive_polynomial;
     const negative_high_result = negative_high_scaled;
     const negative_low_result = negative_low_scaled + negative_high_scaled * negative_polynomial;
     var high = positive_high_result - negative_high_result;
@@ -416,8 +423,8 @@ pub fn sinhd(value: f64) f64 {
     const accurate_positive_high = asExpAccurate(
         absolute_value,
         reduction,
-        positive_high_scaled,
-        positive_low_scaled,
+        positive_high,
+        positive_low,
         &accurate_low,
     );
     var accurate_negative_low: f64 = undefined;

@@ -124,6 +124,11 @@ test "Erf scalar families resolve pinned CORE-MATH witnesses" {
     );
 }
 
+test "Erf binary32 preserves minimum-subnormal rounding" {
+    try expectBits(f32, u32, 0x0000_0001, zmath.scalar.erff(@bitCast(@as(u32, 0x0000_0001))));
+    try expectBits(f32, u32, 0x8000_0001, zmath.scalar.erff(@bitCast(@as(u32, 0x8000_0001))));
+}
+
 test "Erf scalar families are odd" {
     const h: f16 = 0.75;
     const f: f32 = 0.75;

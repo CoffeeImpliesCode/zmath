@@ -19,7 +19,7 @@ pub fn coshh(value: f16) f16 {
     const magnitude = bits & coshh_magnitude_mask;
     if (magnitude > coshh_infinity_bits) return @bitCast(bits | coshh_quiet_nan_bit);
     if (magnitude == coshh_infinity_bits) return @bitCast(coshh_infinity_bits);
-    if (magnitude == 0) return @as(f16, 1.0);
+    if (magnitude == 0) return 1.0;
 
     const table1_index: usize = @intCast(magnitude >> 5);
     const table2_index: usize = @intCast(((magnitude >> 10) << 5) | (magnitude & 0x1f));
@@ -46,17 +46,6 @@ const coshf_tb: [32]u64 = .{
     0x3fed5818dcfba487, 0x3fedfc97337b9b5f, 0x3feea4afa2a490da, 0x3fef50765b6e4540,
 };
 
-fn coshfRoundEvenFinite(value: f64) i64 {
-    @setFloatMode(.strict);
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_float: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_float;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0x1p-1 or (fraction == 0x1p-1 and odd)) return truncated + 1;
-    if (fraction < -0x1p-1 or (fraction == -0x1p-1 and odd)) return truncated - 1;
-    return truncated;
-}
-
 fn coshfTableValue(index: i64) f64 {
     const index_bits: u64 = @bitCast(index);
     const exponent_bits: u64 = @bitCast(index >> 5);
@@ -73,13 +62,12 @@ pub fn coshf(value: f32) f32 {
     if (magnitude == coshf_infinity_bits) return @bitCast(coshf_infinity_bits);
 
     const absolute_shifted = bits << 1;
-    const z: f64 = @floatCast(value);
     if (absolute_shifted > 0x8565_a9f8) return @bitCast(coshf_infinity_bits);
     if (absolute_shifted < 0x7c00_0000) {
         if (absolute_shifted < 0x7400_0000) {
             if (absolute_shifted < 0x6600_0000) {
-                const absolute_value: f32 = @bitCast(absolute_shifted >> 1);
-                return @mulAdd(f32, absolute_value, 0x1p-25, 1.0);
+                // The correction is below half an ulp of one in this branch.
+                return 1.0;
             }
             return (0.5 * value) * value + 1.0;
         }
@@ -89,6 +77,7 @@ pub fn coshf(value: f32) f32 {
             0x1.6c16bee4a5986p-10,
             0x1.a0483fc0328f7p-16,
         };
+        const z: f64 = @floatCast(value);
         const z_squared = z * z;
         const z_fourth = z_squared * z_squared;
         return @floatCast(1.0 + z_squared *
@@ -96,15 +85,16 @@ pub fn coshf(value: f32) f32 {
                 z_fourth * (coefficients[2] + z_squared * coefficients[3])));
     }
 
+    const z: f64 = @floatCast(value);
     const iln2 = 0x1.71547652b82fep+5;
     const a = iln2 * z;
-    const ia = coshfRoundEvenFinite(a);
+    // The finite path bounds a to less than 2^23, so the bias has unit spacing.
+    const rounded_bits: u64 = @bitCast(a + 0x1.8p+52);
+    const ia: i64 = @bitCast(rounded_bits -% 0x4338_0000_0000_0000);
     const ia_float: f64 = @floatFromInt(ia);
     const h = a - ia_float;
     const h_squared = h * h;
-    const ja_value = ia_float + 0x1.8p52;
-    const ja_bits: u64 = @bitCast(ja_value);
-    const jp: i64 = @bitCast(ja_bits);
+    const jp: i64 = @bitCast(rounded_bits);
     const jm = -jp;
     const sp = coshfTableValue(jp);
     const sm = coshfTableValue(jm);
@@ -387,11 +377,11 @@ fn coshdExpAccurate(x: f64, t: f64, t_high: f64, t_low: f64, low: *f64) f64 {
     return v_high;
 }
 
-fn coshdDatabase(value: f64, fallback: f64) f64 {
+noinline fn coshdDatabase(value: f64, fallback: f64) f64 {
     @setFloatMode(.strict);
-    var lower: i32 = 0;
-    var upper: i32 = @intCast(coshd_database.len - 1);
-    var middle: i32 = @divTrunc(lower + upper, 2);
+    var lower: isize = 0;
+    var upper: isize = @intCast(coshd_database.len - 1);
+    var middle: isize = @divTrunc(lower + upper, 2);
     const absolute_value = if (value < 0.0) -value else value;
     var iteration: u8 = 0;
     while (iteration < 8 and lower <= upper) : (iteration += 1) {
@@ -408,7 +398,7 @@ fn coshdDatabase(value: f64, fallback: f64) f64 {
     return fallback;
 }
 
-fn coshdZero(value: f64) f64 {
+noinline fn coshdZero(value: f64) f64 {
     @setFloatMode(.strict);
     const square_high = value * value;
     const square_low = @mulAdd(f64, value, value, -square_high);
@@ -441,25 +431,155 @@ fn coshdZero(value: f64) f64 {
     return result_zero + rounded;
 }
 
+noinline fn coshdFinalizeAccurate(value: f64, high_result: f64, low_result: f64) f64 {
+    @setFloatMode(.strict);
+    const result = coshdFastTwoSum(high_result, low_result);
+    const high_bits: u64 = @bitCast(result.high);
+    const low_bits: u64 = @bitCast(result.low);
+    const high_exponent: i64 = @intCast((high_bits >> 52) & 0x7ff);
+    const low_exponent: i64 = @intCast((low_bits >> 52) & 0x7ff);
+    const low_magnitude = (low_bits +% 8) & 0x000f_ffff_ffff_ffff;
+    const rounded = result.high + result.low;
+    if (low_magnitude <= 16 or high_exponent - low_exponent > 103) {
+        return coshdDatabase(value, rounded);
+    }
+    return rounded;
+}
+
+noinline fn coshdLargeAccurate(
+    value: f64,
+    absolute_value: f64,
+    reduction: f64,
+    scaled_sp: f64,
+    table_high_input: f64,
+    table_low_input: f64,
+) f64 {
+    @setFloatMode(.strict);
+    var table_low = table_low_input;
+    var table_high = coshdExpAccurate(
+        absolute_value,
+        reduction,
+        table_high_input,
+        table_low,
+        &table_low,
+    );
+    const normalized = coshdFastTwoSum(table_high, table_low);
+    table_high = normalized.high;
+    table_low = normalized.low;
+    const high_bits: u64 = @bitCast(table_high);
+    const low_bits: u64 = @bitCast(table_low);
+    const high_exponent: i64 = @intCast((high_bits >> 52) & 0x7ff);
+    const low_exponent: i64 = @intCast((low_bits >> 52) & 0x7ff);
+    const low_magnitude = (low_bits +% 8) & 0x000f_ffff_ffff_ffff;
+    table_high += table_low;
+    table_high *= 2.0;
+    table_high *= scaled_sp;
+    if (low_magnitude <= 16 or high_exponent - low_exponent > 103) {
+        return coshdDatabase(value, table_high);
+    }
+    return table_high;
+}
+
+noinline fn coshdMediumAccurate(
+    value: f64,
+    absolute_value: f64,
+    reduction: f64,
+    magnitude: u64,
+    table_high_input: f64,
+    table_low_input: f64,
+    negative_high: f64,
+    sm: f64,
+    table_j0: usize,
+    table_j1: usize,
+) f64 {
+    @setFloatMode(.strict);
+    var table_low = table_low_input;
+    const table_high = coshdExpAccurate(
+        absolute_value,
+        reduction,
+        table_high_input,
+        table_low,
+        &table_low,
+    );
+    var high_result: f64 = undefined;
+    var low_result: f64 = undefined;
+    if (magnitude > 0x403f_6666_6666_6666) {
+        const sum = coshdFastTwoSum(table_high, negative_high);
+        high_result = sum.high;
+        low_result = ((table_high - high_result) + negative_high) + table_low;
+    } else {
+        const q0_low = coshd_t0[table_j0][0];
+        const q1_low = coshd_t1[table_j1][0];
+        const q_product = coshdMuldd(
+            coshd_t0[table_j0][1],
+            q0_low,
+            coshd_t1[table_j1][1],
+            q1_low,
+        );
+        var accurate_negative_low = q_product.low * sm;
+        const accurate_negative_high = coshdExpAccurate(
+            -absolute_value,
+            -reduction,
+            q_product.high * sm,
+            accurate_negative_low,
+            &accurate_negative_low,
+        );
+        const sum = coshdFastTwoSum(table_high, accurate_negative_high);
+        high_result = sum.high;
+        low_result = ((table_high - high_result) + accurate_negative_high) +
+            accurate_negative_low + table_low;
+    }
+    return coshdFinalizeAccurate(value, high_result, low_result);
+}
+
+noinline fn coshdSmallAccurate(
+    value: f64,
+    absolute_value: f64,
+    reduction: f64,
+    table_high_input: f64,
+    table_low_input: f64,
+    negative_high: f64,
+    negative_low_input: f64,
+) f64 {
+    @setFloatMode(.strict);
+    var table_low = table_low_input;
+    var negative_low = negative_low_input;
+    const table_high = coshdExpAccurate(
+        absolute_value,
+        reduction,
+        table_high_input,
+        table_low,
+        &table_low,
+    );
+    const accurate_negative = coshdExpAccurate(
+        -absolute_value,
+        -reduction,
+        negative_high,
+        negative_low,
+        &negative_low,
+    );
+    const sum = coshdFastTwoSum(table_high, accurate_negative);
+    const high_result = sum.high;
+    const low_result =
+        ((table_high - high_result) + accurate_negative) + negative_low + table_low;
+    return coshdFinalizeAccurate(value, high_result, low_result);
+}
+
 /// Correctly rounded binary64 hyperbolic cosine under caller round-to-nearest-even.
 pub fn coshd(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);
     const magnitude = bits & coshd_magnitude_mask;
-    if (magnitude > coshd_infinity_bits) return @bitCast(bits | coshd_quiet_nan_bit);
-    if (magnitude == coshd_infinity_bits) return @bitCast(coshd_infinity_bits);
+    if (magnitude > 0x4086_33ce_8fb9_f87d) {
+        if (magnitude > coshd_infinity_bits) return @bitCast(bits | coshd_quiet_nan_bit);
+        return @bitCast(coshd_infinity_bits);
+    }
 
     const absolute_value: f64 = @bitCast(magnitude);
-    const scale = 0x1.71547652b82fep+12;
-    const reduction_value = @mulAdd(f64, absolute_value, scale, 0x1.8000002p+26);
-    const reduction_bits: u64 = @bitCast(reduction_value);
-    const rounded_reduction_bits = reduction_bits & ~@as(u64, 0x03ff_ffff);
-    const reduction = @as(f64, @bitCast(rounded_reduction_bits)) - 0x1.8p26;
-    const absolute_bits: u64 = @bitCast(absolute_value);
-
-    if (absolute_bits < 0x3fc0_0000_0000_0000) {
-        if (absolute_bits < 0x3e50_0000_0000_0000) {
-            return @mulAdd(f64, absolute_value, 0x1p-55, 1.0);
+    if (magnitude < 0x3fc0_0000_0000_0000) {
+        if (magnitude < 0x3e50_0000_0000_0000) {
+            // The correction is below half an ulp of one in this branch.
+            return 1.0;
         }
         const coefficients = [5]f64{
             0x1p-1,
@@ -475,24 +595,23 @@ pub fn coshd(value: f64) f64 {
         const error_bound = square * 0x1.84p-51;
         const lower = 1.0 + (polynomial - error_bound);
         const upper = 1.0 + (polynomial + error_bound);
-        if (lower == upper) return lower;
-        return coshdZero(value);
+        if (lower == upper) {
+            return lower;
+        } else {
+            @branchHint(.cold);
+            return coshdZero(value);
+        }
     }
 
-    if (absolute_bits > 0x4086_33ce_8fb9_f87d) return @bitCast(coshd_infinity_bits);
-
+    const scale = 0x1.71547652b82fep+12;
+    const reduction_value = @mulAdd(f64, absolute_value, scale, 0x1.8000002p+26);
+    const reduction_bits: u64 = @bitCast(reduction_value);
+    const rounded_reduction_bits = reduction_bits & ~@as(u64, 0x03ff_ffff);
+    const reduction = @as(f64, @bitCast(rounded_reduction_bits)) - 0x1.8p26;
     const il: i64 = @intCast((reduction_bits << 14) >> 40);
-    const jl = -il;
     const table_i1: usize = @intCast(@as(u64, @bitCast(il)) & 0x3f);
     const table_i0: usize = @intCast(@as(u64, @bitCast(il >> 6)) & 0x3f);
     const ie: i64 = il >> 12;
-    const table_j1: usize = @intCast(@as(u64, @bitCast(jl)) & 0x3f);
-    const table_j0: usize = @intCast(@as(u64, @bitCast(jl >> 6)) & 0x3f);
-    const je: i64 = jl >> 12;
-    const sp_bits = (@as(u64, @bitCast(@as(i64, 1022 + ie)))) << 52;
-    const sm_bits = (@as(u64, @bitCast(@as(i64, 1022 + je)))) << 52;
-    const sp: f64 = @bitCast(sp_bits);
-    const sm: f64 = @bitCast(sm_bits);
     const t0_high = coshd_t0[table_i0][1];
     const t0_low = coshd_t0[table_i0][0];
     const t1_high = coshd_t1[table_i1][1];
@@ -504,71 +623,73 @@ pub fn coshd(value: f64) f64 {
     const log_two_low = 0x1.718432a1b0e26p-47;
     const delta = (absolute_value - log_two_high * reduction) + log_two_low * reduction;
     const delta_square = delta * delta;
-    const minus_delta = -delta;
     const coefficients = [4]f64{ 1.0, 0.5, 0x1.5555555aaaaaep-3, 0x1.55555551c98cp-5 };
     const positive_polynomial = delta * ((coefficients[0] + delta * coefficients[1]) +
         delta_square * (coefficients[2] + delta * coefficients[3]));
-    var high_result: f64 = undefined;
-    var low_result: f64 = undefined;
 
-    if (absolute_bits > 0x4014_0000_0000_0000) {
-        if (absolute_bits > 0x4042_5e4f_7b27_37fa) {
-            const scaled_sp_bits = (@as(u64, @intCast(1021 + ie))) << 52;
-            const scaled_sp: f64 = @bitCast(scaled_sp_bits);
-            const error_bound = 0.12e-18 * table_high;
-            const lower = table_high + (table_low + table_high * positive_polynomial - error_bound);
-            const upper = table_high + (table_low + table_high * positive_polynomial + error_bound);
-            if (lower == upper) return (lower * scaled_sp) * 2.0;
-            table_high = coshdExpAccurate(absolute_value, reduction, table_high, table_low, &table_low);
-            const normalized = coshdFastTwoSum(table_high, table_low);
-            table_high = normalized.high;
-            table_low = normalized.low;
-            const high_bits: u64 = @bitCast(table_high);
-            const low_bits: u64 = @bitCast(table_low);
-            const high_exponent: i64 = @intCast((high_bits >> 52) & 0x7ff);
-            const low_exponent: i64 = @intCast((low_bits >> 52) & 0x7ff);
-            const low_magnitude = (low_bits +% 8) & 0x000f_ffff_ffff_ffff;
-            table_high += table_low;
-            table_high *= 2.0;
-            table_high *= scaled_sp;
-            if (low_magnitude <= 16 or high_exponent - low_exponent > 103) return coshdDatabase(value, table_high);
-            return table_high;
+    if (magnitude > 0x4042_5e4f_7b27_37fa) {
+        const scaled_sp_bits = (@as(u64, @intCast(1021 + ie))) << 52;
+        const scaled_sp: f64 = @bitCast(scaled_sp_bits);
+        const error_bound = 0.12e-18 * table_high;
+        const lower = table_high + (table_low + table_high * positive_polynomial - error_bound);
+        const upper = table_high + (table_low + table_high * positive_polynomial + error_bound);
+        if (lower == upper) {
+            return (lower * scaled_sp) * 2.0;
+        } else {
+            @branchHint(.cold);
+            return coshdLargeAccurate(
+                value,
+                absolute_value,
+                reduction,
+                scaled_sp,
+                table_high,
+                table_low,
+            );
         }
+    }
+
+    const sp_bits = (@as(u64, @bitCast(@as(i64, 1022 + ie)))) << 52;
+    const sp: f64 = @bitCast(sp_bits);
+    const jl = -il;
+    const table_j1: usize = @intCast(@as(u64, @bitCast(jl)) & 0x3f);
+    const table_j0: usize = @intCast(@as(u64, @bitCast(jl >> 6)) & 0x3f);
+    const je: i64 = jl >> 12;
+    const sm_bits = (@as(u64, @bitCast(@as(i64, 1022 + je)))) << 52;
+    const sm: f64 = @bitCast(sm_bits);
+    const minus_delta = -delta;
+
+    if (magnitude > 0x4014_0000_0000_0000) {
         const q0_high = coshd_t0[table_j0][1];
         const q1_high = coshd_t1[table_j1][1];
         const q_high = q0_high * q1_high;
         table_high *= sp;
         table_low *= sp;
         const negative_high = q_high * sm;
-        const negative_polynomial = minus_delta * ((coefficients[0] + minus_delta * coefficients[1]) +
-            delta_square * (coefficients[2] + minus_delta * coefficients[3]));
+        const negative_polynomial = minus_delta *
+            ((coefficients[0] + minus_delta * coefficients[1]) +
+                delta_square * (coefficients[2] + minus_delta * coefficients[3]));
         const negative_exp = negative_high + negative_high * negative_polynomial;
-        high_result = table_high;
-        low_result = (table_low + negative_exp) + table_high * positive_polynomial;
+        const high_result = table_high;
+        const low_result = (table_low + negative_exp) + table_high * positive_polynomial;
         const error_bound = 0x1.202p-63 * high_result;
         const lower = high_result + (low_result - error_bound);
         const upper = high_result + (low_result + error_bound);
-        if (lower == upper) return lower;
-        table_high = coshdExpAccurate(absolute_value, reduction, table_high, table_low, &table_low);
-        if (absolute_bits > 0x403f_6666_6666_6666) {
-            const sum = coshdFastTwoSum(table_high, negative_high);
-            high_result = sum.high;
-            low_result = ((table_high - high_result) + negative_high) + table_low;
+        if (lower == upper) {
+            return lower;
         } else {
-            const q0_low = coshd_t0[table_j0][0];
-            const q1_low = coshd_t1[table_j1][0];
-            const q_product = coshdMuldd(q0_high, q0_low, q1_high, q1_low);
-            var accurate_negative_low = q_product.low * sm;
-            const accurate_negative_high = coshdExpAccurate(
-                -absolute_value,
-                -reduction,
-                q_product.high * sm,
-                accurate_negative_low,
-                &accurate_negative_low,
+            @branchHint(.cold);
+            return coshdMediumAccurate(
+                value,
+                absolute_value,
+                reduction,
+                magnitude,
+                table_high,
+                table_low,
+                negative_high,
+                sm,
+                table_j0,
+                table_j1,
             );
-            const sum = coshdFastTwoSum(table_high, accurate_negative_high);
-            high_result = sum.high;
-            low_result = ((table_high - high_result) + accurate_negative_high) + accurate_negative_low + table_low;
         }
     } else {
         const q0_high = coshd_t0[table_j0][1];
@@ -579,33 +700,33 @@ pub fn coshd(value: f64) f64 {
         table_high *= sp;
         table_low *= sp;
         const negative_high = negative_product.high * sm;
-        var negative_low = negative_product.low * sm;
-        const negative_polynomial = minus_delta * ((coefficients[0] + minus_delta * coefficients[1]) +
-            delta_square * (coefficients[2] + minus_delta * coefficients[3]));
+        const negative_low = negative_product.low * sm;
+        const negative_polynomial = minus_delta *
+            ((coefficients[0] + minus_delta * coefficients[1]) +
+                delta_square * (coefficients[2] + minus_delta * coefficients[3]));
         const positive_high = table_high;
         const positive_low = table_low + table_high * positive_polynomial;
         const negative_sum_high = negative_high;
         const negative_sum_low = negative_low + negative_high * negative_polynomial;
-        high_result = positive_high + negative_sum_high;
-        low_result = ((positive_high - high_result) + negative_sum_high) + negative_sum_low + positive_low;
+        const high_result = positive_high + negative_sum_high;
+        const low_result =
+            ((positive_high - high_result) + negative_sum_high) + negative_sum_low + positive_low;
         const error_bound = 0x1.c0ap-62 * high_result;
         const lower = high_result + (low_result - error_bound);
         const upper = high_result + (low_result + error_bound);
-        if (lower == upper) return lower;
-        table_high = coshdExpAccurate(absolute_value, reduction, table_high, table_low, &table_low);
-        const accurate_negative = coshdExpAccurate(-absolute_value, -reduction, negative_high, negative_low, &negative_low);
-        const sum = coshdFastTwoSum(table_high, accurate_negative);
-        high_result = sum.high;
-        low_result = ((table_high - high_result) + accurate_negative) + negative_low + table_low;
+        if (lower == upper) {
+            return lower;
+        } else {
+            @branchHint(.cold);
+            return coshdSmallAccurate(
+                value,
+                absolute_value,
+                reduction,
+                table_high,
+                table_low,
+                negative_high,
+                negative_low,
+            );
+        }
     }
-
-    const result = coshdFastTwoSum(high_result, low_result);
-    const high_bits: u64 = @bitCast(result.high);
-    const low_bits: u64 = @bitCast(result.low);
-    const high_exponent: i64 = @intCast((high_bits >> 52) & 0x7ff);
-    const low_exponent: i64 = @intCast((low_bits >> 52) & 0x7ff);
-    const low_magnitude = (low_bits +% 8) & 0x000f_ffff_ffff_ffff;
-    const rounded = result.high + result.low;
-    if (low_magnitude <= 16 or high_exponent - low_exponent > 103) return coshdDatabase(value, rounded);
-    return rounded;
 }

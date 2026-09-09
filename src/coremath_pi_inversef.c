@@ -433,6 +433,10 @@ float zmath_core_atan2pif(float y, float x){
     cd4 += z4*cd6;
     cd0 += z8*cd4;
     r = cn0/cd0;
+  } else if (gt || (ux >> 31)) {
+    // With z2 <= 2^-54, atan(|z|)/pi is below the f32 midpoint
+    // distance from 0.5 or 1; positive-x tiny angles remain nonzero.
+    return off[i];
   }
   r = z*r + off[i];
   zmath_pi_atan2pif_b64u64_u res = {.f = r};

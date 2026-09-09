@@ -65,16 +65,16 @@ pub fn fmah(a: f16, b: f16, c: f16) f16 {
     // 5 - (-48) = 53, so the larger addend occupies at most 64 bits and
     // their exact sum at most 65 bits. addDyadic cannot discard a bit here;
     // packDyadic performs the only RNE rounding.
-    const first = narrow.finiteDyadic(narrow.H, narrow.decode(narrow.H, a_bits));
-    const second = narrow.finiteDyadic(narrow.H, narrow.decode(narrow.H, b_bits));
-    const addend = narrow.finiteDyadic(narrow.H, narrow.decode(narrow.H, c_bits));
+    const first = narrow.finiteDyadic(narrow.binary16_format, narrow.decode(narrow.binary16_format, a_bits));
+    const second = narrow.finiteDyadic(narrow.binary16_format, narrow.decode(narrow.binary16_format, b_bits));
+    const addend = narrow.finiteDyadic(narrow.binary16_format, narrow.decode(narrow.binary16_format, c_bits));
     const product = narrow.multiplyDyadic(first, second);
     var result = narrow.addDyadic(product, addend);
     if (result.magnitude == 0) {
         // Exact cancellation produces +0. Only two negative zero terms produce -0.
         result.negative = product_sign and c_sign;
     }
-    return @bitCast(narrow.packDyadic(narrow.H, result));
+    return @bitCast(narrow.packDyadic(narrow.binary16_format, result));
 }
 
 test "binary16 fused multiply-add avoids double rounding at the normal boundary" {

@@ -888,10 +888,12 @@ double zmath_core_lgammad(double x, int *sign_out){
 #ifdef CORE_MATH_SUPPORT_ERRNO
     errno = ERANGE;
 #endif
-    if(t.u>>63)
-      return 1.0/0.0; // huge negative integer
-    else
+    if(t.u>>63) {
+      *sign_out = -1; // huge negative integer pole
+      return 1.0/0.0;
+    } else {
       return 0x1.fp1023 * 0x1.fp1023; // huge positive integer
+    }
   }
   double fx = __builtin_floor(x);
   if(__builtin_expect(fx==x, 0)){ /* x is integer */

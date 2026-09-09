@@ -26,11 +26,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-pub const q1: [5]f64 = .{
-    0x1p0,                0x1p0, 0x1p-1, 0x1.5555555995d37p-3,
-    0x1.55555558489dcp-5,
-};
-
 pub const t1: [64][2]f64 = .{
     .{ 0x1p+0, 0x0p+0 },
     .{ 0x1.02c9a3e778061p+0, -0x1.19083535b085dp-56 },
@@ -495,11 +490,4 @@ pub const exceptions_tiny: [74][3]f64 = .{
     .{ 0x1.e73eb1f1b7f2ap-60, 0x1.187b0ff7df629p-58, -0x1.f42eb87e8p-166 },
     .{ 0x1.735b5da21781bp-59, 0x1.ab8a597feec6fp-58, -0x1.148856ac4p-165 },
     .{ 0x1.9f388b5863db3p-56, 0x1.de0a6b501ba08p-55, 0x1.561de50cp-166 },
-};
-
-pub const exact_powers: [16]f64 = .{
-    0x0p+0,             0x1.2p+3,            0x1.8cp+6,            0x1.f38p+9,
-    0x1.3878p+13,       0x1.869fp+16,        0x1.e847ep+19,        0x1.312cfep+23,
-    0x1.7d783fcp+26,    0x1.dcd64ff8p+29,    0x1.2a05f1ff8p+33,    0x1.74876e7ffp+36,
-    0x1.d1a94a1ffep+39, 0x1.2309ce53ffep+43, 0x1.6bcc41e8fffcp+46, 0x1.c6bf52633fff8p+49,
 };

@@ -124,7 +124,7 @@ pub fn log1pf(value: f32) f32 {
     if (magnitude < 0x3c88_0000) {
         if (magnitude < 0x3300_0000) {
             if (magnitude == 0) return value;
-            return @mulAdd(f32, value, -value, value);
+            return value;
         }
 
         const value_squared = widened * widened;

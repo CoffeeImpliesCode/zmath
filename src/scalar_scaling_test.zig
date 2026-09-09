@@ -84,6 +84,14 @@ test "binary16 scaling crosses range boundaries with ties to even" {
     try expectAllH(0xfbff, 1, 0xfc00);
     try expectHBits(0x7c00, scaling.scalblnh(@bitCast(@as(u16, 0x3c00)), std.math.maxInt(i64)));
     try expectHBits(0x8000, scaling.scalblnh(@bitCast(@as(u16, 0xbc00)), std.math.minInt(i64)));
+    try expectHBits(
+        0x7c00,
+        scaling.scalblnh(@bitCast(@as(u16, 0x0001)), std.math.maxInt(i64)),
+    );
+    try expectHBits(
+        0x8000,
+        scaling.scalblnh(@bitCast(@as(u16, 0x8001)), std.math.minInt(i64)),
+    );
 }
 
 test "binary32 scaling preserves identities and special encodings" {
@@ -120,6 +128,14 @@ test "binary32 scaling crosses range boundaries with ties to even" {
     try expectFBits(
         0x8000_0000,
         scaling.scalblnf(@bitCast(@as(u32, 0xbf80_0000)), std.math.minInt(i64)),
+    );
+    try expectFBits(
+        0x7f80_0000,
+        scaling.scalblnf(@bitCast(@as(u32, 0x0000_0001)), std.math.maxInt(i64)),
+    );
+    try expectFBits(
+        0x8000_0000,
+        scaling.scalblnf(@bitCast(@as(u32, 0x8000_0001)), std.math.minInt(i64)),
     );
 }
 
@@ -161,6 +177,20 @@ test "binary64 scaling crosses range boundaries with ties to even" {
         0x8000_0000_0000_0000,
         scaling.scalblnd(
             @bitCast(@as(u64, 0xbff0_0000_0000_0000)),
+            std.math.minInt(i64),
+        ),
+    );
+    try expectDBits(
+        0x7ff0_0000_0000_0000,
+        scaling.scalblnd(
+            @bitCast(@as(u64, 0x0000_0000_0000_0001)),
+            std.math.maxInt(i64),
+        ),
+    );
+    try expectDBits(
+        0x8000_0000_0000_0000,
+        scaling.scalblnd(
+            @bitCast(@as(u64, 0x8000_0000_0000_0001)),
             std.math.minInt(i64),
         ),
     );

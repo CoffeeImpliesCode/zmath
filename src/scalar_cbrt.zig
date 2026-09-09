@@ -114,8 +114,10 @@ pub fn cbrtf(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);
     const magnitude = bits & magnitude_mask_f;
-    if (magnitude > infinity_bits_f) return @bitCast(bits | quiet_nan_bit_f);
-    if (magnitude == infinity_bits_f or magnitude == 0) return value;
+    if (magnitude -% 1 >= infinity_bits_f - 1) {
+        if (magnitude > infinity_bits_f) return @bitCast(bits | quiet_nan_bit_f);
+        return value;
+    }
 
     const escale = [_]f64{
         1.0,
@@ -203,8 +205,6 @@ pub fn cbrtd(value: f64) f64 {
     };
     const correction_u0 = 0x1.5555555555555p-2;
     const correction_u1 = 0x1.c71c71c71c71cp-3;
-    const reciprocal_scales = [_]f64{ 1.0, -1.0, 0.5, -0.5, 0.25, -0.25 };
-
     const mantissa_mask: u64 = 0x000f_ffff_ffff_ffff;
     var mantissa = bits & mantissa_mask;
     var exponent: u64 = (bits >> 52) & 0x7ff;
@@ -232,8 +232,11 @@ pub fn cbrtd(value: f64) f64 {
     const normalized: f64 = @bitCast(normalized_bits);
     const sign: u64 = bits >> 63;
     const reciprocal = 1.0 / normalized;
-    const reciprocal_scale = reciprocal_scales[(exponent_remainder << 1) | sign];
-    const reciprocal_scaled = reciprocal * reciprocal_scale;
+    // The reciprocal of a normalized magnitude in [1,2) is normal and at least
+    // 0.5, so the exact factor (-1)^sign * 2^-exponent_remainder is an exact
+    // exponent decrement plus a sign injection.
+    const reciprocal_scaled: f64 = @bitCast((@as(u64, @bitCast(reciprocal)) -%
+        (exponent_remainder << 52)) | (sign << 63));
     const normalized_squared = normalized * normalized;
     const coefficient_0 = coefficients[0] + normalized * coefficients[1];
     const coefficient_2 = coefficients[2] + normalized * coefficients[3];

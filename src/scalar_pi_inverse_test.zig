@@ -333,6 +333,74 @@ test "atan2pi finite kernels report resolved values" {
     );
 }
 
+test "atan2pi binary32 selects the quotient operands for unequal magnitudes" {
+    // The kernel divides the larger magnitude by the smaller one, so these
+    // binary32 pairs cover both comparisons with unequal magnitudes: adjacent
+    // encodings, an exact ratio of two, and a wide ratio in every quadrant.
+    try expectAtan2F(0x3e80_0001, pi.atan2pif(f(0x3f80_0001), f(0x3f80_0000)));
+    try expectAtan2F(0x3e80_0000, pi.atan2pif(f(0x3f80_0000), f(0x3f7f_ffff)));
+    try expectAtan2F(0x3eb4_6fec, pi.atan2pif(f(0x4000_0000), f(0x3f80_0000)));
+    try expectAtan2F(0x3ea0_2ba4, pi.atan2pif(f(0x3fc0_0000), f(0x3f80_0000)));
+    try expectAtan2F(0x3f25_c80a, pi.atan2pif(f(0x4000_0000), f(0xbf80_0000)));
+    try expectAtan2F(0xbeb4_6fec, pi.atan2pif(f(0xc000_0000), f(0x3f80_0000)));
+    try expectAtan2F(0xbf25_c80a, pi.atan2pif(f(0xc000_0000), f(0xbf80_0000)));
+    try expectAtan2F(0x3eb4_6fec, pi.atan2pif(f(0x3f00_0000), f(0x3e80_0000)));
+}
+
+test "atan2pi binary32 rounds exponent-gap axis neighbors" {
+    try expectAtan2F(0x3f00_0000, pi.atan2pif(f(0x3f80_0000), f(0x3100_0000)));
+    try expectAtan2F(0x3f00_0000, pi.atan2pif(f(0x3f80_0000), f(0x317f_ffff)));
+    try expectAtan2F(0x3f00_0000, pi.atan2pif(f(0x3f80_0000), f(0x3180_0000)));
+    try expectAtan2F(0x3f00_0000, pi.atan2pif(f(0x3f80_0000), f(0x0000_0001)));
+    try expectAtan2F(0xbf00_0000, pi.atan2pif(f(0xbf80_0000), f(0x3100_0000)));
+    try expectAtan2F(0x3f80_0000, pi.atan2pif(f(0x3100_0000), f(0xbf80_0000)));
+    try expectAtan2F(0xbf80_0000, pi.atan2pif(f(0xb100_0000), f(0xbf80_0000)));
+    try expectAtan2F(0x3f00_0000, pi.atan2pif(f(0x3f80_0000), f(0x3300_0000)));
+    try expectAtan2F(0x3f00_0000, pi.atan2pif(f(0x3f80_0000), f(0x3200_0000)));
+    try expectAtan2F(0x3f80_0000, pi.atan2pif(f(0x3200_0000), f(0xbf80_0000)));
+    try expectAtan2F(0x3eff_ffff, pi.atan2pif(f(0x3f80_0000), f(0x3380_0000)));
+    try expectAtan2F(0x3f80_0000, pi.atan2pif(f(0x3380_0000), f(0xbf80_0000)));
+    try expectAtan2F(0x3f7f_ffff, pi.atan2pif(f(0x3400_0000), f(0xbf80_0000)));
+}
+
+test "atan2pi wide gaps use certified principal bounds" {
+    try expectAtan2D(
+        0x3fe0_0000_0000_0000,
+        pi.atan2pid(d(0x3ff0_0000_0000_0000), d(0x3c80_0000_0000_0000)),
+    );
+    try expectAtan2D(
+        0x3fe0_0000_0000_0000,
+        pi.atan2pid(d(0x3ff0_0000_0000_0000), d(0xbc80_0000_0000_0000)),
+    );
+    try expectAtan2D(
+        0x3ff0_0000_0000_0000,
+        pi.atan2pid(d(0x3c80_0000_0000_0000), d(0xbff0_0000_0000_0000)),
+    );
+    try expectAtan2D(
+        0x39c4_5f30_6dc9_c883,
+        pi.atan2pid(d(0x39e0_0000_0000_0000), d(0x3ff0_0000_0000_0000)),
+    );
+    try expectAtan2D(
+        0xb9c4_5f30_6dc9_c883,
+        pi.atan2pid(d(0xb9e0_0000_0000_0000), d(0x3ff0_0000_0000_0000)),
+    );
+    try expectAtan2D(
+        0x0000_0000_0000_0001,
+        pi.atan2pid(d(0x0000_0000_0000_0002), d(0x3ff0_0000_0000_0000)),
+    );
+}
+
+test "atan2pi normalizes subnormal operands before fast interval" {
+    try expectAtan2D(
+        0x3ff0_0000_0000_0000,
+        pi.atan2pid(d(0x0000_0000_0000_0001), d(0x8020_0000_0000_0000)),
+    );
+    try expectAtan2D(
+        0xbff0_0000_0000_0000,
+        pi.atan2pid(d(0x8000_0000_0000_0001), d(0x8020_0000_0000_0000)),
+    );
+}
+
 test "atan2pi binary64 forced ambiguity reports unresolved" {
     const positive = pi.testing.forcedAmbiguity(1.0, 1.0);
     const negative = pi.testing.forcedAmbiguity(-1.0, -1.0);

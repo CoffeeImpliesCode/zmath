@@ -170,6 +170,56 @@ test "square root corrects the adjacent destination result from an exact residua
     try expectF(0x3f80_0001, narrow.fsqrt(d(0x3ff0_0000_2000_0011)));
 }
 
+test "square root rounds the exact midpoint once at both parity choices" {
+    // The source-format roots at these midpoints would lose the one-bit side.
+    try expectH(0x3c00, narrow.f16sqrtf32(f(0x3f80_2001)));
+    try expectH(0x3c00, narrow.f16sqrtf32(f(0x3f80_2002)));
+    try expectH(0x3c01, narrow.f16sqrtf32(f(0x3f80_2003)));
+    try expectH(0x3c01, narrow.f16sqrtf32(f(0x3f80_6011)));
+    try expectH(0x3c02, narrow.f16sqrtf32(f(0x3f80_6012)));
+    try expectH(0x3c02, narrow.f16sqrtf32(f(0x3f80_6013)));
+
+    try expectH(0x3c00, narrow.f16sqrtf64(d(0x3ff0_0400_3fff_ffff)));
+    try expectH(0x3c00, narrow.f16sqrtf64(d(0x3ff0_0400_4000_0000)));
+    try expectH(0x3c01, narrow.f16sqrtf64(d(0x3ff0_0400_4000_0001)));
+    try expectH(0x3c01, narrow.f16sqrtf64(d(0x3ff0_0c02_3fff_ffff)));
+    try expectH(0x3c02, narrow.f16sqrtf64(d(0x3ff0_0c02_4000_0000)));
+    try expectH(0x3c02, narrow.f16sqrtf64(d(0x3ff0_0c02_4000_0001)));
+
+    try expectF(0x3f80_0000, narrow.f32sqrtf64(d(0x3ff0_0000_2000_000f)));
+    try expectF(0x3f80_0000, narrow.f32sqrtf64(d(0x3ff0_0000_2000_0010)));
+    try expectF(0x3f80_0001, narrow.f32sqrtf64(d(0x3ff0_0000_2000_0011)));
+    try expectF(0x3f80_0001, narrow.f32sqrtf64(d(0x3ff0_0000_6000_008f)));
+    try expectF(0x3f80_0002, narrow.f32sqrtf64(d(0x3ff0_0000_6000_0090)));
+    try expectF(0x3f80_0002, narrow.f32sqrtf64(d(0x3ff0_0000_6000_0091)));
+}
+
+test "square root rounds once at zero and the least subnormal" {
+    // 2^-50 and 2^-300 are exact squares of the destination midpoints.
+    try expectH(0x0000, narrow.f16sqrtf32(f(0x267f_ffff)));
+    try expectH(0x0000, narrow.f16sqrtf32(f(0x2680_0000)));
+    try expectH(0x0001, narrow.f16sqrtf32(f(0x2680_0001)));
+    try expectH(0x0000, narrow.f16sqrtf64(d(0x3ccf_ffff_ffff_ffff)));
+    try expectH(0x0000, narrow.f16sqrtf64(d(0x3cd0_0000_0000_0000)));
+    try expectH(0x0001, narrow.f16sqrtf64(d(0x3cd0_0000_0000_0001)));
+    try expectF(0x0000_0000, narrow.f32sqrtf64(d(0x2d2f_ffff_ffff_ffff)));
+    try expectF(0x0000_0000, narrow.f32sqrtf64(d(0x2d30_0000_0000_0000)));
+    try expectF(0x0000_0001, narrow.f32sqrtf64(d(0x2d30_0000_0000_0001)));
+}
+
+test "square root rounds at the subnormal to normal boundary" {
+    try expectH(0x03ff, narrow.f16sqrtf32(f(0x317f_c003)));
+    try expectH(0x0400, narrow.f16sqrtf32(f(0x317f_c004)));
+    try expectH(0x0400, narrow.f16sqrtf32(f(0x317f_c005)));
+    try expectH(0x03ff, narrow.f16sqrtf64(d(0x3e2f_f800_7fff_ffff)));
+    try expectH(0x0400, narrow.f16sqrtf64(d(0x3e2f_f800_8000_0000)));
+    try expectH(0x0400, narrow.f16sqrtf64(d(0x3e2f_f800_8000_0001)));
+
+    try expectF(0x007f_ffff, narrow.f32sqrtf64(d(0x302f_ffff_c000_001f)));
+    try expectF(0x0080_0000, narrow.f32sqrtf64(d(0x302f_ffff_c000_0020)));
+    try expectF(0x0080_0000, narrow.f32sqrtf64(d(0x302f_ffff_c000_0021)));
+}
+
 test "gradual underflow and overflow ties are rounded in the destination format" {
     const zero_f = f(0x0000_0000);
     try expectH(0x0000, narrow.f16addf32(f(0x3300_0000), zero_f));

@@ -1344,38 +1344,48 @@ const expf_scale_bits = [64]u64{
     0x3fffa7c1819e90d8,
 };
 
-pub fn expf(value: f32) f32 {
-    const bits: u32 = @bitCast(value);
-    const magnitude = bits & magnitude_mask_f;
-
-    if (magnitude == 0) return 1.0;
-    if (magnitude > infinity_bits_f) {
-        return @bitCast(bits | expf_quiet_nan_bit);
-    }
-    if (magnitude == infinity_bits_f) {
-        if ((bits & sign_mask_f) == 0) return @bitCast(infinity_bits_f);
-        return 0.0;
-    }
-
-    return expfFinite(value, bits);
+noinline fn expfAccurate(value_wide: f64, correction: f64, scale: f64) f32 {
+    @setFloatMode(.strict);
+    const inverse_ln2_high: f64 = 0x1.7154765p+0;
+    const inverse_ln2_low: f64 = 0x1.5c17f0bbbe88p-31;
+    const reduced =
+        (inverse_ln2_high * value_wide + correction) +
+        inverse_ln2_low * value_wide;
+    const reduced_squared = reduced * reduced;
+    const scaled_remainder = scale * reduced;
+    const result = scale +
+        scaled_remainder *
+            ((expf_accurate_coefficients[0] +
+                reduced * expf_accurate_coefficients[1]) +
+                reduced_squared *
+                    ((expf_accurate_coefficients[2] +
+                        reduced * expf_accurate_coefficients[3]) +
+                        reduced_squared *
+                            (expf_accurate_coefficients[4] +
+                                reduced * expf_accurate_coefficients[5])));
+    return @floatCast(result);
 }
 
-fn expfFinite(value: f32, bits: u32) f32 {
+pub fn expf(value: f32) f32 {
     @setFloatMode(.strict);
+    const bits: u32 = @bitCast(value);
 
     const inverse_ln2: f64 = 0x1.71547652b82fep+0;
     const rounding_constant: f64 = 0x1.8p46;
-    const value_wide: f64 = value;
-    const scaled = inverse_ln2 * value_wide;
-    const rounded = scaled + rounding_constant;
-    const rounded_bits: u64 = @bitCast(rounded);
     const absolute_bits = bits << 1;
 
-    if (absolute_bits > 0x8562_e42e or absolute_bits < 0x6f93_813e) {
+    if (absolute_bits -% 0x6f93_813e > 0x8562_e42e - 0x6f93_813e) {
+        @branchHint(.unlikely);
         if (absolute_bits < 0x6f93_813e) {
+            if (absolute_bits <= 0x6600_0000) return 1.0;
+            const value_wide: f64 = value;
             return @floatCast(1.0 + value_wide * (1.0 + value_wide * 0.5));
         }
+        if (absolute_bits > 0xff00_0000) return @bitCast(bits | expf_quiet_nan_bit);
         if (bits > 0xc2ce_8ec0) {
+            // exp(-104) < 2^-150, below the binary32 zero midpoint.
+            if (bits >= 0xc2d0_0000) return 0.0;
+            const value_wide: f64 = value;
             var result = 0x1p-149 +
                 (value_wide + 0x1.9d1d9fccf477p+6) * 0x1.71547652b82edp-150;
             if (result < 0x1p-151) result = 0x1p-151;
@@ -1385,44 +1395,28 @@ fn expfFinite(value: f32, bits: u32) f32 {
             return @bitCast(infinity_bits_f);
         }
     }
+    const value_wide: f64 = value;
+    const scaled = inverse_ln2 * value_wide;
+    const rounded = scaled + rounding_constant;
+    const rounded_bits: u64 = @bitCast(rounded);
 
     const correction = rounding_constant - rounded;
-    var reduced = scaled + correction;
+    const reduced = scaled + correction;
     const table_index: u6 = @truncate(rounded_bits);
     const exponent_bits = (rounded_bits >> 6) << 52;
     const scale_bits = expf_scale_bits[table_index] +% exponent_bits;
     const scale: f64 = @bitCast(scale_bits);
-    var reduced_squared = reduced * reduced;
-    var result =
-        ((expf_fast_coefficients[0] + reduced * expf_fast_coefficients[1]) +
-            reduced_squared *
-                (expf_fast_coefficients[2] + reduced * expf_fast_coefficients[3])) *
-        scale;
-    var upper: f32 = @floatCast(result);
-    const lower: f32 = @floatCast(result - result * 1.45e-10);
-
-    if (upper != lower) {
-        const inverse_ln2_high: f64 = 0x1.7154765p+0;
-        const inverse_ln2_low: f64 = 0x1.5c17f0bbbe88p-31;
-        reduced =
-            (inverse_ln2_high * value_wide + correction) +
-            inverse_ln2_low * value_wide;
-        reduced_squared = reduced * reduced;
-        const scaled_remainder = scale * reduced;
-        result = scale +
-            scaled_remainder *
-                ((expf_accurate_coefficients[0] +
-                    reduced * expf_accurate_coefficients[1]) +
-                    reduced_squared *
-                        ((expf_accurate_coefficients[2] +
-                            reduced * expf_accurate_coefficients[3]) +
-                            reduced_squared *
-                                (expf_accurate_coefficients[4] +
-                                    reduced * expf_accurate_coefficients[5])));
-        upper = @floatCast(result);
-    }
-
-    return upper;
+    var polynomial = @mulAdd(f64, expf_fast_coefficients[3], reduced, expf_fast_coefficients[2]);
+    polynomial = @mulAdd(f64, polynomial, reduced, expf_fast_coefficients[1]);
+    polynomial = @mulAdd(f64, polynomial, reduced, expf_fast_coefficients[0]);
+    const result = polynomial * scale;
+    // Horner changes the original evaluation by less than 16u, u=2^-53.
+    // Its total relative error remains below 2^-32. Every binary32
+    // midpoint has 28 low binary64 bits clear; 2^21 adjacent encodings
+    // enclose the error on either side, including binade transitions.
+    const result_bits: u64 = @bitCast(result);
+    if (((result_bits +% 0x0020_0000) & 0x0fff_ffff) > 0x0040_0000) return @floatCast(result);
+    return expfAccurate(value_wide, correction, scale);
 }
 // Correctly rounded binary64 exponential, ported from CORE-MATH revision
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa.
@@ -1468,42 +1462,139 @@ const expd_database: [51]f64 = .{
 };
 
 // Double-double approximations of 2^(i / 2^6), for 0 <= i < 64.
-const expd_table_0: [64]ExpdDoubleDouble = .{ .{ .high = 0x1p+0, .low = 0x0p+0 }, .{ .high = 0x1.02c9a3e778061p+0, .low = -0x1.19083535b085ep-56 }, .{ .high = 0x1.059b0d3158574p+0, .low = 0x1.d73e2a475b466p-55 }, .{ .high = 0x1.0874518759bc8p+0, .low = 0x1.186be4bb285p-57 }, .{ .high = 0x1.0b5586cf9890fp+0, .low = 0x1.8a62e4adc610ap-54 }, .{ .high = 0x1.0e3ec32d3d1a2p+0, .low = 0x1.03a1727c57b52p-59 }, .{ .high = 0x1.11301d0125b51p+0, .low = -0x1.6c51039449b3ap-54 }, .{ .high = 0x1.1429aaea92dep+0, .low = -0x1.32fbf9af1369ep-54 }, .{ .high = 0x1.172b83c7d517bp+0, .low = -0x1.19041b9d78a76p-55 }, .{ .high = 0x1.1a35beb6fcb75p+0, .low = 0x1.e5b4c7b4968e4p-55 }, .{ .high = 0x1.1d4873168b9aap+0, .low = 0x1.e016e00a2643cp-54 }, .{ .high = 0x1.2063b88628cd6p+0, .low = 0x1.dc775814a8494p-55 }, .{ .high = 0x1.2387a6e756238p+0, .low = 0x1.9b07eb6c70572p-54 }, .{ .high = 0x1.26b4565e27cddp+0, .low = 0x1.2bd339940e9dap-55 }, .{ .high = 0x1.29e9df51fdee1p+0, .low = 0x1.612e8afad1256p-55 }, .{ .high = 0x1.2d285a6e4030bp+0, .low = 0x1.0024754db41d4p-54 }, .{ .high = 0x1.306fe0a31b715p+0, .low = 0x1.6f46ad23182e4p-55 }, .{ .high = 0x1.33c08b26416ffp+0, .low = 0x1.32721843659a6p-54 }, .{ .high = 0x1.371a7373aa9cbp+0, .low = -0x1.63aeabf42eae2p-54 }, .{ .high = 0x1.3a7db34e59ff7p+0, .low = -0x1.5e436d661f5e2p-56 }, .{ .high = 0x1.3dea64c123422p+0, .low = 0x1.ada0911f09ebcp-55 }, .{ .high = 0x1.4160a21f72e2ap+0, .low = -0x1.ef3691c309278p-58 }, .{ .high = 0x1.44e086061892dp+0, .low = 0x1.89b7a04ef80dp-59 }, .{ .high = 0x1.486a2b5c13cdp+0, .low = 0x1.3c1a3b69062fp-56 }, .{ .high = 0x1.4bfdad5362a27p+0, .low = 0x1.d4397afec42e2p-56 }, .{ .high = 0x1.4f9b2769d2ca7p+0, .low = -0x1.4b309d25957e4p-54 }, .{ .high = 0x1.5342b569d4f82p+0, .low = -0x1.07abe1db13cacp-55 }, .{ .high = 0x1.56f4736b527dap+0, .low = 0x1.9bb2c011d93acp-54 }, .{ .high = 0x1.5ab07dd485429p+0, .low = 0x1.6324c054647acp-54 }, .{ .high = 0x1.5e76f15ad2148p+0, .low = 0x1.ba6f93080e65ep-54 }, .{ .high = 0x1.6247eb03a5585p+0, .low = -0x1.383c17e40b496p-54 }, .{ .high = 0x1.6623882552225p+0, .low = -0x1.bb60987591c34p-54 }, .{ .high = 0x1.6a09e667f3bcdp+0, .low = -0x1.bdd3413b26456p-54 }, .{ .high = 0x1.6dfb23c651a2fp+0, .low = -0x1.bbe3a683c88aap-57 }, .{ .high = 0x1.71f75e8ec5f74p+0, .low = -0x1.16e4786887a9ap-55 }, .{ .high = 0x1.75feb564267c9p+0, .low = -0x1.0245957316dd4p-54 }, .{ .high = 0x1.7a11473eb0187p+0, .low = -0x1.41577ee04993p-55 }, .{ .high = 0x1.7e2f336cf4e62p+0, .low = 0x1.05d02ba15797ep-56 }, .{ .high = 0x1.82589994cce13p+0, .low = -0x1.d4c1dd41532d8p-54 }, .{ .high = 0x1.868d99b4492edp+0, .low = -0x1.fc6f89bd4f6bap-54 }, .{ .high = 0x1.8ace5422aa0dbp+0, .low = 0x1.6e9f156864b26p-54 }, .{ .high = 0x1.8f1ae99157736p+0, .low = 0x1.5cc13a2e3976cp-55 }, .{ .high = 0x1.93737b0cdc5e5p+0, .low = -0x1.75fc781b57ebcp-57 }, .{ .high = 0x1.97d829fde4e5p+0, .low = -0x1.d185b7c1b85dp-54 }, .{ .high = 0x1.9c49182a3f09p+0, .low = 0x1.c7c46b071f2bep-56 }, .{ .high = 0x1.a0c667b5de565p+0, .low = -0x1.359495d1cd532p-54 }, .{ .high = 0x1.a5503b23e255dp+0, .low = -0x1.d2f6edb8d41e2p-54 }, .{ .high = 0x1.a9e6b5579fdbfp+0, .low = 0x1.0fac90ef7fd32p-54 }, .{ .high = 0x1.ae89f995ad3adp+0, .low = 0x1.7a1cd345dcc82p-54 }, .{ .high = 0x1.b33a2b84f15fbp+0, .low = -0x1.2805e3084d708p-57 }, .{ .high = 0x1.b7f76f2fb5e47p+0, .low = -0x1.5584f7e54ac3ap-56 }, .{ .high = 0x1.bcc1e904bc1d2p+0, .low = 0x1.23dd07a2d9e84p-55 }, .{ .high = 0x1.c199bdd85529cp+0, .low = 0x1.11065895048dep-55 }, .{ .high = 0x1.c67f12e57d14bp+0, .low = 0x1.2884dff483cacp-54 }, .{ .high = 0x1.cb720dcef9069p+0, .low = 0x1.503cbd1e949dcp-56 }, .{ .high = 0x1.d072d4a07897cp+0, .low = -0x1.cbc3743797a9cp-54 }, .{ .high = 0x1.d5818dcfba487p+0, .low = 0x1.2ed02d75b3706p-55 }, .{ .high = 0x1.da9e603db3285p+0, .low = 0x1.c2300696db532p-54 }, .{ .high = 0x1.dfc97337b9b5fp+0, .low = -0x1.1a5cd4f184b5cp-54 }, .{ .high = 0x1.e502ee78b3ff6p+0, .low = 0x1.39e8980a9cc9p-55 }, .{ .high = 0x1.ea4afa2a490dap+0, .low = -0x1.e9c23179c2894p-54 }, .{ .high = 0x1.efa1bee615a27p+0, .low = 0x1.dc7f486a4b6bp-54 }, .{ .high = 0x1.f50765b6e454p+0, .low = 0x1.9d3e12dd8a18ap-54 }, .{ .high = 0x1.fa7c1819e90d8p+0, .low = 0x1.74853f3a5931ep-55 } };
+const expd_table_0: [64]ExpdDoubleDouble = .{
+    .{ .high = 0x1p+0, .low = 0x0p+0 },
+    .{ .high = 0x1.02c9a3e778061p+0, .low = -0x1.19083535b085ep-56 },
+    .{ .high = 0x1.059b0d3158574p+0, .low = 0x1.d73e2a475b466p-55 },
+    .{ .high = 0x1.0874518759bc8p+0, .low = 0x1.186be4bb285p-57 },
+    .{ .high = 0x1.0b5586cf9890fp+0, .low = 0x1.8a62e4adc610ap-54 },
+    .{ .high = 0x1.0e3ec32d3d1a2p+0, .low = 0x1.03a1727c57b52p-59 },
+    .{ .high = 0x1.11301d0125b51p+0, .low = -0x1.6c51039449b3ap-54 },
+    .{ .high = 0x1.1429aaea92dep+0, .low = -0x1.32fbf9af1369ep-54 },
+    .{ .high = 0x1.172b83c7d517bp+0, .low = -0x1.19041b9d78a76p-55 },
+    .{ .high = 0x1.1a35beb6fcb75p+0, .low = 0x1.e5b4c7b4968e4p-55 },
+    .{ .high = 0x1.1d4873168b9aap+0, .low = 0x1.e016e00a2643cp-54 },
+    .{ .high = 0x1.2063b88628cd6p+0, .low = 0x1.dc775814a8494p-55 },
+    .{ .high = 0x1.2387a6e756238p+0, .low = 0x1.9b07eb6c70572p-54 },
+    .{ .high = 0x1.26b4565e27cddp+0, .low = 0x1.2bd339940e9dap-55 },
+    .{ .high = 0x1.29e9df51fdee1p+0, .low = 0x1.612e8afad1256p-55 },
+    .{ .high = 0x1.2d285a6e4030bp+0, .low = 0x1.0024754db41d4p-54 },
+    .{ .high = 0x1.306fe0a31b715p+0, .low = 0x1.6f46ad23182e4p-55 },
+    .{ .high = 0x1.33c08b26416ffp+0, .low = 0x1.32721843659a6p-54 },
+    .{ .high = 0x1.371a7373aa9cbp+0, .low = -0x1.63aeabf42eae2p-54 },
+    .{ .high = 0x1.3a7db34e59ff7p+0, .low = -0x1.5e436d661f5e2p-56 },
+    .{ .high = 0x1.3dea64c123422p+0, .low = 0x1.ada0911f09ebcp-55 },
+    .{ .high = 0x1.4160a21f72e2ap+0, .low = -0x1.ef3691c309278p-58 },
+    .{ .high = 0x1.44e086061892dp+0, .low = 0x1.89b7a04ef80dp-59 },
+    .{ .high = 0x1.486a2b5c13cdp+0, .low = 0x1.3c1a3b69062fp-56 },
+    .{ .high = 0x1.4bfdad5362a27p+0, .low = 0x1.d4397afec42e2p-56 },
+    .{ .high = 0x1.4f9b2769d2ca7p+0, .low = -0x1.4b309d25957e4p-54 },
+    .{ .high = 0x1.5342b569d4f82p+0, .low = -0x1.07abe1db13cacp-55 },
+    .{ .high = 0x1.56f4736b527dap+0, .low = 0x1.9bb2c011d93acp-54 },
+    .{ .high = 0x1.5ab07dd485429p+0, .low = 0x1.6324c054647acp-54 },
+    .{ .high = 0x1.5e76f15ad2148p+0, .low = 0x1.ba6f93080e65ep-54 },
+    .{ .high = 0x1.6247eb03a5585p+0, .low = -0x1.383c17e40b496p-54 },
+    .{ .high = 0x1.6623882552225p+0, .low = -0x1.bb60987591c34p-54 },
+    .{ .high = 0x1.6a09e667f3bcdp+0, .low = -0x1.bdd3413b26456p-54 },
+    .{ .high = 0x1.6dfb23c651a2fp+0, .low = -0x1.bbe3a683c88aap-57 },
+    .{ .high = 0x1.71f75e8ec5f74p+0, .low = -0x1.16e4786887a9ap-55 },
+    .{ .high = 0x1.75feb564267c9p+0, .low = -0x1.0245957316dd4p-54 },
+    .{ .high = 0x1.7a11473eb0187p+0, .low = -0x1.41577ee04993p-55 },
+    .{ .high = 0x1.7e2f336cf4e62p+0, .low = 0x1.05d02ba15797ep-56 },
+    .{ .high = 0x1.82589994cce13p+0, .low = -0x1.d4c1dd41532d8p-54 },
+    .{ .high = 0x1.868d99b4492edp+0, .low = -0x1.fc6f89bd4f6bap-54 },
+    .{ .high = 0x1.8ace5422aa0dbp+0, .low = 0x1.6e9f156864b26p-54 },
+    .{ .high = 0x1.8f1ae99157736p+0, .low = 0x1.5cc13a2e3976cp-55 },
+    .{ .high = 0x1.93737b0cdc5e5p+0, .low = -0x1.75fc781b57ebcp-57 },
+    .{ .high = 0x1.97d829fde4e5p+0, .low = -0x1.d185b7c1b85dp-54 },
+    .{ .high = 0x1.9c49182a3f09p+0, .low = 0x1.c7c46b071f2bep-56 },
+    .{ .high = 0x1.a0c667b5de565p+0, .low = -0x1.359495d1cd532p-54 },
+    .{ .high = 0x1.a5503b23e255dp+0, .low = -0x1.d2f6edb8d41e2p-54 },
+    .{ .high = 0x1.a9e6b5579fdbfp+0, .low = 0x1.0fac90ef7fd32p-54 },
+    .{ .high = 0x1.ae89f995ad3adp+0, .low = 0x1.7a1cd345dcc82p-54 },
+    .{ .high = 0x1.b33a2b84f15fbp+0, .low = -0x1.2805e3084d708p-57 },
+    .{ .high = 0x1.b7f76f2fb5e47p+0, .low = -0x1.5584f7e54ac3ap-56 },
+    .{ .high = 0x1.bcc1e904bc1d2p+0, .low = 0x1.23dd07a2d9e84p-55 },
+    .{ .high = 0x1.c199bdd85529cp+0, .low = 0x1.11065895048dep-55 },
+    .{ .high = 0x1.c67f12e57d14bp+0, .low = 0x1.2884dff483cacp-54 },
+    .{ .high = 0x1.cb720dcef9069p+0, .low = 0x1.503cbd1e949dcp-56 },
+    .{ .high = 0x1.d072d4a07897cp+0, .low = -0x1.cbc3743797a9cp-54 },
+    .{ .high = 0x1.d5818dcfba487p+0, .low = 0x1.2ed02d75b3706p-55 },
+    .{ .high = 0x1.da9e603db3285p+0, .low = 0x1.c2300696db532p-54 },
+    .{ .high = 0x1.dfc97337b9b5fp+0, .low = -0x1.1a5cd4f184b5cp-54 },
+    .{ .high = 0x1.e502ee78b3ff6p+0, .low = 0x1.39e8980a9cc9p-55 },
+    .{ .high = 0x1.ea4afa2a490dap+0, .low = -0x1.e9c23179c2894p-54 },
+    .{ .high = 0x1.efa1bee615a27p+0, .low = 0x1.dc7f486a4b6bp-54 },
+    .{ .high = 0x1.f50765b6e454p+0, .low = 0x1.9d3e12dd8a18ap-54 },
+    .{ .high = 0x1.fa7c1819e90d8p+0, .low = 0x1.74853f3a5931ep-55 },
+};
 
 // Double-double approximations of 2^(i / 2^12), for 0 <= i < 64.
 const expd_table_1: [64]ExpdDoubleDouble = .{
-    .{ .high = 0x1p+0, .low = 0x0p+0 },                               .{ .high = 0x1.000b175effdc7p+0, .low = 0x1.ae8e38c59c72ap-54 },
-    .{ .high = 0x1.00162f3904052p+0, .low = -0x1.7b5d0d58ea8f4p-58 }, .{ .high = 0x1.0021478e11ce6p+0, .low = 0x1.4115cb6b16a8ep-54 },
-    .{ .high = 0x1.002c605e2e8cfp+0, .low = -0x1.d7c96f201bb2ep-55 }, .{ .high = 0x1.003779a95f959p+0, .low = 0x1.84711d4c35eap-54 },
-    .{ .high = 0x1.0042936faa3d8p+0, .low = -0x1.0484245243778p-55 }, .{ .high = 0x1.004dadb113dap+0, .low = -0x1.4b237da2025fap-54 },
-    .{ .high = 0x1.0058c86da1c0ap+0, .low = -0x1.5e00e62d6b30ep-56 }, .{ .high = 0x1.0063e3a559473p+0, .low = 0x1.a1d6cedbb948p-54 },
-    .{ .high = 0x1.006eff583fc3dp+0, .low = -0x1.4acf197a00142p-54 }, .{ .high = 0x1.007a1b865a8cap+0, .low = -0x1.eaf2ea42391a6p-57 },
-    .{ .high = 0x1.0085382faef83p+0, .low = 0x1.da93f90835f76p-56 },  .{ .high = 0x1.00905554425d4p+0, .low = -0x1.6a79084ab093cp-55 },
-    .{ .high = 0x1.009b72f41a12bp+0, .low = 0x1.86364f8fbe8f8p-54 },  .{ .high = 0x1.00a6910f3b6fdp+0, .low = -0x1.82e8e14e3110ep-55 },
-    .{ .high = 0x1.00b1afa5abcbfp+0, .low = -0x1.4f6b2a7609f72p-55 }, .{ .high = 0x1.00bcceb7707ecp+0, .low = -0x1.e1a258ea8f71ap-56 },
-    .{ .high = 0x1.00c7ee448ee02p+0, .low = 0x1.4362ca5bc26f2p-56 },  .{ .high = 0x1.00d30e4d0c483p+0, .low = 0x1.095a56c919d02p-54 },
-    .{ .high = 0x1.00de2ed0ee0f5p+0, .low = -0x1.406ac4e81a646p-57 }, .{ .high = 0x1.00e94fd0398ep+0, .low = 0x1.b5a6902767e08p-54 },
-    .{ .high = 0x1.00f4714af41d3p+0, .low = -0x1.91b206085932p-54 },  .{ .high = 0x1.00ff93412315cp+0, .low = 0x1.427068ab22306p-55 },
-    .{ .high = 0x1.010ab5b2cbd11p+0, .low = 0x1.c1d0660524e08p-54 },  .{ .high = 0x1.0115d89ff3a8bp+0, .low = -0x1.e7bdfb3204be8p-54 },
-    .{ .high = 0x1.0120fc089ff63p+0, .low = 0x1.843aa8b9cbbc6p-55 },  .{ .high = 0x1.012c1fecd613bp+0, .low = -0x1.34104ee7edae8p-56 },
-    .{ .high = 0x1.0137444c9b5b5p+0, .low = -0x1.2b6aeb6176892p-56 }, .{ .high = 0x1.01426927f5278p+0, .low = 0x1.a8cd33b8a1bb2p-56 },
-    .{ .high = 0x1.014d8e7ee8d2fp+0, .low = 0x1.2edc08e5da99ap-56 },  .{ .high = 0x1.0158b4517bb88p+0, .low = 0x1.57ba2dc7e0c72p-55 },
-    .{ .high = 0x1.0163da9fb3335p+0, .low = 0x1.b61299ab8cdb8p-54 },  .{ .high = 0x1.016f0169949edp+0, .low = -0x1.90565902c5f44p-54 },
-    .{ .high = 0x1.017a28af25567p+0, .low = 0x1.70fc41c5c2d54p-55 },  .{ .high = 0x1.018550706ab62p+0, .low = 0x1.4b9a6e145d76cp-54 },
-    .{ .high = 0x1.019078ad6a19fp+0, .low = -0x1.008eff5142bfap-56 }, .{ .high = 0x1.019ba16628de2p+0, .low = -0x1.77669f033c7dep-54 },
-    .{ .high = 0x1.01a6ca9aac5f3p+0, .low = -0x1.09bb78eeead0ap-54 }, .{ .high = 0x1.01b1f44af9f9ep+0, .low = 0x1.371231477ece6p-54 },
-    .{ .high = 0x1.01bd1e77170b4p+0, .low = 0x1.5e7626621eb5ap-56 },  .{ .high = 0x1.01c8491f08f08p+0, .low = -0x1.bc72b100828a4p-54 },
-    .{ .high = 0x1.01d37442d507p+0, .low = -0x1.ce39cbbab8bbep-57 },  .{ .high = 0x1.01de9fe280ac8p+0, .low = 0x1.16996709da2e2p-55 },
-    .{ .high = 0x1.01e9cbfe113efp+0, .low = -0x1.c11f5239bf536p-55 }, .{ .high = 0x1.01f4f8958c1c6p+0, .low = 0x1.e1d4eb5edc6b4p-55 },
-    .{ .high = 0x1.020025a8f6a35p+0, .low = -0x1.afb99946ee3fp-54 },  .{ .high = 0x1.020b533856324p+0, .low = -0x1.8f06d8a148a32p-54 },
-    .{ .high = 0x1.02168143b0281p+0, .low = -0x1.2bf310fc54eb6p-55 }, .{ .high = 0x1.0221afcb09e3ep+0, .low = -0x1.c95a035eb4176p-54 },
-    .{ .high = 0x1.022cdece68c4fp+0, .low = -0x1.491793e46834cp-54 }, .{ .high = 0x1.02380e4dd22adp+0, .low = -0x1.3e8d0d9c4909p-56 },
-    .{ .high = 0x1.02433e494b755p+0, .low = -0x1.314aa16278aa4p-54 }, .{ .high = 0x1.024e6ec0da046p+0, .low = 0x1.48daf888e965p-55 },
-    .{ .high = 0x1.02599fb483385p+0, .low = 0x1.56dc8046821f4p-55 },  .{ .high = 0x1.0264d1244c719p+0, .low = 0x1.45b42356b9d46p-54 },
-    .{ .high = 0x1.027003103b10ep+0, .low = -0x1.082ef51b61d7ep-56 }, .{ .high = 0x1.027b357854772p+0, .low = 0x1.2106ed0920a34p-56 },
-    .{ .high = 0x1.0286685c9e059p+0, .low = -0x1.fd4cf26ea5d0ep-54 }, .{ .high = 0x1.02919bbd1d1d8p+0, .low = -0x1.09f8775e78084p-54 },
-    .{ .high = 0x1.029ccf99d720ap+0, .low = 0x1.64cbba902ca28p-58 },  .{ .high = 0x1.02a803f2d170dp+0, .low = 0x1.4383ef231d206p-54 },
-    .{ .high = 0x1.02b338c811703p+0, .low = 0x1.4a47a505b3a46p-54 },  .{ .high = 0x1.02be6e199c811p+0, .low = 0x1.e47120223468p-54 },
+    .{ .high = 0x1p+0, .low = 0x0p+0 },
+    .{ .high = 0x1.000b175effdc7p+0, .low = 0x1.ae8e38c59c72ap-54 },
+    .{ .high = 0x1.00162f3904052p+0, .low = -0x1.7b5d0d58ea8f4p-58 },
+    .{ .high = 0x1.0021478e11ce6p+0, .low = 0x1.4115cb6b16a8ep-54 },
+    .{ .high = 0x1.002c605e2e8cfp+0, .low = -0x1.d7c96f201bb2ep-55 },
+    .{ .high = 0x1.003779a95f959p+0, .low = 0x1.84711d4c35eap-54 },
+    .{ .high = 0x1.0042936faa3d8p+0, .low = -0x1.0484245243778p-55 },
+    .{ .high = 0x1.004dadb113dap+0, .low = -0x1.4b237da2025fap-54 },
+    .{ .high = 0x1.0058c86da1c0ap+0, .low = -0x1.5e00e62d6b30ep-56 },
+    .{ .high = 0x1.0063e3a559473p+0, .low = 0x1.a1d6cedbb948p-54 },
+    .{ .high = 0x1.006eff583fc3dp+0, .low = -0x1.4acf197a00142p-54 },
+    .{ .high = 0x1.007a1b865a8cap+0, .low = -0x1.eaf2ea42391a6p-57 },
+    .{ .high = 0x1.0085382faef83p+0, .low = 0x1.da93f90835f76p-56 },
+    .{ .high = 0x1.00905554425d4p+0, .low = -0x1.6a79084ab093cp-55 },
+    .{ .high = 0x1.009b72f41a12bp+0, .low = 0x1.86364f8fbe8f8p-54 },
+    .{ .high = 0x1.00a6910f3b6fdp+0, .low = -0x1.82e8e14e3110ep-55 },
+    .{ .high = 0x1.00b1afa5abcbfp+0, .low = -0x1.4f6b2a7609f72p-55 },
+    .{ .high = 0x1.00bcceb7707ecp+0, .low = -0x1.e1a258ea8f71ap-56 },
+    .{ .high = 0x1.00c7ee448ee02p+0, .low = 0x1.4362ca5bc26f2p-56 },
+    .{ .high = 0x1.00d30e4d0c483p+0, .low = 0x1.095a56c919d02p-54 },
+    .{ .high = 0x1.00de2ed0ee0f5p+0, .low = -0x1.406ac4e81a646p-57 },
+    .{ .high = 0x1.00e94fd0398ep+0, .low = 0x1.b5a6902767e08p-54 },
+    .{ .high = 0x1.00f4714af41d3p+0, .low = -0x1.91b206085932p-54 },
+    .{ .high = 0x1.00ff93412315cp+0, .low = 0x1.427068ab22306p-55 },
+    .{ .high = 0x1.010ab5b2cbd11p+0, .low = 0x1.c1d0660524e08p-54 },
+    .{ .high = 0x1.0115d89ff3a8bp+0, .low = -0x1.e7bdfb3204be8p-54 },
+    .{ .high = 0x1.0120fc089ff63p+0, .low = 0x1.843aa8b9cbbc6p-55 },
+    .{ .high = 0x1.012c1fecd613bp+0, .low = -0x1.34104ee7edae8p-56 },
+    .{ .high = 0x1.0137444c9b5b5p+0, .low = -0x1.2b6aeb6176892p-56 },
+    .{ .high = 0x1.01426927f5278p+0, .low = 0x1.a8cd33b8a1bb2p-56 },
+    .{ .high = 0x1.014d8e7ee8d2fp+0, .low = 0x1.2edc08e5da99ap-56 },
+    .{ .high = 0x1.0158b4517bb88p+0, .low = 0x1.57ba2dc7e0c72p-55 },
+    .{ .high = 0x1.0163da9fb3335p+0, .low = 0x1.b61299ab8cdb8p-54 },
+    .{ .high = 0x1.016f0169949edp+0, .low = -0x1.90565902c5f44p-54 },
+    .{ .high = 0x1.017a28af25567p+0, .low = 0x1.70fc41c5c2d54p-55 },
+    .{ .high = 0x1.018550706ab62p+0, .low = 0x1.4b9a6e145d76cp-54 },
+    .{ .high = 0x1.019078ad6a19fp+0, .low = -0x1.008eff5142bfap-56 },
+    .{ .high = 0x1.019ba16628de2p+0, .low = -0x1.77669f033c7dep-54 },
+    .{ .high = 0x1.01a6ca9aac5f3p+0, .low = -0x1.09bb78eeead0ap-54 },
+    .{ .high = 0x1.01b1f44af9f9ep+0, .low = 0x1.371231477ece6p-54 },
+    .{ .high = 0x1.01bd1e77170b4p+0, .low = 0x1.5e7626621eb5ap-56 },
+    .{ .high = 0x1.01c8491f08f08p+0, .low = -0x1.bc72b100828a4p-54 },
+    .{ .high = 0x1.01d37442d507p+0, .low = -0x1.ce39cbbab8bbep-57 },
+    .{ .high = 0x1.01de9fe280ac8p+0, .low = 0x1.16996709da2e2p-55 },
+    .{ .high = 0x1.01e9cbfe113efp+0, .low = -0x1.c11f5239bf536p-55 },
+    .{ .high = 0x1.01f4f8958c1c6p+0, .low = 0x1.e1d4eb5edc6b4p-55 },
+    .{ .high = 0x1.020025a8f6a35p+0, .low = -0x1.afb99946ee3fp-54 },
+    .{ .high = 0x1.020b533856324p+0, .low = -0x1.8f06d8a148a32p-54 },
+    .{ .high = 0x1.02168143b0281p+0, .low = -0x1.2bf310fc54eb6p-55 },
+    .{ .high = 0x1.0221afcb09e3ep+0, .low = -0x1.c95a035eb4176p-54 },
+    .{ .high = 0x1.022cdece68c4fp+0, .low = -0x1.491793e46834cp-54 },
+    .{ .high = 0x1.02380e4dd22adp+0, .low = -0x1.3e8d0d9c4909p-56 },
+    .{ .high = 0x1.02433e494b755p+0, .low = -0x1.314aa16278aa4p-54 },
+    .{ .high = 0x1.024e6ec0da046p+0, .low = 0x1.48daf888e965p-55 },
+    .{ .high = 0x1.02599fb483385p+0, .low = 0x1.56dc8046821f4p-55 },
+    .{ .high = 0x1.0264d1244c719p+0, .low = 0x1.45b42356b9d46p-54 },
+    .{ .high = 0x1.027003103b10ep+0, .low = -0x1.082ef51b61d7ep-56 },
+    .{ .high = 0x1.027b357854772p+0, .low = 0x1.2106ed0920a34p-56 },
+    .{ .high = 0x1.0286685c9e059p+0, .low = -0x1.fd4cf26ea5d0ep-54 },
+    .{ .high = 0x1.02919bbd1d1d8p+0, .low = -0x1.09f8775e78084p-54 },
+    .{ .high = 0x1.029ccf99d720ap+0, .low = 0x1.64cbba902ca28p-58 },
+    .{ .high = 0x1.02a803f2d170dp+0, .low = 0x1.4383ef231d206p-54 },
+    .{ .high = 0x1.02b338c811703p+0, .low = 0x1.4a47a505b3a46p-54 },
+    .{ .high = 0x1.02be6e199c811p+0, .low = 0x1.e47120223468p-54 },
 };
 
 const expd_accurate_coefficients: [7]ExpdDoubleDouble = .{
@@ -1517,14 +1608,10 @@ const expd_accurate_coefficients: [7]ExpdDoubleDouble = .{
 };
 
 fn expdRoundEvenFinite(value: f64) i64 {
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_float: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_float;
-    const odd = (truncated & 1) != 0;
-
-    if (fraction > 0x1p-1 or (fraction == 0x1p-1 and odd)) return truncated + 1;
-    if (fraction < -0x1p-1 or (fraction == -0x1p-1 and odd)) return truncated - 1;
-    return truncated;
+    @setFloatMode(.strict);
+    // The finite exp range gives |value| < 2^23. The bias has unit spacing.
+    const rounded_bits: i64 = @bitCast(value + 0x1.8p52);
+    return rounded_bits -% 0x4338_0000_0000_0000;
 }
 
 fn expdFastTwoSum(x: f64, y: f64) ExpdDoubleDouble {
@@ -1601,8 +1688,8 @@ fn expdToDenormal(value: f64) f64 {
 
 fn expdDatabaseLookup(value: f64, fallback: f64) f64 {
     const value_bits: u64 = @bitCast(value);
-    var lower: i32 = 0;
-    var upper: i32 = @intCast(expd_database.len - 1);
+    var lower: isize = 0;
+    var upper: isize = @intCast(expd_database.len - 1);
 
     while (lower <= upper) {
         const middle = @divTrunc(lower + upper, 2);
@@ -1644,7 +1731,7 @@ fn expdDatabaseLookup(value: f64, fallback: f64) f64 {
 
 fn expdAccurate(value: f64) f64 {
     const value_bits: u64 = @bitCast(value);
-    if (((value_bits >> 52) & 0x7ff) < 0x3c9) return 1.0 + value;
+    if (((value_bits >> 52) & 0x7ff) < 0x3c9) return 1.0;
 
     const reduction_scale = 0x1.71547652b82fep+12;
     const reduction_integer = expdRoundEvenFinite(value * reduction_scale);
@@ -1703,7 +1790,7 @@ fn expdAccurate(value: f64) f64 {
         return expdToDenormal(result.high + result.low);
     }
 
-    var result = ExpdDoubleDouble{ .high = 0.0, .low = 0.0 };
+    var result: ExpdDoubleDouble = .{ .high = 0.0, .low = 0.0 };
     if (table_product.high == 1.0) {
         const high_sum = expdFastTwoSum(table_product.high, polynomial.high);
         const low_sum = expdFastTwoSum(high_sum.low, polynomial.low);
@@ -1755,7 +1842,7 @@ pub fn expd(value: f64) f64 {
     if (magnitude == 0) return 1.0;
 
     // exp(x) rounds to one in nearest-even mode for |x| <= 2^-54.
-    if (magnitude <= 0x3c90_0000_0000_0000) return 1.0 + value;
+    if (magnitude <= 0x3c90_0000_0000_0000) return 1.0;
 
     if (magnitude >= 0x4086_2e42_fefa_39f0) {
         if ((bits & sign_mask_d) == 0) return @bitCast(infinity_bits_d);
@@ -1898,40 +1985,32 @@ const sinf_hard_cases: [4]struct { arg: u32, rh: f32, rl: f32 } = .{
     .{ .arg = 0x4116_cbe4, .rh = -0x1.99bc5ap-26, .rl = -0x1p-51 },
 };
 
-fn sinf_round_even(value: f64) f64 {
+fn sinfRoundEven(value: f64, quadrant: *i32) f64 {
     @setFloatMode(.strict);
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_float: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_float;
-
-    if (fraction > 0.5) return truncated_float + 1.0;
-    if (fraction < -0.5) return truncated_float - 1.0;
-    if (fraction == 0.5 and (truncated & 1) != 0) return truncated_float + 1.0;
-    if (fraction == -0.5 and (truncated & 1) != 0) return truncated_float - 1.0;
-    return truncated_float;
+    // Small reduction gives |value| < 2^29. RNE rounds the biased sum to an integer.
+    const rounded = value + 0x1.8p52;
+    const rounded_bits: u64 = @bitCast(rounded);
+    quadrant.* = @bitCast(@as(u32, @truncate(rounded_bits)));
+    return rounded - 0x1.8p52;
 }
 
-fn sinf_rltl(value: f32, quadrant: *i32) f64 {
+fn sinfRltl(value: f32, quadrant: *i32) f64 {
     @setFloatMode(.strict);
     const value_wide: f64 = value;
     const id_low = -0x1.b1bbead603d8bp-29 * value_wide;
     const id_high = 0x1.45f306ep+2 * value_wide;
-    const id = sinf_round_even(id_high);
-    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
-    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    const id = sinfRoundEven(id_high, quadrant);
     return (id_high - id) + id_low;
 }
 
-fn sinf_rltl0(value: f64, quadrant: *i32) f64 {
+fn sinfRltl0(value: f64, quadrant: *i32) f64 {
     @setFloatMode(.strict);
     const id_high = 0x1.45f306dc9c883p+2 * value;
-    const id = sinf_round_even(id_high);
-    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
-    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    const id = sinfRoundEven(id_high, quadrant);
     return id_high - id;
 }
 
-fn sinf_rbig(bits: u32, quadrant: *i32) f64 {
+fn sinfRbig(bits: u32, phase_out: *u5) f64 {
     @setFloatMode(.strict);
     const exponent: i32 = @intCast((bits >> 23) & 0xff);
     const mantissa: u64 = @as(u64, bits & 0x007f_ffff) | 0x0080_0000;
@@ -1943,75 +2022,74 @@ fn sinf_rbig(bits: u32, quadrant: *i32) f64 {
     var product_3: u128 = @as(u128, mantissa) * sinf_reduction_pi_inverse[3];
     product_3 += product_2 >> 64;
 
-    const product_3_high: u64 = @truncate(product_3 >> 64);
     const product_3_low: u64 = @truncate(product_3);
     const product_2_low: u64 = @truncate(product_2);
     const product_1_low: u64 = @truncate(product_1);
     const shift: i32 = exponent - 147;
-    var integer_bits: u64 = undefined;
+    // The big-path bound gives shift >= 6, so the omitted high product limb is
+    // zero in the phase's low five bits.
+    var phase: u5 = undefined;
     var fraction_bits: u64 = undefined;
 
     if (shift < 64) {
         const left_shift: u6 = @intCast(shift);
         const right_shift: u6 = @intCast(64 - shift);
-        integer_bits = (product_3_high << left_shift) | (product_3_low >> right_shift);
+        phase = @truncate(product_3_low >> right_shift);
         fraction_bits = (product_3_low << left_shift) | (product_2_low >> right_shift);
     } else if (shift == 64) {
-        integer_bits = product_3_low;
+        phase = @truncate(product_3_low);
         fraction_bits = product_2_low;
     } else {
         const left_shift: u6 = @intCast(shift - 64);
         const right_shift: u6 = @intCast(128 - shift);
-        integer_bits = (product_3_low << left_shift) | (product_2_low >> right_shift);
+        phase = @truncate((product_3_low << left_shift) | (product_2_low >> right_shift));
         fraction_bits = (product_2_low << left_shift) | (product_1_low >> right_shift);
     }
 
-    var integer_part: i32 = @bitCast(@as(u32, @truncate(integer_bits)));
+    const fraction_negative: u5 = @truncate(fraction_bits >> 63);
+    phase +%= fraction_negative;
+    const input_negative: u1 = @truncate(bits >> 31);
+    const sign: i64 = -@as(i64, input_negative);
     const fraction_part: i64 = @bitCast(fraction_bits);
-    const sign: i64 = if ((bits >> 31) != 0) -1 else 0;
-    const fraction_sign: i64 = fraction_part >> 63;
-    integer_part -= @intCast(fraction_sign);
     const reduced = @as(f64, @floatFromInt(fraction_part ^ sign)) * 0x1p-64;
-    const integer_sign: i32 = @intCast(sign);
-    integer_part = (integer_part ^ integer_sign) - integer_sign;
-    quadrant.* = integer_part;
+    const phase_sign: u5 = 0 -% @as(u5, input_negative);
+    phase_out.* = (phase ^ phase_sign) -% phase_sign;
     return reduced;
 }
 
-fn sinf_add_sign(value: f32, high: f32, low: f32) f32 {
+fn sinfAddSign(value: f32, high: f32, low: f32) f32 {
     @setFloatMode(.strict);
     const sign: f32 = if ((@as(u32, @bitCast(value)) & sign_mask_f) != 0) -1.0 else 1.0;
     return sign * high + sign * low;
 }
 
-fn sinf_database(value: f32, reduced: f64) f32 {
+noinline fn sinfDatabase(value: f32, reduced: f64) f32 {
+    @setFloatMode(.strict);
     const magnitude = @as(u32, @bitCast(value)) & magnitude_mask_f;
     for (sinf_hard_cases) |entry| {
-        if (entry.arg == magnitude) return sinf_add_sign(value, entry.rh, entry.rl);
+        if (entry.arg == magnitude) return sinfAddSign(value, entry.rh, entry.rl);
     }
     return @floatCast(reduced);
 }
 
-fn sinf_big(value: f32) f32 {
+noinline fn sinfBig(bits: u32, absolute_bits: u32) f32 {
     @setFloatMode(.strict);
-    const bits: u32 = @bitCast(value);
-    const absolute_bits = bits << 1;
     if (absolute_bits >= 0xff00_0000) {
+        @branchHint(.unlikely);
         if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
         return @bitCast(@as(u32, 0x7fc0_0000));
     }
 
-    var quadrant: i32 = 0;
-    const reduced = sinf_rbig(bits, &quadrant);
+    var phase: u5 = 0;
+    const reduced = sinfRbig(bits, &phase);
     const reduced_squared = reduced * reduced;
     const reduced_fourth = reduced_squared * reduced_squared;
     const polynomial_a = (sinf_a[0] + reduced_squared * sinf_a[1]) +
         reduced_fourth * (sinf_a[2] + reduced_squared * sinf_a[3]);
     const polynomial_b = (sinf_b[0] + reduced_squared * sinf_b[1]) +
         reduced_fourth * (sinf_b[2] + reduced_squared * sinf_b[3]);
-    const sine_table = sinf_table[@intCast(@as(u32, @bitCast(quadrant)) & 31)];
-    const cosine_table =
-        sinf_table[@intCast((@as(u32, @bitCast(quadrant)) +% 8) & 31)];
+    const sine_table = sinf_table[@intCast(phase)];
+    const cosine_table = sinf_table[@intCast(phase +% 8)];
     const result = sine_table + reduced * (polynomial_a * cosine_table -
         polynomial_b * (reduced * sine_table));
     return @floatCast(result);
@@ -2024,38 +2102,54 @@ pub fn sinf(value: f32) f32 {
     var quadrant: i32 = 0;
     var reduced: f64 = 0.0;
 
-    if (absolute_bits > 0x9900_0000 or absolute_bits < 0x7300_0000) {
-        if (absolute_bits < 0x7300_0000) {
-            if (absolute_bits < 0x6600_0000) {
-                if (absolute_bits == 0) return value;
-                const absolute_value: f32 = @bitCast(bits & magnitude_mask_f);
-                const result = @mulAdd(f32, -value, absolute_value, value);
-                return result;
+    if (absolute_bits > 0x9900_0000 or absolute_bits < 0x7b92_1fb6) {
+        @branchHint(.unlikely);
+        if (absolute_bits < 0x7b92_1fb6) {
+            if (absolute_bits < 0x7300_0000) {
+                if (absolute_bits < 0x6600_0000) return value;
+                return (-0x1.555556p-3 * value) * (value * value) + value;
             }
-            return (-0x1.555556p-3 * value) * (value * value) + value;
+            // RNE makes sinfRltl0's phase zero here. Its sine table is zero
+            // and its cosine table is one, so only polynomial A contributes.
+            const argument = @as(f64, value) * 0x1.45f306dc9c883p+2;
+            const square = argument * argument;
+            const fourth = square * square;
+            const polynomial = (sinf_a[0] + square * sinf_a[1]) +
+                fourth * (sinf_a[2] + square * sinf_a[3]);
+            return @floatCast(polynomial * argument);
         }
-        return sinf_big(value);
+        return sinfBig(bits, absolute_bits);
     }
 
     if (absolute_bits < 0x822d_97c8) {
         if (absolute_bits == 0x7e75_b8a2 or absolute_bits == 0x7f4f_0654) {
-            return sinf_database(value, 0.0);
+            @branchHint(.unlikely);
+            return sinfDatabase(value, 0.0);
         }
-        reduced = sinf_rltl0(@as(f64, value), &quadrant);
+        reduced = sinfRltl0(value, &quadrant);
     } else {
-        if (absolute_bits == 0x8c33_3330) return sinf_database(value, 0.0);
-        reduced = sinf_rltl(value, &quadrant);
+        if (absolute_bits == 0x8c33_3330) {
+            @branchHint(.unlikely);
+            return sinfDatabase(value, 0.0);
+        }
+        reduced = sinfRltl(value, &quadrant);
     }
+    const table_phase: u5 = @truncate(@as(u32, @bitCast(quadrant)));
 
     const reduced_squared = reduced * reduced;
     const reduced_fourth = reduced_squared * reduced_squared;
-    const polynomial_a = (sinf_a[0] + reduced_squared * sinf_a[1]) +
-        reduced_fourth * (sinf_a[2] + reduced_squared * sinf_a[3]);
-    const polynomial_b = (sinf_b[0] + reduced_squared * sinf_b[1]) +
-        reduced_fourth * (sinf_b[2] + reduced_squared * sinf_b[3]);
-    const sine_table = sinf_table[@intCast(@as(u32, @bitCast(quadrant)) & 31)];
-    const cosine_table =
-        sinf_table[@intCast((@as(u32, @bitCast(quadrant)) +% 8) & 31)];
+    const V = @Vector(2, f64);
+    const square_vector: V = @splat(reduced_squared);
+    const fourth_vector: V = @splat(reduced_fourth);
+    const low_terms = V{ sinf_a[0], sinf_b[0] } +
+        square_vector * V{ sinf_a[1], sinf_b[1] };
+    const high_terms = V{ sinf_a[2], sinf_b[2] } +
+        square_vector * V{ sinf_a[3], sinf_b[3] };
+    const polynomials = low_terms + fourth_vector * high_terms;
+    const polynomial_a = polynomials[0];
+    const polynomial_b = polynomials[1];
+    const sine_table = sinf_table[@intCast(table_phase)];
+    const cosine_table = sinf_table[@intCast(table_phase +% 8)];
     const result = sine_table + polynomial_a * (reduced * cosine_table) -
         polynomial_b * (reduced_squared * sine_table);
     return @floatCast(result);
@@ -2154,18 +2248,14 @@ fn cosfRltl(value: f32, quadrant: *i32) f64 {
     const value_wide: f64 = value;
     const id_low = -0x1.b1bbead603d8bp-29 * value_wide;
     const id_high = 0x1.45f306ep+2 * value_wide;
-    const id = sinf_round_even(id_high);
-    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
-    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    const id = sinfRoundEven(id_high, quadrant);
     return (id_high - id) + id_low;
 }
 
 fn cosfRltl0(value: f64, quadrant: *i32) f64 {
     @setFloatMode(.strict);
     const id_high = 0x1.45f306dc9c883p+2 * value;
-    const id = sinf_round_even(id_high);
-    const quadrant_bits: u64 = @bitCast(0x1.8p52 + id);
-    quadrant.* = @bitCast(@as(u32, @truncate(quadrant_bits)));
+    const id = sinfRoundEven(id_high, quadrant);
     return id_high - id;
 }
 
@@ -2206,7 +2296,8 @@ fn cosfRbig(bits: u32, quadrant: *i32) f64 {
         fraction_bits = (product_2_low << left_shift) | (product_1_low >> right_shift);
     }
 
-    var integer_part: i32 = @bitCast(@as(u32, @truncate(integer_bits)));
+    // Only the quadrant modulo 32 is consumed. Bound before signed correction.
+    var integer_part: i32 = @intCast(integer_bits & 31);
     const fraction_part: i64 = @bitCast(fraction_bits);
     const sign: i64 = if ((bits & sign_mask_f) != 0) -1 else 0;
     const fraction_sign: i64 = fraction_part >> 63;
@@ -2218,23 +2309,17 @@ fn cosfRbig(bits: u32, quadrant: *i32) f64 {
     return reduced;
 }
 
-fn cosfDatabase(value: f32, reduced: f64) f32 {
+noinline fn cosfDatabase(bits: u32, reduced: f64) f32 {
     @setFloatMode(.strict);
-    const magnitude = @as(u32, @bitCast(value)) & magnitude_mask_f;
+    const magnitude = bits & magnitude_mask_f;
     for (cosf_hard_cases) |entry| {
         if (entry.arg == magnitude) return entry.rh + entry.rl;
     }
     return @floatCast(reduced);
 }
 
-fn cosfBig(value: f32) f32 {
+noinline fn cosfBig(bits: u32) f32 {
     @setFloatMode(.strict);
-    const bits: u32 = @bitCast(value);
-    const absolute_bits = bits << 1;
-    if (absolute_bits >= 0xff00_0000) {
-        if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
-        return @bitCast(@as(u32, 0x7fc0_0000));
-    }
 
     var quadrant: i32 = 0;
     const reduced = cosfRbig(bits, &quadrant);
@@ -2250,8 +2335,8 @@ fn cosfBig(value: f32) f32 {
     const result = cosine_table + reduced * (polynomial_a * sine_table -
         polynomial_b * (reduced * cosine_table));
     const result_bits: u64 = @bitCast(result);
-    const tail = (result_bits + 6) & (~@as(u64, 0) >> 36);
-    if (tail <= 12) return cosfDatabase(value, result);
+    const tail = (result_bits +% 6) & (~@as(u64, 0) >> 36);
+    if (tail <= 12) return cosfDatabase(bits, result);
     return @floatCast(result);
 }
 
@@ -2261,21 +2346,37 @@ pub fn cosf(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);
     const absolute_bits = bits << 1;
-    if (absolute_bits >= 0xff00_0000) {
-        if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
-        return @bitCast(@as(u32, 0x7fc0_0000));
-    }
 
-    if (absolute_bits > 0x9900_0000 or absolute_bits < 0x7400_0000) {
+    if (absolute_bits -% 0x7400_0000 > 0x9900_0000 - 0x7400_0000) {
+        @branchHint(.unlikely);
         if (absolute_bits < 0x7400_0000) {
+            if (absolute_bits <= 0x7300_0000) return 1.0;
             return 0.5 * @mulAdd(f32, value, -value, 2.0);
         }
-        return cosfBig(value);
+        if (absolute_bits >= 0xff00_0000) {
+            if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
+            return @bitCast(@as(u32, 0x7fc0_0000));
+        }
+        return cosfBig(bits);
+    }
+
+    if (absolute_bits <= 0x7d00_0000) {
+        const value_wide: f64 = value;
+        const square = value_wide * value_wide;
+        var polynomial = @mulAdd(f64, -0x1.6c16c16c16c17p-10, square, 0x1.5555555555555p-5);
+        polynomial = @mulAdd(f64, polynomial, square, -0.5);
+        const approximation = @mulAdd(f64, polynomial, square, 1.0);
+        // On 2^-11 <= |x| <= 1/4, the degree-six remainder plus all
+        // rounding error is below 2^-31. The result lies in [1/2, 1),
+        // so this is 2^22 binary64 ulps around a binary32 midpoint.
+        const approximation_bits: u64 = @bitCast(approximation);
+        const midpoint_distance = (approximation_bits +% 0x1040_0000) & 0x1fff_ffff;
+        if (midpoint_distance > 0x0080_0000) return @floatCast(approximation);
     }
 
     var quadrant: i32 = 0;
     const reduced: f64 = if (absolute_bits < 0x82a4_1896) blk: {
-        if (absolute_bits == 0x812d_97c8) return cosfDatabase(value, 0.0);
+        if (absolute_bits == 0x812d_97c8) return cosfDatabase(bits, 0.0);
         break :blk cosfRltl0(@as(f64, value), &quadrant);
     } else cosfRltl(value, &quadrant);
 

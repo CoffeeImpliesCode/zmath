@@ -34,21 +34,20 @@ const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
 const quiet_nan_bit: u64 = 0x0008_0000_0000_0000;
 
 const DoubleDouble = data.DoubleDouble;
+const Rounded = struct { value: f64, integer: i64 };
 
-fn roundEvenFinite(value: f64) f64 {
+fn roundEvenFinite(value: f64) Rounded {
     @setFloatMode(.strict);
 
-    const truncated: i64 = @intFromFloat(value);
-    const truncated_value: f64 = @floatFromInt(truncated);
-    const fraction = value - truncated_value;
-    const odd = (truncated & 1) != 0;
-    if (fraction > 0.5 or (fraction == 0.5 and odd)) {
-        return @floatFromInt(truncated + 1);
-    }
-    if (fraction < -0.5 or (fraction == -0.5 and odd)) {
-        return @floatFromInt(truncated - 1);
-    }
-    return truncated_value;
+    // All callers bound |value| below 2^24. The biased encoding gives both
+    // the rounded value and its exact signed integer without a checked cast.
+    const rounding_constant: f64 = 0x1.8p52;
+    const biased = value + rounding_constant;
+    const biased_bits: u64 = @bitCast(biased);
+    return .{
+        .value = biased - rounding_constant,
+        .integer = @bitCast(biased_bits -% 0x4338_0000_0000_0000),
+    };
 }
 
 fn fastTwoSum(first: f64, second: f64) DoubleDouble {
@@ -122,10 +121,10 @@ fn databaseLookup(value: f64, fallback: f64) f64 {
     @setFloatMode(.strict);
 
     const value_bits: u64 = @bitCast(value);
-    var lower: i32 = 0;
-    var upper: i32 = @intCast(data.database.len - 1);
+    var lower: isize = 0;
+    var upper: isize = @intCast(data.database.len - 1);
     while (lower <= upper) {
-        const middle: i32 = @divTrunc(lower + upper, 2);
+        const middle: isize = @divTrunc(lower + upper, 2);
         const middle_index: usize = @intCast(middle);
         const database_bits: u64 = @bitCast(data.database[middle_index]);
         if (database_bits < value_bits) {
@@ -156,12 +155,13 @@ fn databaseLookup(value: f64, fallback: f64) f64 {
     return fallback;
 }
 
-fn accurate(value: f64) f64 {
+noinline fn accurate(value: f64) f64 {
     @setFloatMode(.strict);
 
     const value_bits: u64 = @bitCast(value);
-    const scaled = roundEvenFinite(0x1.a934f0979a371p+13 * value);
-    const rounded_integer: i64 = @intFromFloat(scaled);
+    const reduction = roundEvenFinite(0x1.a934f0979a371p+13 * value);
+    const scaled = reduction.value;
+    const rounded_integer = reduction.integer;
     const table_1_index: usize = @intCast(rounded_integer & 0x3f);
     const table_0_index: usize = @intCast((rounded_integer >> 6) & 0x3f);
     const exponent = rounded_integer >> 12;
@@ -258,23 +258,11 @@ pub fn exp10d(value: f64) f64 {
         }
     }
 
-    if ((bits << 16) == 0 and (absolute_bits >> 48) <= 0x4036) {
-        const rounded_value = roundEvenFinite(value);
-        if (rounded_value == value) {
-            const integer: i64 = @intFromFloat(rounded_value);
-            if (integer >= 0) {
-                var result: f64 = 1.0;
-                var count: i64 = 0;
-                while (count < integer) : (count += 1) result *= 10.0;
-                return result;
-            }
-        }
-    }
-
     if (absolute_bits <= 0x3c7b_cb7b_1526_e50e) return 1.0 + value;
 
-    const scaled = roundEvenFinite(0x1.a934f0979a371p+13 * value);
-    const rounded_integer: i64 = @intFromFloat(scaled);
+    const reduction = roundEvenFinite(0x1.a934f0979a371p+13 * value);
+    const scaled = reduction.value;
+    const rounded_integer = reduction.integer;
     const table_1_index: usize = @intCast(rounded_integer & 0x3f);
     const table_0_index: usize = @intCast((rounded_integer >> 6) & 0x3f);
     const exponent = rounded_integer >> 12;
