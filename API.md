@@ -337,6 +337,12 @@ This requirement does not claim that a current implementation satisfies it.
 A composition of separately rounded operations is not final evidence.
 This includes post-scaling by an approximation of `1/pi`, reciprocal-exponent power, and target-format power-by-squaring.
 
+The implemented bounded power kernels use fixed, format-specific integer storage.
+They use 32 `u64` limbs for `f16`, 256 limbs for `f32`, and 2,048 limbs for `f64`.
+`pown` and `compoundn` keep finite dyadic arithmetic exact and round once.
+`rootn` uses exact candidate and midpoint comparisons instead of a rounded reciprocal-power composition.
+These storage bounds prevent allocation. They do not specify a universal execution-time bound.
+
 #### Error and gamma
 
 | Root generic | Scalar implementation family |
@@ -430,6 +436,10 @@ They are not delegated to host library behavior.
 | `fminimum_num` | `fminimum_num{h,f,d}` |
 | `fmaximum_mag_num` | `fmaximum_mag_num{h,f,d}` |
 | `fminimum_mag_num` | `fminimum_mag_num{h,f,d}` |
+
+The binary16 `fmah` kernel multiplies and adds exact integer dyadics.
+It performs one final round-to-nearest, ties-to-even packing step.
+It does not use a widened host FMA followed by a second target-format rounding.
 
 The legacy `fmax` and `fmin` families use a deterministic local policy.
 This policy is a zmath contract, not a portable C guarantee.
@@ -590,82 +600,114 @@ Implementations must not replace those results with a host-library choice.
 The manifest must record every operation-specific exception before acceptance.
 Target status or source availability cannot substitute for this evidence.
 
-### CORE-MATH manifest
+### Typed scalar corpus manifest
 
-Before a manifest-gated scalar pair becomes accepted, the repository adds or updates a versioned contract at `spec/core-math-<date>.md`.
+Before a manifest-gated scalar pair becomes accepted, the repository updates a versioned contract at `spec/core-math-<date>.md`.
 
-The machine-readable manifest pins one CORE-MATH commit. It lists each accepted or unsupported function-format pair separately for `f16`, `f32`, and `f64`.
-The current schema-v2 manifest contains 315 sorted typed function rows.
-It accepts exactly six pairs: `exp/h`, `exp/f`, `exp/d`, `log/h`, `log/f`, and `sin/h`.
-Each accepted row uses `status = "correct"`, `oracle = "mpfr_arb"`, and `max_ulp = 0`.
-The remaining 309 rows use `status = "unsupported"`, `oracle = "none"`, and `max_ulp = 0`.
-The root `special_policy` must equal `"zmath_c23_v1"`.
-Every schema-v2 function row must set `special_policy = "zmath_c23_v1"`.
-This exact row token must match the root token. No other special-policy token is valid.
+The schema-3 manifest is `zmath-testing/test/corpus/manifest.toml`.
+It contains exactly 315 sorted typed function rows for `f16`, `f32`, and `f64`.
+It pins the CORE-MATH revision, 512-bit MPFR/Arb settings for evaluator paths that use them, `nearest_even`, and the special-value policy.
+The checked-in manifest is the only acceptance authority.
+A successful candidate campaign does not change a row's manifest status.
 
-Each entry defines the zmath operation, provenance, status, arity, typed inputs, typed result, oracle capability, special-value policy, and maximum ULP bound.
-The root field `operation_spelling` must equal `"c23_hfd_lowercase_v1"`.
-For standard H/F/D families, `op` stores the unsuffixed C23 operation base. The typed descriptors select the format, and this spelling convention derives the public scalar symbol by appending lowercase `h`, `f`, or `d`.
-This rule does not change the case or spelling of the operation base. Dedicated encoded operations, including the narrowing names, remain exact and are not transformed.
+Each row defines the operation, provenance, status, arity, typed inputs, typed result, oracle, special-value policy, and maximum ULP bound.
+The root `operation_spelling` value is `"c23_hfd_lowercase_v1"`.
+For a standard H/F/D family, the typed descriptors select the suffix.
+Dedicated encoded names, including narrowing operations, remain unchanged.
+
 The provenance vocabulary is exactly `["zmath", "core_math"]`.
-Each row uses one nonempty ordered subset of that vocabulary. The valid arrays are exactly `["zmath"]`, `["core_math"]`, and `["zmath", "core_math"]`.
-The parser rejects all other operation-spelling values and provenance arrays.
+Each row uses `["zmath"]`, `["core_math"]`, or `["zmath", "core_math"]`.
 Scalar results use `float:<format>`, `integer:<type>`, or `bool`.
 Structure results use `struct:<kind>:<format>`.
-The status-container kinds are:
+Status-container descriptors include:
 
-- `struct:atan2:h`, `struct:atan2:f`, and `struct:atan2:d` for `Atan2Result(T)`, with `value:T` and `resolved:bool` fields.
-- `struct:power:h`, `struct:power:f`, and `struct:power:d` for `PowerResult(T)`, with `value:T` and `ok:bool` fields.
-- `struct:integer:h`, `struct:integer:f`, and `struct:integer:d` for `IntegerResult`, with `value:i64` and `ok:bool` fields.
+- `struct:atan2:<format>` for `Atan2Result(T) { value: T, resolved: bool }`.
+- `struct:power:<format>` for `PowerResult(T) { value: T, ok: bool }`.
+- `struct:integer:<format>` for `IntegerResult { value: i64, ok: bool }`.
 
-All 27 status-container rows remain `unsupported` with `oracle = "none"` and `max_ulp = 0`. The descriptor records the public return shape; it does not grant implementation or manifest acceptance.
+These descriptors record the public return shape.
+They do not grant implementation, corpus evidence, or manifest acceptance.
 
-An entry is one of:
-
-- `correct`: the result is correctly rounded in `nearest_even`.
-- `bounded`: the result has a stated maximum ULP error in `nearest_even`.
-- `unsupported`: the manifest has no accepted accuracy claim for the pair. It does not state that an implementation is absent.
-
-A ULP comparison applies only to finite results of the same sign. Special-value rows require exact expected bit patterns.
-CORE-MATH source availability does not prove API implementation or manifest acceptance. Each format requires independent implementation and oracle evidence.
-
-The correct-rounding requirement for finite power, root, and pi-scaled results is a target requirement.
-It is not an implementation-status or manifest-acceptance claim.
-
-A future `correct` or `bounded` claim for an unsupported pair requires a manifest update and two independent forms of evidence.
-Within schema version 2, that row transition can change `status`, `oracle`, and `max_ulp` together.
-The resulting row must satisfy the existing schema-v2 relations.
+The status values are `correct`, `bounded`, and `unsupported`.
 An `unsupported` row uses `oracle = "none"` and `max_ulp = 0`.
-A `correct` or `bounded` row uses `oracle = "mpfr_arb"`.
-A `correct` row uses `max_ulp = 0`. A `bounded` row uses a non-negative `max_ulp` value.
-These value changes use existing fields and do not require a `schema_version` bump.
-A schema change requires a `schema_version` bump, including a change to fields, allowed values, field order, or validation semantics.
-First, reviewers must accept a complete rounding proof or an unchanged pinned upstream proof that applies to the exact implementation.
-Second, every finite oracle candidate must use MPFR at 512 bits with `MPFR_RNDN`.
-An Arb interval at 512 bits must round uniquely to the same target bits.
-The producer must fail on an ambiguous interval or an MPFR and Arb disagreement.
+An accepted row uses the evaluator class assigned by the authoritative C operation table.
+A `correct` row uses `max_ulp = 0`.
+A `bounded` row uses an approved non-negative `max_ulp` value.
+Schema 3 accepts `none`, `exact_bits`, `algebraic`, and `mpfr_arb`.
 
-The accepted corpus profile is exactly target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`.
+Status and oracle snapshots are not part of numerical descriptor identity.
+This permits review of candidate artifacts before a manifest promotion.
+The loader still checks that each snapshot has a valid status-oracle relation.
+It hashes the profile, numerical descriptors, special policy, ULP bound, and authoritative C signature.
+
+The current checked-in manifest accepts all 315 descriptors as `correct` with `max_ulp = 0`, backed by full publication and replay of 63,160,084 records and benchmarks for every descriptor.
+Do not infer acceptance from source exports, evaluator availability, or a filtered campaign.
+
+#### Oracle evidence classes
+
+The authoritative C operation table selects one evaluator for each of the 315 descriptors.
+The table assigns 150 descriptors to `exact_bits`, 126 to `mpfr_arb`, and 39 to `algebraic`.
+Operation spelling and manifest status do not select an evaluator.
+
+- `exact_bits` uses direct IEEE bit and integer models. It preserves bit-sensitive NaN and status behavior without numerical approximation.
+- `algebraic` uses exact GMP rational arithmetic for finite dyadic operations. Irrational algebraic roots use 512-bit MPFR candidates and 512-bit Arb enclosures.
+- `mpfr_arb` uses a 512-bit MPFR candidate and a 512-bit Arb proof, with operation-specific certified reductions where required.
+
+Exact-bit and algebraic boundary checks use exact integer or rational arithmetic.
+The MPFR/Arb oracle uses fixed 1,024-bit MPFR boundary containers where their capacity is sufficient for exact binary values.
+This boundary storage is not adaptive numerical evaluation.
+The numerical MPFR and Arb precision remains fixed at 512 bits.
+
+The generator fails closed when an evaluator reports unsupported, error, uncertainty, a descriptor mismatch, or an unresolved rounding cell.
+It does not increase numerical precision or emit a best-effort record.
+
+Fixed MPFR512 evaluation followed by target RNE can double-round
+`atan2((2^52-1)*2^-1074, 2)`.
+The generator may correct the initial candidate by one adjacent lower-magnitude value only under the following proof:
+
+1. Exact dyadic arithmetic proves that `t = abs(y/x)` equals the midpoint above the corrected candidate.
+2. The proof establishes `0 < t < 1`.
+3. Arb512 proves `t^3` is less than the gap from `t` to the next lower rounding midpoint.
+4. The analytic bound `t - t^3 < atan(t) < t` places the exact result inside the corrected candidate's rounding cell.
+
+The correction preserves the result sign.
+If any condition is unresolved, the generator rejects the record.
+
+For exponentials and powers, Arb512 can prove positive overflow in the log domain.
+This proof does not construct the enormous result.
+For negative noninteger `lgamma` inputs, the Arb proof uses the reflection formula and evaluates `lgamma` at a positive argument.
+
+#### Typed corpus publication
+
+The generator uses oracle ABI v2.
+Every request declares the operation bytes, arity, typed input fields, result layout, structure kind, and typed result fields.
+The generator compares the zmath runtime result with independent evaluator evidence before it writes a record.
+
+Published records use the length-framed binary `ZCDR` codec version 1.
+A record stores operation, ordered provenance, typed arguments, result descriptor, typed result fields, and `max_ulp`.
+Floating fields store the exact format, bits, and IEEE class.
+Other fields store their integer width, Boolean value, tag bytes, or rounding enumeration.
+
+A full publication covers all 315 descriptors.
+A filtered publication covers the exact `--operation` and `--format` selection.
+Metadata records the campaign class, seed, cardinality, selection rule, profile, and artifact digest.
+The 61 exhaustive unary H campaigns each enumerate all 65,536 input bit patterns.
+Only those campaigns claim exhaustive coverage of their one-argument binary16 domain.
+Selected Cartesian, explicit special-tuple, selected unary, bounded-integer, and exact-status campaigns cover only their declared tuples.
+
+The publication loader rejects `.incomplete`, requires `COMPLETE`, and verifies the metadata SHA-256.
+It also verifies the full or filtered scope, target profile, descriptor digest, record count, record order, and artifact SHA-256.
+Unavailable per-campaign source metadata uses the exact `source-metadata-unavailable` digest sentinel and `none` source fields.
+
+Generated raw records can be multi-gigabyte artifacts.
+Keep `generated/records/`, `generated/probes/`, `.incomplete`, and `*.tmp` local and ignored.
+Commit publication metadata, `COMPLETE`, `replay.txt`, and `benchmark.txt`.
+Regenerate the raw records with `generate-corpus` in a new checkout.
+
+The accepted corpus profile is target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`.
 No other target, CPU, or optimization mode is manifest-qualified.
-The current H artifacts for `exp`, `log`, and `sin` enumerate all 65,536 binary16 inputs.
-The `exp/f`, `exp/d`, and `log/f` artifacts contain deterministic selected cases.
-Those F and D samples provide corpus evidence only for their stored inputs.
-They are not exhaustive whole-domain proofs.
-Binary16 evidence is operation-specific and covers complete ordered public-input tuples.
-A unary operation with one `f16` argument has `65,536` encoded tuples.
-A binary operation must declare its ordered `(x, y)` tuple domain and each domain or special-value rule.
-It has `4,294,967,296` ordered encoded tuples when both arguments use `f16`.
-A ternary operation must declare its ordered `(x, y, z)` tuple domain and each domain or special-value rule.
-It has `281,474,976,710,656` ordered encoded tuples when all arguments use `f16`.
-These tuple domains include every zero, finite value, infinity, and NaN encoding in each argument position.
-An integer-parameter operation must declare its accepted integer set and its rejected complement.
-Correct-rounding enumeration pairs every floating tuple with every accepted integer value.
-For H `pown`, `compoundn`, and `rootn`, this is `65,536 * 129 = 8,454,144` accepted tuples.
-Separate proof must cover the exact false-status result and its precedence for every rejected `i64` value.
-Reviewers may accept reduced enumeration only with a proof that covers every omitted ordered tuple and domain rule.
-Coverage of only `65,536` values never proves a binary, ternary, or integer-parameter operation.
-A finite corpus alone is not a proof of correct rounding.
-
+Corpus evidence applies only to stored tuples unless an exhaustive campaign or separate proof covers the whole operation-format domain.
+Benchmark output measures performance only and does not change manifest acceptance.
 ## Complex API
 
 `zmath.complex` owns the canonical `Complexf` and `Complexd` types.
@@ -823,20 +865,52 @@ No public `Algebra(p, q, r, T)`, generic vector, generic quaternion, or `anytype
 ## Tests and benchmarks
 
 `zmath` has no MPFR, GMP, FLINT, Arb, BLIS, Eigen, or C++ runtime dependency.
+`~/projects/zmath-testing` owns integration tests, oracle generation, typed corpus replay, and benchmarks.
 
-`~/projects/zmath-testing` owns integration tests, oracle tests, corpus production, and benchmarks.
-The current scalar acceptance commands run only for target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`:
+The scalar tools use only target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe` for manifest-qualified evidence.
+These build steps install the typed tools:
+
+```text
+zig build oracle-generator -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build corpus-replay -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build bench-scalar -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+```
+
+The installed executables are:
+
+```text
+zig-out/bin/zmath-testing-corpus-producer
+zig-out/bin/zmath-corpus-replay
+zig-out/bin/zmath-scalar-matrix
+```
+
+Each executable accepts an optional first positional corpus root.
+The default root is `test/corpus`.
+Each also accepts `--operation=<manifest-op>` and `--format=h|f|d`.
+The filters can be used independently or together.
+
+The standard full-publication commands are:
 
 ```text
 zig build generate-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build oracle -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build bench -Dbench-target=scalar-log-f -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build run-bench -Dbench-target=scalar-log-f -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build replay-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build run-bench-scalar -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
 ```
 
-The oracle command replays immutable corpus rows.
-The F and D sample rows do not establish whole-domain proof.
-The benchmark commands measure performance only and do not change manifest acceptance.
+The build steps already pass `test/corpus` as the positional root.
+Append filters after `--`, for example:
 
-A numerical oracle test names the exact zmath symbol, type, manifest entry, input corpus, expected result, and acceptance rule.
-An external differential test or benchmark names its baseline library, version, build options, scalar type, dimensions, and operation.
+```text
+zig build generate-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe -- --operation=atan2 --format=d
+zig build replay-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe -- --operation=atan2 --format=d
+zig build run-bench-scalar -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe -- --operation=atan2 --format=d
+```
+
+The generator owns independent oracle evaluation and proof.
+Replay reads stored typed outputs and compares them with current zmath results.
+The replay executable does not link MPFR, Arb, GMP, or FLINT.
+The scalar benchmark validates publication metadata and artifact digests before measurement.
+It reports measurements only and does not grant manifest acceptance or whole-domain proof.
+
+A numerical oracle record names the exact zmath symbol, typed inputs, typed outputs, manifest descriptor, campaign, and acceptance rule.
+An external differential test names its baseline library, version, build options, scalar type, dimensions, and operation.
