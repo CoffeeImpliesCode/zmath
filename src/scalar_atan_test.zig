@@ -72,6 +72,11 @@ test "Atan family matches CORE-MATH rounding witnesses" {
     try expectAtandBits(0xbfe5_f457_e4f4_812e, 0xbfe3_3e04_6c84_3286);
 }
 
+test "binary64 atan refines small non-table arguments" {
+    // MPFR-512 and CORE-MATH agree on this refinement-path result.
+    try expectAtandBits(0x3f7d_7065_405b_4000, 0x3f7d_7044_0819_2854);
+}
+
 test "Atan family quiets NaNs and preserves payload and sign" {
     try expectAtanhBits(0x7c01, 0x7e01);
     try expectAtanhBits(0xfe55, 0xfe55);

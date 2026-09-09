@@ -376,8 +376,8 @@ pub fn hypotd(x: f64, y: f64) f64 {
     const residual_bits: u64 = @bitCast(@abs(residual));
     const root_exponent = root_bits & exponent_mask_d;
     const aidr = residual_bits +% (0x3fe << 52) -% root_exponent;
-    const midpoint = (aidr -% 0x3c9_0000_0000_0000 +% 16) >> 5;
-    if (midpoint == 0 or aidr < 0x39b_0000_0000_0000 or aidr > 0x3c9_ffff_ffff_ff80) {
+    const midpoint = (aidr -% 0x3c90_0000_0000_0000 +% 16) >> 5;
+    if (midpoint == 0 or aidr < 0x39b0_0000_0000_0000 or aidr > 0x3c9f_ffff_ffff_ff80) {
         root = hypotdHard(normalized_x, normalized_y);
     }
 

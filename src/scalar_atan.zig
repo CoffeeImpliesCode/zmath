@@ -189,7 +189,7 @@ fn mulDoubleDoubleAcc(x_high: f64, x_low: f64, c_high: f64, c_low: f64, low: *f6
     const low_high = c_low * x_high;
     const high_high = c_high * x_high;
     const high_error = @mulAdd(f64, c_high, x_high, -high_high);
-    const middle = high_error + low_high + high_low;
+    const middle = high_error + (low_high + high_low);
     return fastTwoSum(high_high, middle, low);
 }
 
@@ -208,7 +208,7 @@ fn atanPolyDoubleDouble(x_high: f64, x_low: f64, low: *f64) f64 {
     var index: i32 = 2;
     while (index > 0) {
         index -= 1;
-        coefficient_low = mulDoubleDoubleAcc(x_high, x_low, high, coefficient_low, &coefficient_low);
+        high = mulDoubleDoubleAcc(x_high, x_low, high, coefficient_low, &coefficient_low);
         const temporary_high = high + coefficients[@intCast(index)][0];
         const temporary_low = (coefficients[@intCast(index)][0] - temporary_high) + high;
         high = temporary_high;
