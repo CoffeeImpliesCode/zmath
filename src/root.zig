@@ -21,6 +21,57 @@ pub const LgammaResult = scalar_c23_types.LgammaResult;
 pub const CanonicalizeResult = scalar_c23_types.CanonicalizeResult;
 pub const PayloadResult = scalar_c23_types.PayloadResult;
 
+// ---------------------------------------------------------------------------
+// Lane-parallel result shapes
+//
+// The operations below route a `@Vector` argument to the lane-parallel entry
+// point of their family in `vector.zig`, so each of them must spell BOTH the
+// scalar result and the vector result. These three helpers are the whole
+// adjustment: every one of them leaves the scalar result type exactly as it
+// was and derives the vector result type from the argument alone.
+// ---------------------------------------------------------------------------
+
+/// The lane float type of `X`: the `@Vector` element type for a vector
+/// argument, and `X` itself for a scalar one.
+///
+/// A result struct such as `FrexpResult(T)` is parameterized by the lane type,
+/// never by the vector type, so a `@Vector(N, f32)` argument must bind
+/// `FrexpResult(f32)`.
+fn FloatLane(comptime X: anytype) type {
+    return switch (@typeInfo(X)) {
+        .vector => |v| v.child,
+        else => X,
+    };
+}
+
+/// The result type of an operation whose per-lane result is the struct `R`:
+/// `R` itself for a scalar argument, and a lane-ordered `[N]R` for a vector
+/// one.
+///
+/// Zig forbids a struct as a `@Vector` element type and reports "expected
+/// integer, float, bool, or pointer for the vector element type", so the
+/// vector result here is an array, never a `@Vector`. Element `i` is the value
+/// the scalar kernel returned for lane `i`.
+fn LaneResult(comptime R: type, comptime X: anytype) type {
+    return switch (@typeInfo(X)) {
+        .vector => |v| [v.len]R,
+        else => R,
+    };
+}
+
+/// The result type of an operation whose per-lane result is the non-struct
+/// value `R`: `R` itself for a scalar argument, and a real `@Vector(N, R)` for
+/// a vector one.
+///
+/// This is the shape of the integer-returning `ilogb` and `llogb` and of the
+/// boolean-returning `totalOrder` and `totalOrderMag`.
+fn LaneVector(comptime R: type, comptime X: anytype) type {
+    return switch (@typeInfo(X)) {
+        .vector => |v| @Vector(v.len, R),
+        else => R,
+    };
+}
+
 /// Computes the absolute value of `value` with the scalar implementation for
 /// its type.
 pub fn abs(value: anytype) @TypeOf(value) {
@@ -104,6 +155,7 @@ pub fn exp10m1(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn fma(a: anytype, b: anytype, c: anytype) @TypeOf(a) {
     const T = @TypeOf(a);
+    if (@typeInfo(T) == .vector) return vector.narrow.fmav(a, b, c);
     if (@TypeOf(b) != T or @TypeOf(c) != T) {
         @compileError("zmath.fma requires all arguments to have the same type");
     }
@@ -519,6 +571,7 @@ pub fn rint(value: anytype) @TypeOf(value) {
 
 pub fn round(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.roundv(value);
     if (T == f16) return scalar.roundh(value);
     if (T == f32) return scalar.roundf(value);
     if (T == f64) return scalar.roundd(value);
@@ -543,32 +596,36 @@ pub fn trunc(value: anytype) @TypeOf(value) {
     @compileError("zmath.trunc supports only f16, f32, and f64");
 }
 
-pub fn lrint(value: anytype) IntegerResult {
+pub fn lrint(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.lrintv(value);
     if (T == f16) return scalar.lrinth(value);
     if (T == f32) return scalar.lrintf(value);
     if (T == f64) return scalar.lrintd(value);
     @compileError("zmath.lrint supports only f16, f32, and f64");
 }
 
-pub fn llrint(value: anytype) IntegerResult {
+pub fn llrint(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.llrintv(value);
     if (T == f16) return scalar.llrinth(value);
     if (T == f32) return scalar.llrintf(value);
     if (T == f64) return scalar.llrintd(value);
     @compileError("zmath.llrint supports only f16, f32, and f64");
 }
 
-pub fn lround(value: anytype) IntegerResult {
+pub fn lround(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.lroundv(value);
     if (T == f16) return scalar.lroundh(value);
     if (T == f32) return scalar.lroundf(value);
     if (T == f64) return scalar.lroundd(value);
     @compileError("zmath.lround supports only f16, f32, and f64");
 }
 
-pub fn llround(value: anytype) IntegerResult {
+pub fn llround(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.llroundv(value);
     if (T == f16) return scalar.llroundh(value);
     if (T == f32) return scalar.llroundf(value);
     if (T == f64) return scalar.llroundd(value);
@@ -577,6 +634,7 @@ pub fn llround(value: anytype) IntegerResult {
 
 pub fn fromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.fromfpv(value, direction, width);
     if (T == f16) return scalar.fromfph(value, direction, width);
     if (T == f32) return scalar.fromfpf(value, direction, width);
     if (T == f64) return scalar.fromfpd(value, direction, width);
@@ -585,6 +643,7 @@ pub fn fromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value)
 
 pub fn ufromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.ufromfpv(value, direction, width);
     if (T == f16) return scalar.ufromfph(value, direction, width);
     if (T == f32) return scalar.ufromfpf(value, direction, width);
     if (T == f64) return scalar.ufromfpd(value, direction, width);
@@ -593,6 +652,7 @@ pub fn ufromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value
 
 pub fn fromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.fromfpxv(value, direction, width);
     if (T == f16) return scalar.fromfpxh(value, direction, width);
     if (T == f32) return scalar.fromfpxf(value, direction, width);
     if (T == f64) return scalar.fromfpxd(value, direction, width);
@@ -601,14 +661,16 @@ pub fn fromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value
 
 pub fn ufromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.ufromfpxv(value, direction, width);
     if (T == f16) return scalar.ufromfpxh(value, direction, width);
     if (T == f32) return scalar.ufromfpxf(value, direction, width);
     if (T == f64) return scalar.ufromfpxd(value, direction, width);
     @compileError("zmath.ufromfpx supports only f16, f32, and f64");
 }
 
-pub fn atan2(y: anytype, x: anytype) Atan2Result(@TypeOf(y)) {
+pub fn atan2(y: anytype, x: anytype) LaneResult(Atan2Result(FloatLane(@TypeOf(y))), @TypeOf(y)) {
     const T = @TypeOf(y);
+    if (@typeInfo(T) == .vector) return vector.struct_family.atan2v(y, x);
     if (@TypeOf(x) != T) {
         @compileError("zmath.atan2 requires both arguments to have the same type");
     }
@@ -645,8 +707,9 @@ pub fn atanpi(value: anytype) @TypeOf(value) {
     @compileError("zmath.atanpi supports only f16, f32, and f64");
 }
 
-pub fn atan2pi(y: anytype, x: anytype) Atan2Result(@TypeOf(y)) {
+pub fn atan2pi(y: anytype, x: anytype) LaneResult(Atan2Result(FloatLane(@TypeOf(y))), @TypeOf(y)) {
     const T = @TypeOf(y);
+    if (@typeInfo(T) == .vector) return vector.struct_family.atan2piv(y, x);
     if (@TypeOf(x) != T) {
         @compileError("zmath.atan2pi requires both arguments to have the same type");
     }
@@ -656,8 +719,9 @@ pub fn atan2pi(y: anytype, x: anytype) Atan2Result(@TypeOf(y)) {
     @compileError("zmath.atan2pi supports only f16, f32, and f64");
 }
 
-pub fn pown(value: anytype, exponent: i64) PowerResult(@TypeOf(value)) {
+pub fn pown(value: anytype, exponent: i64) LaneResult(PowerResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.pownv(value, exponent);
     if (T == f16) return scalar.pownh(value, exponent);
     if (T == f32) return scalar.pownf(value, exponent);
     if (T == f64) return scalar.pownd(value, exponent);
@@ -676,24 +740,27 @@ pub fn powr(base: anytype, exponent: anytype) @TypeOf(base) {
     @compileError("zmath.powr supports only f16, f32, and f64");
 }
 
-pub fn compoundn(value: anytype, exponent: i64) PowerResult(@TypeOf(value)) {
+pub fn compoundn(value: anytype, exponent: i64) LaneResult(PowerResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.compoundnv(value, exponent);
     if (T == f16) return scalar.compoundnh(value, exponent);
     if (T == f32) return scalar.compoundnf(value, exponent);
     if (T == f64) return scalar.compoundnd(value, exponent);
     @compileError("zmath.compoundn supports only f16, f32, and f64");
 }
 
-pub fn rootn(value: anytype, degree: i64) PowerResult(@TypeOf(value)) {
+pub fn rootn(value: anytype, degree: i64) LaneResult(PowerResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.rootnv(value, degree);
     if (T == f16) return scalar.rootnh(value, degree);
     if (T == f32) return scalar.rootnf(value, degree);
     if (T == f64) return scalar.rootnd(value, degree);
     @compileError("zmath.rootn supports only f16, f32, and f64");
 }
 
-pub fn lgamma(value: anytype) LgammaResult(@TypeOf(value)) {
+pub fn lgamma(value: anytype) LaneResult(LgammaResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.lgammav(value);
     if (T == f16) return scalar.lgammah(value);
     if (T == f32) return scalar.lgammaf(value);
     if (T == f64) return scalar.lgammad(value);
@@ -724,8 +791,9 @@ pub fn remainder(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.remainder supports only f16, f32, and f64");
 }
 
-pub fn remquo(x: anytype, y: anytype) RemquoResult(@TypeOf(x)) {
+pub fn remquo(x: anytype, y: anytype) LaneResult(RemquoResult(FloatLane(@TypeOf(x))), @TypeOf(x)) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.struct_family.remquov(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.remquo requires both arguments to have the same type");
     }
@@ -735,32 +803,36 @@ pub fn remquo(x: anytype, y: anytype) RemquoResult(@TypeOf(x)) {
     @compileError("zmath.remquo supports only f16, f32, and f64");
 }
 
-pub fn frexp(value: anytype) FrexpResult(@TypeOf(value)) {
+pub fn frexp(value: anytype) LaneResult(FrexpResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.frexpv(value);
     if (T == f16) return scalar.frexph(value);
     if (T == f32) return scalar.frexpf(value);
     if (T == f64) return scalar.frexpd(value);
     @compileError("zmath.frexp supports only f16, f32, and f64");
 }
 
-pub fn modf(value: anytype) ModfResult(@TypeOf(value)) {
+pub fn modf(value: anytype) LaneResult(ModfResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.modfv(value);
     if (T == f16) return scalar.modfh(value);
     if (T == f32) return scalar.modff(value);
     if (T == f64) return scalar.modfd(value);
     @compileError("zmath.modf supports only f16, f32, and f64");
 }
 
-pub fn ilogb(value: anytype) i32 {
+pub fn ilogb(value: anytype) LaneVector(i32, @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.ilogbv(value);
     if (T == f16) return scalar.ilogbh(value);
     if (T == f32) return scalar.ilogbf(value);
     if (T == f64) return scalar.ilogbd(value);
     @compileError("zmath.ilogb supports only f16, f32, and f64");
 }
 
-pub fn llogb(value: anytype) i64 {
+pub fn llogb(value: anytype) LaneVector(i64, @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.llogbv(value);
     if (T == f16) return scalar.llogbh(value);
     if (T == f32) return scalar.llogbf(value);
     if (T == f64) return scalar.llogbd(value);
@@ -778,6 +850,7 @@ pub fn logb(value: anytype) @TypeOf(value) {
 
 pub fn ldexp(value: anytype, exponent: i32) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.ldexpv(value, exponent);
     if (T == f16) return scalar.ldexph(value, exponent);
     if (T == f32) return scalar.ldexpf(value, exponent);
     if (T == f64) return scalar.ldexpd(value, exponent);
@@ -786,6 +859,7 @@ pub fn ldexp(value: anytype, exponent: i32) @TypeOf(value) {
 
 pub fn scalbn(value: anytype, exponent: i32) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.scalbnv(value, exponent);
     if (T == f16) return scalar.scalbnh(value, exponent);
     if (T == f32) return scalar.scalbnf(value, exponent);
     if (T == f64) return scalar.scalbnd(value, exponent);
@@ -794,6 +868,7 @@ pub fn scalbn(value: anytype, exponent: i32) @TypeOf(value) {
 
 pub fn scalbln(value: anytype, exponent: i64) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.scalblnv(value, exponent);
     if (T == f16) return scalar.scalblnh(value, exponent);
     if (T == f32) return scalar.scalblnf(value, exponent);
     if (T == f64) return scalar.scalblnd(value, exponent);
@@ -862,6 +937,7 @@ pub fn fminimum(x: anytype, y: anytype) @TypeOf(x) {
 
 fn fmaximumMag(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.fmaximumMagv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fmaximum_mag requires both arguments to have the same type");
     }
@@ -875,6 +951,7 @@ pub const fmaximum_mag = fmaximumMag;
 
 fn fminimumMag(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.fminimumMagv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fminimum_mag requires both arguments to have the same type");
     }
@@ -888,6 +965,7 @@ pub const fminimum_mag = fminimumMag;
 
 fn fmaximumNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.fmaximumNumv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fmaximum_num requires both arguments to have the same type");
     }
@@ -901,6 +979,7 @@ pub const fmaximum_num = fmaximumNum;
 
 fn fminimumNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.fminimumNumv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fminimum_num requires both arguments to have the same type");
     }
@@ -914,6 +993,7 @@ pub const fminimum_num = fminimumNum;
 
 fn fmaximumMagNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.fmaximumMagNumv(x, y);
     if (@TypeOf(y) != T) {
         @compileError(
             "zmath.fmaximum_mag_num requires both arguments to have the same type",
@@ -929,6 +1009,7 @@ pub const fmaximum_mag_num = fmaximumMagNum;
 
 fn fminimumMagNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.fminimumMagNumv(x, y);
     if (@TypeOf(y) != T) {
         @compileError(
             "zmath.fminimum_mag_num requires both arguments to have the same type",
@@ -942,8 +1023,9 @@ fn fminimumMagNum(x: anytype, y: anytype) @TypeOf(x) {
 
 pub const fminimum_mag_num = fminimumMagNum;
 
-pub fn canonicalize(value: anytype) CanonicalizeResult(@TypeOf(value)) {
+pub fn canonicalize(value: anytype) LaneResult(CanonicalizeResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.canonicalizev(value);
     if (T == f16) return ieee.canonicalizeh(value);
     if (T == f32) return ieee.canonicalizef(value);
     if (T == f64) return ieee.canonicalized(value);
@@ -952,6 +1034,7 @@ pub fn canonicalize(value: anytype) CanonicalizeResult(@TypeOf(value)) {
 
 pub fn copySign(value: anytype, sign: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.copySignv(value, sign);
     if (@TypeOf(sign) != T) {
         @compileError("zmath.copySign requires both arguments to have the same type");
     }
@@ -970,6 +1053,7 @@ pub fn nan(comptime T: type, tag: []const u8) T {
 
 pub fn nextAfter(from: anytype, to: anytype) @TypeOf(from) {
     const T = @TypeOf(from);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.nextAfterv(from, to);
     if (@TypeOf(to) != T) {
         @compileError("zmath.nextAfter requires both arguments to have the same type");
     }
@@ -981,6 +1065,7 @@ pub fn nextAfter(from: anytype, to: anytype) @TypeOf(from) {
 
 pub fn nextToward(value: anytype, toward: f64) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.intarg.nextTowardv(value, toward);
     if (T == f16) return ieee.nextTowardh(value, toward);
     if (T == f32) return ieee.nextTowardf(value, toward);
     if (T == f64) return ieee.nextTowardd(value, toward);
@@ -989,6 +1074,7 @@ pub fn nextToward(value: anytype, toward: f64) @TypeOf(value) {
 
 pub fn nextUp(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.nextUpv(value);
     if (T == f16) return ieee.nextUph(value);
     if (T == f32) return ieee.nextUpf(value);
     if (T == f64) return ieee.nextUpd(value);
@@ -997,14 +1083,16 @@ pub fn nextUp(value: anytype) @TypeOf(value) {
 
 pub fn nextDown(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.nextDownv(value);
     if (T == f16) return ieee.nextDownh(value);
     if (T == f32) return ieee.nextDownf(value);
     if (T == f64) return ieee.nextDownd(value);
     @compileError("zmath.nextDown supports only f16, f32, and f64");
 }
 
-pub fn totalOrder(left: anytype, right: anytype) bool {
+pub fn totalOrder(left: anytype, right: anytype) LaneVector(bool, @TypeOf(left)) {
     const T = @TypeOf(left);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.totalOrderv(left, right);
     if (@TypeOf(right) != T) {
         @compileError("zmath.totalOrder requires both arguments to have the same type");
     }
@@ -1014,8 +1102,9 @@ pub fn totalOrder(left: anytype, right: anytype) bool {
     @compileError("zmath.totalOrder supports only f16, f32, and f64");
 }
 
-pub fn totalOrderMag(left: anytype, right: anytype) bool {
+pub fn totalOrderMag(left: anytype, right: anytype) LaneVector(bool, @TypeOf(left)) {
     const T = @TypeOf(left);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.totalOrderMagv(left, right);
     if (@TypeOf(right) != T) {
         @compileError("zmath.totalOrderMag requires both arguments to have the same type");
     }
@@ -1027,22 +1116,25 @@ pub fn totalOrderMag(left: anytype, right: anytype) bool {
 
 pub fn getPayload(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ieee_family.getPayloadv(value);
     if (T == f16) return ieee.getPayloadh(value);
     if (T == f32) return ieee.getPayloadf(value);
     if (T == f64) return ieee.getPayloadd(value);
     @compileError("zmath.getPayload supports only f16, f32, and f64");
 }
 
-pub fn setPayload(value: anytype) PayloadResult(@TypeOf(value)) {
+pub fn setPayload(value: anytype) LaneResult(PayloadResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.setPayloadv(value);
     if (T == f16) return ieee.setPayloadh(value);
     if (T == f32) return ieee.setPayloadf(value);
     if (T == f64) return ieee.setPayloadd(value);
     @compileError("zmath.setPayload supports only f16, f32, and f64");
 }
 
-pub fn setPayloadSig(value: anytype) PayloadResult(@TypeOf(value)) {
+pub fn setPayloadSig(value: anytype) LaneResult(PayloadResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.struct_family.setPayloadSigv(value);
     if (T == f16) return ieee.setPayloadSigh(value);
     if (T == f32) return ieee.setPayloadSigf(value);
     if (T == f64) return ieee.setPayloadSigd(value);
@@ -1050,26 +1142,38 @@ pub fn setPayloadSig(value: anytype) PayloadResult(@TypeOf(value)) {
 }
 
 pub fn fadd(x: f64, y: f64) f32 {
+    const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.narrow.faddv(x, y);
     return scalar_narrow.fadd(x, y);
 }
 
 pub fn fsub(x: f64, y: f64) f32 {
+    const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.narrow.fsubv(x, y);
     return scalar_narrow.fsub(x, y);
 }
 
 pub fn fmul(x: f64, y: f64) f32 {
+    const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.narrow.fmulv(x, y);
     return scalar_narrow.fmul(x, y);
 }
 
 pub fn fdiv(x: f64, y: f64) f32 {
+    const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.narrow.fdivv(x, y);
     return scalar_narrow.fdiv(x, y);
 }
 
 pub fn ffma(x: f64, y: f64, z: f64) f32 {
+    const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.narrow.ffmav(x, y, z);
     return scalar_narrow.ffma(x, y, z);
 }
 
 pub fn fsqrt(x: f64) f32 {
+    const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.narrow.fsqrtv(x);
     return scalar_narrow.fsqrt(x);
 }
 
@@ -1154,6 +1258,7 @@ test {
     _ = @import("ieee_c23_optional_test.zig");
     _ = @import("c23_public_surface_test.zig");
     _ = @import("vector_test.zig");
+    _ = @import("vector_surface_test.zig");
 }
 
 test "root exports nearest-even Atan H, F, and D" {

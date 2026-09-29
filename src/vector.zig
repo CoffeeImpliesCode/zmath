@@ -17,16 +17,95 @@
 //!   not already used by another generic entry point (for example `sin` has no
 //!   `sinhv`, because `sinh` already defines the generic `sinhv`).
 //!
-//! These cover only the elementwise float-to-float operations. Operations that
-//! return a struct, return an integer, or take an integer argument are not
-//! vectorized.
+//! ## Families
+//!
+//! This module holds the float-to-float surface, where a lane maps to a lane of
+//! the same float type: `@Vector(N, T) -> @Vector(N, T)`. The operations whose
+//! lane maps to something else live in four sibling modules, re-exported here so
+//! the whole `@Vector` surface is reachable as `zmath.vector.*`.
+//!
+//! - `narrow` holds the ternary float-to-float operation `fma`, and the six C23
+//!   narrowing operations `fadd`, `fsub`, `fmul`, `fdiv`, `ffma` and `fsqrt`,
+//!   which take `f64` lanes and produce `f32` lanes. Their lane type and their
+//!   result element type are both fixed, so they carry no per-format forms.
+//! - `ieee_family` holds the remaining IEEE and miscellaneous float-to-float
+//!   operations, the integer-returning `ilogb` and `llogb`, and the
+//!   boolean-returning `totalOrder` and `totalOrderMag`.
+//! - `intarg` holds the eleven operations that take a non-float argument: the
+//!   `i32` exponent of `ldexp` and `scalbn`, the `i64` exponent of `scalbln`
+//!   and of the `pown`, `compoundn` and `rootn` power family, the `f64` target
+//!   of `nextToward`, and the `FromFpRound` direction and `u32` width of the
+//!   `fromfp` family. Each extra argument is a broadcast runtime scalar; the six
+//!   exponent operations also take a per-lane integer vector under a `Lanes`
+//!   suffix.
+//! - `struct_family` holds the thirteen operations whose scalar kernel returns a
+//!   result struct.
+//! - `core` is the shared per-lane mapping core the other four build on. It is
+//!   public so a caller can write a new lane-parallel entry point from the same
+//!   helpers, with the same per-lane bit-identity.
+//!
+//! ## Result shape
+//!
+//! Most results are a real `@Vector(N, R)`: the lane type for float-to-float,
+//! `f32` for the narrowing operations, `i32` or `i64` for `ilogb` and `llogb`,
+//! and `bool` for `totalOrder` and `totalOrderMag`.
+//!
+//! The result-struct operations cannot be. Zig forbids a struct as a `@Vector`
+//! element type and reports "expected integer, float, bool, or pointer for the
+//! vector element type", so `struct_family` returns a lane-ordered array
+//! `[N]Result` instead, and so do `pown`, `compoundn` and `rootn` in `intarg`.
+//! Element `i` of that array is the value the scalar kernel itself returned for
+//! lane `i`, moved as a whole, in lane order, so the per-lane bit-identity
+//! guarantee is unchanged. Note what this shape does NOT buy: the kernel runs
+//! once per lane, exactly as a scalar loop would, so there is no throughput
+//! advantage and no SIMD acceleration over a scalar loop. The value is a
+//! uniform lane-parallel API, nothing more.
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
 
+/// The shared per-lane mapping core, behind `narrow`, `ieee_family` and
+/// `intarg`.
+pub const core = @import("vector_core.zig");
+
+/// The thirteen operations whose scalar kernel returns a result struct.
+pub const struct_family = @import("vector_struct.zig");
+
+/// The eleven operations that take a non-float extra argument.
+pub const intarg = @import("vector_intarg.zig");
+
+/// The ternary `fma` and the six C23 narrowing operations.
+pub const narrow = @import("vector_narrow.zig");
+
+/// The remaining IEEE and miscellaneous operations, including the
+/// integer-returning and boolean-returning ones.
+pub const ieee_family = @import("vector_ieee.zig");
+
 // ---------------------------------------------------------------------------
 // Core per-lane application
 // ---------------------------------------------------------------------------
+
+// Names follow `op + type + v`: `expfv` applies the binary32 kernel, `expdv`
+// the binary64 one, and `expv` picks the kernel from the lane type. Where an
+// operation name already ends in a format letter the two forms collide, because
+// `sinhv`, `coshv`, `tanhv`, `asinhv`, `acoshv`, and `atanhv` are the GENERIC
+// entry points for `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, and `atanh`. The
+// binary16 specializations for `sin`, `cos`, `tan`, `asin`, `acos`, and `atan`
+// are therefore intentionally absent, and binary16 callers use the generic
+// `sinv`, `cosv`, `tanv`, `asinv`, `acosv`, and `atanv`.
+//
+// The binary16 kernel of a bare operation is not its hyperbolic twin: `root.sin`
+// binds f16 to `scalar.sinh`, the binary16 SINE, and not `scalar.sinhh`, the
+// binary16 HYPERBOLIC SINE. The same holds for `cos` -> `scalar.cosh`,
+// `tan` -> `scalar.tanh`, and the inverse-hyperbolic equivalents. The surface
+// below is machine-derived from the dispatch lines in `root.zig`, and
+// `vector_surface_test.zig` is the guard over that derivation.
+//
+// The two helpers in this section carry a lane to a lane of the same float
+// type, so they serve only the float-to-float surface declared above. An
+// integer, boolean, or narrowing result needs the explicit result element type
+// of `core`, and a result struct needs the lane-ordered array helpers of
+// `struct_family`.
 
 /// Applies the unary scalar kernel `f` to every lane of `x`.
 ///

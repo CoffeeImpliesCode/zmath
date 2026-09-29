@@ -7,7 +7,7 @@ This document defines the target API and identifies the currently implemented pu
 The current public root exports the `zmath.ieee`, `zmath.scalar`, and `zmath.vector` modules, their shared result types, and the C23 source surface defined in `spec/core-math-2026-08-22.md`.
 It also exports `add` and `printAnotherMessage`.
 The `zmath.complex`, `zmath.quaternion`, `zmath.matrix`, `zmath.linalg`, `zmath.geometry`, and `zmath.algebra` module paths below remain planned.
-`zmath.vector` is implemented as the SIMD `@Vector` layer described in [Vector API](#vector-api); it is distinct from the planned linear-algebra `Vec*` value types in [Vectors and quaternions](#vectors-and-quaternions).
+`zmath.vector` is implemented as the portable `@Vector` layer described in [Vector API](#vector-api): 417 public entry points covering the elementwise scalar operations, including the result-struct, integer-argument, integer-returning, boolean-returning, and narrowing ones. It is distinct from the planned linear-algebra `Vec*` value types in [Vectors and quaternions](#vectors-and-quaternions), which remain unimplemented.
 
 ## Scope
 
@@ -46,6 +46,8 @@ src/
   algebra.zig
 ```
 
+`zmath.vector` is implemented across `src/vector*.zig`: `src/vector.zig` plus the five modules it re-exports, as described in [Vector API](#vector-api).
+
 The dependency direction is:
 
 ```text
@@ -60,19 +62,54 @@ Geometry and algebra do not depend on each other.
 
 ## Vector API
 
-`zmath.vector` provides SIMD-style `@Vector` overloads for the elementwise
-float-to-float operations. It is a distinct layer from the planned
-linear-algebra `Vec*` value types described in [Vectors and
-quaternions](#vectors-and-quaternions); those remain unimplemented.
+`zmath.vector` provides `@Vector` overloads for the elementwise scalar
+operations: 417 public entry points across six modules. It is a distinct
+layer from the planned linear-algebra `Vec*` value types described in
+[Vectors and quaternions](#vectors-and-quaternions); those remain
+unimplemented.
 
 Every vector operation applies the identical accepted scalar kernel to each
 lane. Lane `i` of a vector result is therefore bit-for-bit equal to the scalar
-result for lane `i` of the input. This preserves the `max_ulp = 0` contract and
-the immutable corpus: the vector path is a per-lane application of the same
-scalar code, never a re-derived polynomial, and it requires no new acceptance
-evidence.
+result for lane `i` of the input. That is what preserves the `max_ulp = 0`
+contract and the immutable corpus, so the vector surface requires no new
+acceptance evidence under the independent [status terms](#status-terms): the
+vector path is a per-lane application of the same scalar code, never a
+re-derived polynomial.
 
-Each elementwise operation is available in three forms:
+`src/vector_surface_test.zig` guards this surface, and `src/vector_test.zig` carries the per-lane bit-identity tests, including an exhaustive pass over all 65,536 binary16 bit patterns.
+
+The layer is portable. `@Vector` is lowered by the compiler for the selected
+target. There is no runtime CPU detection, no hand-written per-ISA kernel, and
+no per-format selection beyond the lane type itself. What the layer provides
+is a uniform lane-parallel API, not a numerical speedup over a scalar loop.
+
+### Modules
+
+| Module | Source | Covers |
+| --- | --- | --- |
+| `zmath.vector` | `src/vector.zig` | The 214 float-to-float entry points, where a lane maps to a lane of the same float type |
+| `zmath.vector.struct_family` | `src/vector_struct.zig` | The 13 operations whose scalar kernel returns a result struct |
+| `zmath.vector.intarg` | `src/vector_intarg.zig` | The 11 operations that take a non-float argument |
+| `zmath.vector.narrow` | `src/vector_narrow.zig` | The ternary `fma` and the 6 C23 narrowing operations |
+| `zmath.vector.ieee_family` | `src/vector_ieee.zig` | The remaining IEEE and miscellaneous operations, including the integer-returning and boolean-returning ones |
+| `zmath.vector.core` | `src/vector_core.zig` | The shared per-lane mapping core behind `intarg`, `narrow`, and `ieee_family` |
+
+The four families and `core` are re-exported from `zmath.vector`, so the whole `@Vector`
+surface is reachable as `zmath.vector.*`. `core` is public so that a caller
+can write a further lane-parallel entry point from the same helpers, with the
+same per-lane bit-identity. `struct_family` does not use it, because every
+`core` helper returns a `@Vector`; it carries its own per-lane helpers instead.
+
+96 of the 99 top-level `pub fn` operations in `zmath` accept a `@Vector` and
+route to this layer. The three that do not are `nan`, because its type
+argument is a `comptime` type and it therefore has no lane to map over, and
+the two Zig-init template leftovers `printAnotherMessage` and `add`, which are
+not mathematics operations. The vector spelling of a NaN is `@splat` at the
+call site.
+
+### Naming
+
+Each operation is available in these forms:
 
 - As a top-level generic overload: `zmath.sin(x)` where `x: @Vector(N, T)` with
   `T` one of `f16`, `f32`, or `f64`. The element type selects the scalar kernel,
@@ -80,8 +117,9 @@ Each elementwise operation is available in three forms:
 - As a generic vector entry point: `zmath.vector.sinv(x)`, which selects the
   scalar kernel from the lane type.
 - As specialized entry points that pin the lane type: `zmath.vector.sinfv` and
-  `zmath.vector.sindv` for `f32` and `f64`, plus `zmath.vector.sinhv` for
-  `f16` where that name is not already used by another generic entry point.
+  `zmath.vector.sindv` for `f32` and `f64`, plus `zmath.vector.exphv` for `f16`,
+  which is the spelling wherever the `f16` name is not already used by another
+  generic entry point.
 
 The specialized name is the operation name, the format letter, and `v`
 (for example `sinfv` for the sine of a `@Vector(N, f32)`).
@@ -90,25 +128,86 @@ entry point, the specialized name is omitted and the generic `opv` entry point
 serves binary16 as well. This affects the bare trigonometry operations
 `sin`, `cos`, `tan`, `asin`, `acos`, and `atan`, because their binary16
 specialization would otherwise collide with the generic entry point of the
-corresponding hyperbolic operation (`sinhv`, `coshv`, `tanhv`, `asinhhv`,
-`acoshhv`, `atanhhv`). No operation loses coverage; binary16 callers use the
+corresponding hyperbolic operation (`sinhv`, `coshv`, `tanhv`, `asinhv`,
+`acoshv`, `atanhv`). No operation loses coverage; binary16 callers use the
 generic `opv` form.
 
+`zmath.vector.sinhv` is therefore the binary16 HYPERBOLIC sine applied to
+`@Vector(N, f16)` lanes, not the binary16 SINE. The bare trigonometric
+generics `sinv`, `cosv`, `tanv`, `asinv`, `acosv`, and `atanv` keep the f16
+binding of the root dispatch, where `sin` maps to `zmath.scalar.sinh` (the
+binary16 sine), `cos` to `zmath.scalar.cosh`, and `tan` to `zmath.scalar.tanh`,
+while `sinh` maps to `zmath.scalar.sinhh`. See
+[Generic dispatch](#generic-dispatch).
+
 ```text
-zmath.sin(@Vector(4, f32))          // top-level generic overload
-zmath.vector.sinv(@Vector(4, f32))   // generic vector entry point
-zmath.vector.sinfv(@Vector(4, f32))  // binary32 specialization
-zmath.vector.sindv(@Vector(2, f64))  // binary64 specialization
-zmath.vector.powv(a, b)              // elementwise binary
+zmath.sin(@Vector(4, f32))           // top-level generic overload
+zmath.vector.sinv(@Vector(4, f32))    // generic vector entry point
+zmath.vector.sinfv(@Vector(4, f32))   // binary32 specialization
+zmath.vector.sindv(@Vector(2, f64))   // binary64 specialization
+zmath.vector.powv(a, b)               // elementwise binary
+zmath.vector.sinhv(@Vector(4, f16))   // binary16 HYPERBOLIC sine
 ```
 
-Vector operations cover the elementwise float-to-float operations only.
-Operations that return a struct (`atan2`, `atan2pi`, `lgamma`, `frexp`,
-`modf`, `remquo`, `canonicalize`, and the integer-power family), that return an
-integer (`ilogb`, `llogb`, `lrint`, `llrint`), that take an integer argument
-(`ldexp`, `scalbn`, `scalbln`, `pown`, `rootn`, `compoundn`), or that are
-ternary or narrowing (`fma`, `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, `fsqrt`,
-`fromfp`) are not vectorized.
+### Result shapes
+
+Most results are a real `@Vector(N, R)`:
+
+| Operations | Result |
+| --- | --- |
+| Float-to-float, and the narrowing operations | `@Vector(N, T)`, and `@Vector(N, f32)` for `@Vector(N, f64)` narrowing input |
+| `ilogb` and `llogb` | `@Vector(N, i32)` and `@Vector(N, i64)` |
+| `totalOrder` and `totalOrderMag` | `@Vector(N, bool)` |
+
+The 13 result-struct operations cannot be a `@Vector`. Zig 0.16 forbids a
+struct as a vector element type and reports "expected integer, float, bool, or
+pointer for the vector element type", so `atan2`, `atan2pi`, `lgamma`,
+`frexp`, `modf`, `remquo`, `canonicalize`, `setPayload`, `setPayloadSig`,
+`lrint`, `llrint`, `lround`, and `llround` return a lane-ordered array
+`[N]Result` instead, and so do `pown`, `compoundn`, and `rootn`, which also
+return a result struct. Element `i` of that array is the value the scalar
+kernel itself returned for lane `i`, moved whole and in lane order, so the
+per-lane bit-identity guarantee is unchanged. This is a language limitation,
+not an oversight.
+
+The array shape buys no throughput. The kernel is applied once per lane,
+exactly as a scalar loop would, so the array form is a uniform lane-parallel
+API and not SIMD acceleration.
+
+Result structs in `scalar_c23_types.zig` are bare `struct` values with auto
+layout. They are never `extern` and never `packed`, so `@bitCast` and
+`@offsetOf` do not apply to them. Every field is assigned explicitly and
+nothing is reinterpreted.
+
+### Integer-argument operations
+
+`zmath.vector.intarg` holds the 11 operations that take a non-float argument.
+Each extra argument has two forms:
+
+- A broadcast runtime scalar applied to every lane, for example
+  `ldexpv(x, exponent: i32)` and `scalbnv(x, exponent: i32)`,
+  `scalblnv(x, exponent: i64)`, the power family, and
+  `nextTowardv(x, toward: f64)`. The `fromfp` family takes two broadcast
+  scalars, a `FromFpRound` direction and a `u32` width.
+- A per-lane integer vector under a `Lanes` suffix, holding a `@Vector(N, i32)`
+  or `@Vector(N, i64)` of exponents, for example `ldexpvLanes(x, e)` and
+  `pownvLanes(x, e)`.
+
+`nextToward` has no `Lanes` form, because its `toward` argument is always
+`f64` and each per-format kernel applies its own internal tolerance.
+
+`pownv`, `compoundnv`, and `rootnv` return the lane-ordered
+`[N]PowerResult(T)` array described above, in both the broadcast and the
+`Lanes` form.
+
+```text
+zmath.vector.ldexpv(x, 3)               // one broadcast exponent
+zmath.vector.ldexpvLanes(x, e)           // one exponent per lane
+zmath.vector.pownvLanes(x, e)            // [N]PowerResult(T), lane-ordered
+zmath.vector.ilogbv(x)                   // @Vector(N, i32)
+zmath.vector.totalOrderv(a, b)           // @Vector(N, bool)
+zmath.vector.atan2v(y, x)                // [N]Atan2Result(T), lane-ordered
+```
 
 ## IEEE and scalar API
 
@@ -796,6 +895,8 @@ Finite complex results use the scalar manifest accuracy contract for each compon
 ## Vectors and quaternions
 
 `zmath.vector` owns `Vec2f`, `Vec3f`, `Vec4f`, `Vec2d`, `Vec3d`, and `Vec4d`. Each is a value type with named components.
+
+These are target names and are not implemented. They are not the `@Vector` layer of [Vector API](#vector-api), which reuses the same module path for a different purpose.
 
 `zmath.quaternion` owns raw Hamilton types and validated rotation types:
 
