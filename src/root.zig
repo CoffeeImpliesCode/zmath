@@ -4,6 +4,7 @@ const Io = std.Io;
 
 pub const ieee = @import("ieee.zig");
 pub const scalar = @import("scalar.zig");
+pub const vector = @import("vector.zig");
 const generic_scalar_test = @import("generic_scalar_test.zig");
 const c23_public_surface_test = @import("c23_public_surface_test.zig");
 const scalar_c23_types = @import("scalar_c23_types.zig");
@@ -24,6 +25,7 @@ pub const PayloadResult = scalar_c23_types.PayloadResult;
 /// its type.
 pub fn abs(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.absv(value);
     if (T == f16) return scalar.absh(value);
     if (T == f32) return scalar.absf(value);
     if (T == f64) return scalar.absd(value);
@@ -35,6 +37,7 @@ pub fn abs(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn exp(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.expv(value);
     if (T == f16) return scalar.exph(value);
     if (T == f32) return scalar.expf(value);
     if (T == f64) return scalar.expd(value);
@@ -47,6 +50,7 @@ pub fn exp(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn pow(base: anytype, exponent: anytype) @TypeOf(base) {
     const T = @TypeOf(base);
+    if (@typeInfo(T) == .vector) return vector.powv(base, exponent);
     if (@TypeOf(exponent) != T) {
         @compileError("zmath.pow requires base and exponent to have the same type");
     }
@@ -61,6 +65,7 @@ pub fn pow(base: anytype, exponent: anytype) @TypeOf(base) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn exp10(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.exp10v(value);
     if (T == f16) return scalar.exp10h(value);
     if (T == f32) return scalar.exp10f(value);
     if (T == f64) return scalar.exp10d(value);
@@ -73,6 +78,7 @@ pub fn exp10(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn exp2m1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.exp2m1v(value);
     if (T == f16) return scalar.exp2m1h(value);
     if (T == f32) return scalar.exp2m1f(value);
     if (T == f64) return scalar.exp2m1d(value);
@@ -85,6 +91,7 @@ pub fn exp2m1(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn exp10m1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.exp10m1v(value);
     if (T == f16) return scalar.exp10m1h(value);
     if (T == f32) return scalar.exp10m1f(value);
     if (T == f64) return scalar.exp10m1d(value);
@@ -112,6 +119,7 @@ pub fn fma(a: anytype, b: anytype, c: anytype) @TypeOf(a) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn erfc(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.erfcv(value);
     if (T == f16) return scalar.erfch(value);
     if (T == f32) return scalar.erfcf(value);
     if (T == f64) return scalar.erfcd(value);
@@ -124,6 +132,7 @@ pub fn erfc(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn tgamma(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.tgammav(value);
     if (T == f16) return scalar.tgammah(value);
     if (T == f32) return scalar.tgammaf(value);
     if (T == f64) return scalar.tgammad(value);
@@ -136,6 +145,7 @@ pub fn tgamma(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn log(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.logv(value);
     if (T == f16) return scalar.logh(value);
     if (T == f32) return scalar.logf(value);
     if (T == f64) return scalar.logd(value);
@@ -147,6 +157,7 @@ pub fn log(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn log2(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.log2v(value);
     if (T == f16) return scalar.log2h(value);
     if (T == f32) return scalar.log2f(value);
     if (T == f64) return scalar.log2d(value);
@@ -158,6 +169,7 @@ pub fn log2(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn log2p1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.log2p1v(value);
     if (T == f16) return scalar.log2p1h(value);
     if (T == f32) return scalar.log2p1f(value);
     if (T == f64) return scalar.log2p1d(value);
@@ -170,6 +182,7 @@ pub fn log2p1(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn log10(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.log10v(value);
     if (T == f16) return scalar.log10h(value);
     if (T == f32) return scalar.log10f(value);
     if (T == f64) return scalar.log10d(value);
@@ -181,6 +194,7 @@ pub fn log10(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn log10p1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.log10p1v(value);
     if (T == f16) return scalar.log10p1h(value);
     if (T == f32) return scalar.log10p1f(value);
     if (T == f64) return scalar.log10p1d(value);
@@ -193,6 +207,7 @@ pub fn log10p1(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn erf(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.erfv(value);
     if (T == f16) return scalar.erfh(value);
     if (T == f32) return scalar.erff(value);
     if (T == f64) return scalar.erfd(value);
@@ -205,6 +220,7 @@ pub fn erf(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn sinh(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.sinhv(value);
     if (T == f16) return scalar.sinhh(value);
     if (T == f32) return scalar.sinhf(value);
     if (T == f64) return scalar.sinhd(value);
@@ -216,6 +232,7 @@ pub fn sinh(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn sin(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.sinv(value);
     if (T == f16) return scalar.sinh(value);
     if (T == f32) return scalar.sinf(value);
     if (T == f64) return scalar.sind(value);
@@ -227,6 +244,7 @@ pub fn sin(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn sinpi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.sinpiv(value);
     if (T == f16) return scalar.sinpih(value);
     if (T == f32) return scalar.sinpif(value);
     if (T == f64) return scalar.sinpid(value);
@@ -238,6 +256,7 @@ pub fn sinpi(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn cos(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.cosv(value);
     if (T == f16) return scalar.cosh(value);
     if (T == f32) return scalar.cosf(value);
     if (T == f64) return scalar.cosd(value);
@@ -249,6 +268,7 @@ pub fn cos(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn cospi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.cospiv(value);
     if (T == f16) return scalar.cospih(value);
     if (T == f32) return scalar.cospif(value);
     if (T == f64) return scalar.cospid(value);
@@ -260,6 +280,7 @@ pub fn cospi(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn cosh(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.coshv(value);
     if (T == f16) return scalar.coshh(value);
     if (T == f32) return scalar.coshf(value);
     if (T == f64) return scalar.coshd(value);
@@ -271,6 +292,7 @@ pub fn cosh(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn acosh(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.acoshv(value);
     if (T == f16) return scalar.acoshh(value);
     if (T == f32) return scalar.acoshf(value);
     if (T == f64) return scalar.acoshd(value);
@@ -282,6 +304,7 @@ pub fn acosh(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn tan(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.tanv(value);
     if (T == f16) return scalar.tanh(value);
     if (T == f32) return scalar.tanf(value);
     if (T == f64) return scalar.tand(value);
@@ -293,6 +316,7 @@ pub fn tan(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn tanpi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.tanpiv(value);
     if (T == f16) return scalar.tanpih(value);
     if (T == f32) return scalar.tanpif(value);
     if (T == f64) return scalar.tanpid(value);
@@ -305,6 +329,7 @@ pub fn tanpi(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn tanh(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.tanhv(value);
     if (T == f16) return scalar.tanhh(value);
     if (T == f32) return scalar.tanhf(value);
     if (T == f64) return scalar.tanhd(value);
@@ -317,6 +342,7 @@ pub fn tanh(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn rsqrt(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.rsqrtv(value);
     if (T == f16) return scalar.rsqrth(value);
     if (T == f32) return scalar.rsqrtf(value);
     if (T == f64) return scalar.rsqrtd(value);
@@ -329,6 +355,7 @@ pub fn rsqrt(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn sqrt(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.sqrtv(value);
     if (T == f16) return scalar.sqrth(value);
     if (T == f32) return scalar.sqrtf(value);
     if (T == f64) return scalar.sqrtd(value);
@@ -341,6 +368,7 @@ pub fn sqrt(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn hypot(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.hypotv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.hypot requires both arguments to have the same type");
     }
@@ -355,6 +383,7 @@ pub fn hypot(x: anytype, y: anytype) @TypeOf(x) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn acos(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.acosv(value);
     if (T == f16) return scalar.acosh(value);
     if (T == f32) return scalar.acosf(value);
     if (T == f64) return scalar.acosd(value);
@@ -366,6 +395,7 @@ pub fn acos(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn asin(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.asinv(value);
     if (T == f16) return scalar.asinh(value);
     if (T == f32) return scalar.asinf(value);
     if (T == f64) return scalar.asind(value);
@@ -377,6 +407,7 @@ pub fn asin(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn asinh(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.asinhv(value);
     if (T == f16) return scalar.asinhh(value);
     if (T == f32) return scalar.asinhf(value);
     if (T == f64) return scalar.asinhd(value);
@@ -389,6 +420,7 @@ pub fn asinh(value: anytype) @TypeOf(value) {
 /// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn atanh(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.atanhv(value);
     if (T == f16) return scalar.atanhh(value);
     if (T == f32) return scalar.atanhf(value);
     if (T == f64) return scalar.atanhd(value);
@@ -397,6 +429,7 @@ pub fn atanh(value: anytype) @TypeOf(value) {
 
 pub fn atan(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.atanv(value);
     if (T == f16) return scalar.atanh(value);
     if (T == f32) return scalar.atanf(value);
     if (T == f64) return scalar.atand(value);
@@ -405,6 +438,7 @@ pub fn atan(value: anytype) @TypeOf(value) {
 
 pub fn cbrt(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.cbrtv(value);
     if (T == f16) return scalar.cbrth(value);
     if (T == f32) return scalar.cbrtf(value);
     if (T == f64) return scalar.cbrtd(value);
@@ -413,6 +447,7 @@ pub fn cbrt(value: anytype) @TypeOf(value) {
 
 pub fn exp2(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.exp2v(value);
     if (T == f16) return scalar.exp2h(value);
     if (T == f32) return scalar.exp2f(value);
     if (T == f64) return scalar.exp2d(value);
@@ -421,6 +456,7 @@ pub fn exp2(value: anytype) @TypeOf(value) {
 
 pub fn expm1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.expm1v(value);
     if (T == f16) return scalar.expm1h(value);
     if (T == f32) return scalar.expm1f(value);
     if (T == f64) return scalar.expm1d(value);
@@ -429,6 +465,7 @@ pub fn expm1(value: anytype) @TypeOf(value) {
 
 pub fn log1p(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.log1pv(value);
     if (T == f16) return scalar.log1ph(value);
     if (T == f32) return scalar.log1pf(value);
     if (T == f64) return scalar.log1pd(value);
@@ -437,6 +474,7 @@ pub fn log1p(value: anytype) @TypeOf(value) {
 
 pub fn logp1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.logp1v(value);
     if (T == f16) return scalar.logp1h(value);
     if (T == f32) return scalar.logp1f(value);
     if (T == f64) return scalar.logp1d(value);
@@ -445,6 +483,7 @@ pub fn logp1(value: anytype) @TypeOf(value) {
 
 pub fn ceil(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.ceilv(value);
     if (T == f16) return scalar.ceilh(value);
     if (T == f32) return scalar.ceilf(value);
     if (T == f64) return scalar.ceild(value);
@@ -453,6 +492,7 @@ pub fn ceil(value: anytype) @TypeOf(value) {
 
 pub fn floor(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.floorv(value);
     if (T == f16) return scalar.floorh(value);
     if (T == f32) return scalar.floorf(value);
     if (T == f64) return scalar.floord(value);
@@ -461,6 +501,7 @@ pub fn floor(value: anytype) @TypeOf(value) {
 
 pub fn nearbyint(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.nearbyintv(value);
     if (T == f16) return scalar.nearbyinth(value);
     if (T == f32) return scalar.nearbyintf(value);
     if (T == f64) return scalar.nearbyintd(value);
@@ -469,6 +510,7 @@ pub fn nearbyint(value: anytype) @TypeOf(value) {
 
 pub fn rint(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.rintv(value);
     if (T == f16) return scalar.rinth(value);
     if (T == f32) return scalar.rintf(value);
     if (T == f64) return scalar.rintd(value);
@@ -485,6 +527,7 @@ pub fn round(value: anytype) @TypeOf(value) {
 
 pub fn roundeven(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.roundevenv(value);
     if (T == f16) return scalar.roundevenh(value);
     if (T == f32) return scalar.roundevenf(value);
     if (T == f64) return scalar.roundevend(value);
@@ -493,6 +536,7 @@ pub fn roundeven(value: anytype) @TypeOf(value) {
 
 pub fn trunc(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.truncv(value);
     if (T == f16) return scalar.trunch(value);
     if (T == f32) return scalar.truncf(value);
     if (T == f64) return scalar.truncd(value);
@@ -576,6 +620,7 @@ pub fn atan2(y: anytype, x: anytype) Atan2Result(@TypeOf(y)) {
 
 pub fn asinpi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.asinpiv(value);
     if (T == f16) return scalar.asinpih(value);
     if (T == f32) return scalar.asinpif(value);
     if (T == f64) return scalar.asinpid(value);
@@ -584,6 +629,7 @@ pub fn asinpi(value: anytype) @TypeOf(value) {
 
 pub fn acospi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.acospiv(value);
     if (T == f16) return scalar.acospih(value);
     if (T == f32) return scalar.acospif(value);
     if (T == f64) return scalar.acospid(value);
@@ -592,6 +638,7 @@ pub fn acospi(value: anytype) @TypeOf(value) {
 
 pub fn atanpi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.atanpiv(value);
     if (T == f16) return scalar.atanpih(value);
     if (T == f32) return scalar.atanpif(value);
     if (T == f64) return scalar.atanpid(value);
@@ -619,6 +666,7 @@ pub fn pown(value: anytype, exponent: i64) PowerResult(@TypeOf(value)) {
 
 pub fn powr(base: anytype, exponent: anytype) @TypeOf(base) {
     const T = @TypeOf(base);
+    if (@typeInfo(T) == .vector) return vector.powrv(base, exponent);
     if (@TypeOf(exponent) != T) {
         @compileError("zmath.powr requires base and exponent to have the same type");
     }
@@ -654,6 +702,7 @@ pub fn lgamma(value: anytype) LgammaResult(@TypeOf(value)) {
 
 pub fn fmod(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.fmodv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fmod requires both arguments to have the same type");
     }
@@ -665,6 +714,7 @@ pub fn fmod(x: anytype, y: anytype) @TypeOf(x) {
 
 pub fn remainder(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.remainderv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.remainder requires both arguments to have the same type");
     }
@@ -719,6 +769,7 @@ pub fn llogb(value: anytype) i64 {
 
 pub fn logb(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
+    if (@typeInfo(T) == .vector) return vector.logbv(value);
     if (T == f16) return scalar.logbh(value);
     if (T == f32) return scalar.logbf(value);
     if (T == f64) return scalar.logbd(value);
@@ -751,6 +802,7 @@ pub fn scalbln(value: anytype, exponent: i64) @TypeOf(value) {
 
 pub fn fdim(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.fdimv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fdim requires both arguments to have the same type");
     }
@@ -762,6 +814,7 @@ pub fn fdim(x: anytype, y: anytype) @TypeOf(x) {
 
 pub fn fmax(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.fmaxv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fmax requires both arguments to have the same type");
     }
@@ -773,6 +826,7 @@ pub fn fmax(x: anytype, y: anytype) @TypeOf(x) {
 
 pub fn fmin(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.fminv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fmin requires both arguments to have the same type");
     }
@@ -784,6 +838,7 @@ pub fn fmin(x: anytype, y: anytype) @TypeOf(x) {
 
 pub fn fmaximum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.fmaximumv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fmaximum requires both arguments to have the same type");
     }
@@ -795,6 +850,7 @@ pub fn fmaximum(x: anytype, y: anytype) @TypeOf(x) {
 
 pub fn fminimum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
+    if (@typeInfo(T) == .vector) return vector.fminimumv(x, y);
     if (@TypeOf(y) != T) {
         @compileError("zmath.fminimum requires both arguments to have the same type");
     }
@@ -1097,6 +1153,7 @@ test {
     _ = @import("ieee_c23_core_test.zig");
     _ = @import("ieee_c23_optional_test.zig");
     _ = @import("c23_public_surface_test.zig");
+    _ = @import("vector_test.zig");
 }
 
 test "root exports nearest-even Atan H, F, and D" {

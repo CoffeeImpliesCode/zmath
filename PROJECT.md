@@ -4,15 +4,16 @@
 
 ## Implemented
 
-- The public root exposes IEEE-754 and scalar math through `zmath.ieee`, `zmath.scalar`, and scalar root operations.
-- Implementation and tests are flat under `src/`: `src/root.zig`, `src/ieee.zig`, `src/scalar*.zig`, `src/*_test.zig`, and C kernels in `src/coremath_*.[ch]`.
-- The runtime has no external oracle or math-library dependency. There is no SIMD implementation or SSE2 fallback.
+- The public root exposes IEEE-754 and scalar math through `zmath.ieee`, `zmath.scalar`, and scalar root operations, plus portable `@Vector` overloads for the elementwise operations through `zmath.vector`.
+- Implementation and tests are flat under `src/`: `src/root.zig`, `src/ieee.zig`, `src/scalar*.zig`, `src/vector*.zig`, `src/*_test.zig`, and C kernels in `src/coremath_*.[ch]`.
+- Each vector lane applies the identical scalar kernel, so vector results are bit-for-bit equal to the accepted scalar results and the `max_ulp = 0` contract is preserved.
+- The runtime has no external oracle or math-library dependency. The vector layer uses portable Zig `@Vector` and is lowered by the compiler per target; it has no hand-written per-ISA kernels, no runtime dispatch, and no SSE2 fallback.
 - `build.zig` makes the `zmath` module available to consumers and installs the `zig-out/bin/zmath` demonstration executable, not a compiled library artifact.
 - C kernels require `+fma` on x86/x86_64 or a little-endian aarch64 target.
 
 ## Planned
 
-The [API contract](API.md) specifies complex numbers, vectors, quaternions, matrices, linear algebra, geometry, and geometric algebra. These modules and SIMD kernels are not implemented. The API distinguishes target names from current source exports.
+The [API contract](API.md) specifies complex numbers, linear-algebra vectors, quaternions, matrices, linear algebra, geometry, and geometric algebra. These modules are not implemented. The implemented `zmath.vector` module is the portable `@Vector` layer for the elementwise scalar operations, not the linear-algebra `Vec*` types. The API distinguishes target names from current source exports.
 
 ## Numerical evidence
 

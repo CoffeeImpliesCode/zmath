@@ -4,9 +4,10 @@
 
 This document defines the target API and identifies the currently implemented public subset.
 
-The current public root exports the `zmath.ieee` and `zmath.scalar` modules, their shared result types, and the C23 source surface defined in `spec/core-math-2026-08-22.md`.
+The current public root exports the `zmath.ieee`, `zmath.scalar`, and `zmath.vector` modules, their shared result types, and the C23 source surface defined in `spec/core-math-2026-08-22.md`.
 It also exports `add` and `printAnotherMessage`.
-Other module paths below remain planned.
+The `zmath.complex`, `zmath.quaternion`, `zmath.matrix`, `zmath.linalg`, `zmath.geometry`, and `zmath.algebra` module paths below remain planned.
+`zmath.vector` is implemented as the SIMD `@Vector` layer described in [Vector API](#vector-api); it is distinct from the planned linear-algebra `Vec*` value types in [Vectors and quaternions](#vectors-and-quaternions).
 
 ## Scope
 
@@ -23,8 +24,8 @@ The module path is canonical. Root re-exports are optional convenience names aft
 ```text
 zmath.ieee
 zmath.scalar
-zmath.complex
 zmath.vector
+zmath.complex
 zmath.quaternion
 zmath.matrix
 zmath.linalg
@@ -36,8 +37,8 @@ zmath.algebra
 src/
   ieee.zig
   scalar.zig
-  complex.zig
   vector.zig
+  complex.zig
   quaternion.zig
   matrix.zig
   linalg.zig
@@ -56,6 +57,58 @@ complex + vector + quaternion + matrix -> algebra
 ```
 
 Geometry and algebra do not depend on each other.
+
+## Vector API
+
+`zmath.vector` provides SIMD-style `@Vector` overloads for the elementwise
+float-to-float operations. It is a distinct layer from the planned
+linear-algebra `Vec*` value types described in [Vectors and
+quaternions](#vectors-and-quaternions); those remain unimplemented.
+
+Every vector operation applies the identical accepted scalar kernel to each
+lane. Lane `i` of a vector result is therefore bit-for-bit equal to the scalar
+result for lane `i` of the input. This preserves the `max_ulp = 0` contract and
+the immutable corpus: the vector path is a per-lane application of the same
+scalar code, never a re-derived polynomial, and it requires no new acceptance
+evidence.
+
+Each elementwise operation is available in three forms:
+
+- As a top-level generic overload: `zmath.sin(x)` where `x: @Vector(N, T)` with
+  `T` one of `f16`, `f32`, or `f64`. The element type selects the scalar kernel,
+  and the vector width is inferred from the argument.
+- As a generic vector entry point: `zmath.vector.sinv(x)`, which selects the
+  scalar kernel from the lane type.
+- As specialized entry points that pin the lane type: `zmath.vector.sinfv` and
+  `zmath.vector.sindv` for `f32` and `f64`, plus `zmath.vector.sinhv` for
+  `f16` where that name is not already used by another generic entry point.
+
+The specialized name is the operation name, the format letter, and `v`
+(for example `sinfv` for the sine of a `@Vector(N, f32)`).
+Where a specialized `f16` name would collide with another operation's generic
+entry point, the specialized name is omitted and the generic `opv` entry point
+serves binary16 as well. This affects the bare trigonometry operations
+`sin`, `cos`, `tan`, `asin`, `acos`, and `atan`, because their binary16
+specialization would otherwise collide with the generic entry point of the
+corresponding hyperbolic operation (`sinhv`, `coshv`, `tanhv`, `asinhhv`,
+`acoshhv`, `atanhhv`). No operation loses coverage; binary16 callers use the
+generic `opv` form.
+
+```text
+zmath.sin(@Vector(4, f32))          // top-level generic overload
+zmath.vector.sinv(@Vector(4, f32))   // generic vector entry point
+zmath.vector.sinfv(@Vector(4, f32))  // binary32 specialization
+zmath.vector.sindv(@Vector(2, f64))  // binary64 specialization
+zmath.vector.powv(a, b)              // elementwise binary
+```
+
+Vector operations cover the elementwise float-to-float operations only.
+Operations that return a struct (`atan2`, `atan2pi`, `lgamma`, `frexp`,
+`modf`, `remquo`, `canonicalize`, and the integer-power family), that return an
+integer (`ilogb`, `llogb`, `lrint`, `llrint`), that take an integer argument
+(`ldexp`, `scalbn`, `scalbln`, `pown`, `rootn`, `compoundn`), or that are
+ternary or narrowing (`fma`, `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, `fsqrt`,
+`fromfp`) are not vectorized.
 
 ## IEEE and scalar API
 
