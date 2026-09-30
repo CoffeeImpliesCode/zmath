@@ -1,6 +1,6 @@
 # zmath — current state and plan
 
-This document records where the project stands at this point and what remains.
+This document records where the project stands and what remains.
 It is the live plan. The two roadmaps under `docs/superpowers/plans/` are
 historical and superseded; they are kept for provenance only and must not be
 executed.
@@ -9,8 +9,8 @@ executed.
 
 A dependency-free Zig 0.16.0 IEEE-754 and scalar mathematics library for `f16`,
 `f32`, and `f64`, with a portable `@Vector` layer over the operations, vendored
-CORE-MATH C kernels, and a sibling harness that proves the results against an
-independent MPFR/Arb oracle.
+CORE-MATH C kernels, and a sibling harness that is meant to prove the results
+against an independent MPFR/Arb oracle.
 
 Two colocated repositories:
 
@@ -25,49 +25,32 @@ Two colocated repositories:
 
 | Property | Value |
 | --- | --- |
-| Top-level operations | 99 |
-| Operations accepting `@Vector` | 96 (`nan`, `printAnotherMessage`, `add` do not) |
-| Vector dispatch lines in `root.zig` | 102 |
-| Public vector entry points | 417 across six modules |
-| Source files under `src/` | 194 |
-| Commits | 729 |
-| Tracked files | 238 |
+| Public modules | 9, every path in `API.md` implemented |
+| Top-level operations | 97 |
+| Public root types and module aliases | 25 |
+| Operations accepting `@Vector` | 96 (`nan` does not) |
+| Public `@Vector` entry points | 417 across six modules |
+| Non-scalar module source | 9597 lines across seven files |
+| Source files under `src/` | 208 |
+| Local tests | 814 |
 
 The vector layer is portable Zig `@Vector`, lowered by the compiler per target.
 There is no SIMD dispatch, no hand-written per-ISA kernel, no runtime CPU
-detection, and no SSE2 fallback. The build still requires `+fma` for x86/x86_64
-C kernels and supports little-endian aarch64.
+detection, and no SSE2 fallback. The build requires `+fma` for x86/x86_64 C
+kernels and supports little-endian aarch64; a big-endian target is rejected at
+configure time and by a `_Static_assert` in the generated ABI guard.
 
-### Vector coverage
+### Non-scalar modules
 
-`src/vector.zig` holds the 55 elementwise float-to-float operations and
-re-exports five sibling modules:
-
-| Module | Operations | Result shape |
+| Module | Types | Notes |
 | --- | --- | --- |
-| `core` | shared helpers | — |
-| `struct_family` | 13 result-struct operations | lane-ordered `[N]Result` |
-| `intarg` | 11 operations with a non-float extra argument | `@Vector`, or `[N]Result` for the power family |
-| `narrow` | 6 C23 narrowing operations plus ternary `fma` | `@Vector(N, f32)` from `@Vector(N, f64)` |
-| `ieee_family` | 16 IEEE, extrema, integer, and boolean operations | `@Vector` of float, `i32`, `i64`, or `bool` |
-
-**The one shape that is not a `@Vector`:** Zig 0.16 rejects a struct as a `@Vector`
-element type (`expected integer, float, bool, or pointer for the vector element
-type`). Every operation whose scalar kernel returns a result struct therefore
-returns a lane-ordered array. This buys no throughput, because the kernel still
-runs once per lane; the value is a uniform lane-parallel API. Do not read any
-vector result as a correctness or performance claim.
-
-### Acceptance
-
-All 315 manifest descriptors are `status = "correct"` with `max_ulp = 0`. The
-evaluator split is 150 `exact_bits`, 126 `mpfr_arb`, 39 `algebraic`.
-
-Corpus coverage is not whole-domain. Only the 61 exhaustive binary16 unary
-campaigns cover their entire domain. Every `f32` and `f64` row is exact agreement
-on its stored selected tuples, and multi-argument or integer-domain binary16 rows
-are selected too. A `correct` row is a statement about the stored tuples, never
-a theorem about the operation.
+| `complex` | `Complexf`, `Complexd` | 54 suffixed functions, all C99/C23 principal-branch rules documented in a per-family table |
+| `vector` | `Vec2f`..`Vec4d` | 158 methods; `eq` is bit equality with NaN normalization, `normalize` of zero returns the input unchanged |
+| `quaternion` | `Quatf`, `Quatd`, `UnitQuatf`, `UnitQuatd` | `UnitQuat*` has no `raw()` method: Zig puts fields and decls in one namespace, so a field `raw` and a method `raw` cannot both exist, and Zig has no private fields |
+| `matrix` | `Mat` generic, `Mat2f`..`Mat5d` | Storage is column-major, `at` is row-major, and the `init` literal is row-major. `Mat` is the one sanctioned public generic |
+| `linalg` | `LuMat2f`..`LuMat4d`, `CholeskyMat2f`..`CholeskyMat4d` | Doolittle with partial pivoting; reuses the pivot thresholds `zmath.matrix` publishes rather than declaring a second spelling |
+| `geometry` | 59 types | `PredicatePolicy` is explicit; `adaptive_exact` is exact integer arithmetic on a fixed `[132]u64` limb array |
+| `algebra` | `Cl3`, `Cl4`, `Pga3`, `Pga4`, `Cga3`, `Cga4` in `f` and `d` | Comptime-generated blade product tables; published normalization table; every row implemented |
 
 ## How the work stays correct
 
@@ -81,42 +64,72 @@ instead of calling the scalar kernel breaks this and invalidates the argument.
 through zmath's own root overload and compares lane by lane against the same
 root call made on a scalar lane, and it derives the guarded set from
 `std.meta.declarations(root)` rather than a hand-kept list, so an operation
-cannot be vectorized without being pinned. It also pins three known traps: the
-`op + type + v` naming collision, the binary16 kernel trap where root `sin` binds
-`f16` to `scalar.sinh` and not `scalar.sinhh`, and the exclusion of
-struct-returning operations from the float-vector surface.
+cannot be vectorized without being pinned.
+
+The non-scalar modules are held to algebraic identities rather than bit
+patterns: associativity, distributivity, `reconstruct` against the original
+matrix, `conjugate` inverting, `reverse` being an involution, the signed
+Poincaré dual's sign rule, and round trips through `fromCoefficients`.
 
 ## Verification
 
-Run from the repository root. The qualified profile is
+Run from the repository root. The qualified corpus profile is
 `x86_64-linux-gnu.2.38` / `haswell` / `ReleaseSafe`.
 
 ```text
 # runtime
 zig build test
 gate
-
-# harness, from the sibling directory
-zig build test
-gate
-zig build replay-corpus   -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build replay-vector   -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+zig build run
 ```
 
 Last recorded results, all green:
 
 | Check | Result |
 | --- | --- |
-| Runtime gate | passed, all seven checks |
-| Runtime tests | 604/604 |
-| Harness gate | passed, all seven checks |
-| Harness tests | 36/36 |
-| Scalar corpus replay | 315 descriptors, 63,160,084 records |
-| Vector corpus replay | 165 descriptors, 3,179,250 records |
+| Runtime tests | 814/814 |
+| Runtime gate | passed |
+| House gate invocation | `direnv exec . gate`, or `direnv exec . zig-gate` |
 
 `gate` is the devenv script wrapping `zig-gate`. It runs format, build, test,
-AST check, and three linters. The harness gate sets `GATE_EXCLUDE` so gitignored
-benchmark artifacts are not linted as source.
+AST check, and three linters. On a host with a `/nix/store` the store script runs
+it directly; on this host there is no `/nix/store` at all, so `.envrc`
+synthesizes a `gate` shim into the gitignored `.devenv/host-bin`.
+
+**The gate truncates its own linter output.** `zig-gate` pipes zbc's findings through `head -30`,
+so any advisory past the thirtieth line is invisible in the gate result. It also counts findings
+with `grep -c 'error('`, which is why a run with warnings still prints "found 0 potential
+issue(s)". Neither number is a reliable census. To get the truth, run the linter directly on the
+whole tree:
+
+```text
+direnv exec . zbc src/*.zig 2>&1 | grep -c 'warning('
+```
+
+That is the check to use when the question is "are there any advisories left", and it must be
+zero. Six advisories in the accepted scalar kernels went unrecorded for exactly this reason.
+
+## The harness is not present
+
+**`zmath-testing` does not exist on this machine and is not recoverable from
+here.** Verified absent: no `zmath-testing` directory under the home tree at any
+depth, no `manifest.toml`, `corpus_runner.zig`, or `oracle_generator.zig`
+anywhere, and no repository for it under the only authenticated GitHub account
+(`CoffeeImpliesCode`), either directly or by global search.
+
+Consequence: the recorded acceptance evidence in the sibling project — 315
+descriptors, 63,160,084 records, and the `verification.json` digests — is
+neither confirmed nor contradicted here. It is simply uncheckable. Treat it as
+historical, not as current evidence.
+
+To restore it, clone the sibling into the documented location and regenerate the
+gitignored corpus:
+
+```text
+git clone <zmath-testing> ../zmath-testing
+cd ../zmath-testing && zig build generate-corpus \
+    -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
+```
 
 ## Known limits, stated so they are not mistaken for gaps
 
@@ -126,31 +139,40 @@ benchmark artifacts are not linted as source.
 2. Correct rounding of finite power, root, and pi-scaled results is a target
    requirement that is explicitly not claimed as satisfied.
 3. The public helpers `classify`, `ulpDistance`, the four `scaleB` modes, the
-   four `roundIntegral` modes, and integer `add` have no manifest row.
-4. `generated/verification.json` is a dated 2026-09-09 snapshot with no
-   checked-in producer. Its counters are not current. It is deliberately left
-   unedited; the corpus README says so.
-5. The eight-gigabyte corpus under `test/corpus/generated/` is gitignored and
-   must be regenerated with `generate-corpus` on a new machine.
-6. Operations returning a struct return a lane-ordered array, not a `@Vector`.
+   four `roundIntegral` modes, and integer `add` have no manifest row. `add` was
+   in that list and has been removed as Zig-init template text, so the list is
+   now `classify`, `ulpDistance`, and the eight rounding modes.
+4. `scaleB` and `roundIntegral` exist only for `f16`, and `API.md` declares no
+   signature for either family — it names them only in the `zmath-public-helpers`
+   benchmark description. The `f` and `d` forms are an open contract question,
+   not a known gap.
+5. The non-scalar modules have no independent oracle. Their accuracy rests on
+   algebraic identities and on IEEE behaviour, not on the corpus.
+6. `generated/verification.json` in the sibling is a dated 2026-09-09 snapshot
+   with no checked-in producer. Its counters are not current.
+7. Operations returning a struct return a lane-ordered array, not a `@Vector`.
    See above.
 
 ## What remains
 
-Nothing is in flight. The working copy is clean at the commit that added the
-new-family surface guard.
+### Blocked on the missing harness
 
-Decisions that are genuinely open, in the order they are worth taking:
-
-1. **Whole-domain evidence for `f32` and `f64`.** The largest remaining
-   evidence gap. It is a budget question, not a design question: the campaigns
-   exist, they are simply enormous.
+1. **Whole-domain evidence for `f32` and `f64`.** The largest remaining evidence
+   gap. It is a budget question, not a design question: the campaigns exist in
+   the sibling project, they are simply enormous, and the sibling is not here.
 2. **Manifest rows for the uncovered public helpers.** A small, well-bounded
-   piece of work that would close a named coverage hole.
-3. **The planned non-scalar modules.** `complex`, the linear-algebra `Vec*` value
-   types, `quaternion`, `matrix`, `linalg`, `geometry`, and `algebra` are
-   specified in `API.md` and entirely unimplemented. The implemented
-   `zmath.vector` module is the `@Vector` layer and is not those types.
-4. **Remove the Zig-init template leftovers.** `printAnotherMessage` and `add`
-   are project-template boilerplate in a float-only library, currently
-   documented as exports in `API.md`. Removing them is a public API change.
+   piece of work that would close a named coverage hole. The manifest is a
+   sibling file, so this cannot be started from this repository.
+
+Both are blocked on the same missing prerequisite, and neither has a reachable
+half: the deliverable for each is a harness artifact, not a runtime change.
+
+### Open on this repository
+
+3. **Commit the seven executed items.** The work is verified in the working copy
+   and uncommitted.
+4. **Decide whether `f` and `d` forms of `scaleB` and `roundIntegral` belong in
+   the contract.** See known limit 4. That is a contract decision, and the
+   contract is the thing that is under-specified.
+5. **The `UnitQuat*.raw` privacy clause cannot be met as written.** Recorded in
+   `API.md`; no further work unless the contract is amended.

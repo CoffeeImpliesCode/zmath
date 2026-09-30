@@ -4,8 +4,9 @@ Zig 0.16.0 IEEE and scalar math for `f16`, `f32`, and `f64`, plus a portable `@V
 
 ## Layout
 
-- `src/root.zig` is the root module. `src/ieee.zig` and `src/scalar.zig` implement the current IEEE and scalar APIs. `src/vector.zig` holds the float-to-float `@Vector` surface and re-exports `src/vector_core.zig` (shared per-lane helpers), `src/vector_struct.zig`, `src/vector_intarg.zig`, `src/vector_narrow.zig`, and `src/vector_ieee.zig` for the other lane-to-non-lane forms.
+- `src/root.zig` is the root module and exports `zmath.ieee`, `zmath.scalar`, `zmath.vector`, `zmath.complex`, `zmath.quaternion`, `zmath.matrix`, `zmath.linalg`, `zmath.geometry`, and `zmath.algebra`. `src/ieee.zig` and `src/scalar.zig` implement the current IEEE and scalar APIs. `src/vector.zig` holds the float-to-float `@Vector` surface and re-exports `src/vector_core.zig` (shared per-lane helpers), `src/vector_struct.zig`, `src/vector_intarg.zig`, `src/vector_narrow.zig`, and `src/vector_ieee.zig` for the other lane-to-non-lane forms. It also re-exports the six `Vec*` value types from `src/vector_value.zig`, which is a different layer that shares the module path.
 - Source and tests are flat under `src/`: scalar kernels use `src/scalar*.zig`, the vector layer uses `src/vector*.zig`, C kernels use `src/coremath_*.[ch]`, and tests use `src/*_test.zig`.
+- The non-scalar modules are `src/complex.zig`, `src/quaternion.zig`, `src/matrix.zig`, `src/linalg.zig`, `src/geometry.zig`, and `src/algebra.zig`. `src/matrix.zig` holds the one sanctioned public structural generic, `Mat`; every other public type is concretely named. `src/geometry.zig` carries the `PredicatePolicy` enum and its `adaptive_exact` path evaluates predicates in exact integer arithmetic on a fixed `[132]u64` limb array.
 - The vector layer uses Zig's portable `@Vector` and is lowered by the compiler per target; it has no hand-written per-ISA kernels and no runtime dispatch.
 - There is no `src/scalar/`, `src/simd/`, or `src/tests/` directory.
 - `build.zig` exposes the `zmath` module, installs a demonstration executable, and defines `run`, `test`, and `docs` steps.
@@ -25,11 +26,15 @@ Run at the repository root:
 
 - `zig build` installs the demonstration executable at `zig-out/bin/zmath` and makes the `zmath` module available to consumers. It does not install a compiled library artifact.
 - `zig build run` runs the demonstration. `zig build test` runs the local unit tests. `zig build docs` generates documentation from the demonstration executable.
-- `zig fmt --check .` checks formatting. `gate` runs the house gate.
+- `zig fmt --check .` checks formatting. `gate` runs the house gate: format, build, test, AST check, and three linters. `gate` is a devenv script; `.envrc` synthesizes a `gate` shim into the gitignored `.devenv/host-bin` because a devenv script is a store derivation and this host has no `/nix/store`. Run it as `direnv exec . gate`, or `direnv exec . zig-gate` if the shim is missing.
 - `jj st` shows working-copy status. Use `jj`, not raw Git commands.
 
 Run oracle and benchmark commands in sibling `zmath-testing`, not here. Its accepted corpus profile is `x86_64-linux-gnu.2.38`, CPU `haswell`, and `ReleaseSafe`. See [API.md: Tests and benchmarks](API.md#tests-and-benchmarks) for its current build steps.
 
 This NixOS project declares development dependencies and tools in `devenv.nix`. Do not install system or development libraries imperatively.
-Use direnv or `devenv shell`; run `direnv allow` after changing the environment.
+Use direnv or `devenv shell`; run `direnv allow` after changing the environment. Nix is not
+installed natively on this host: `nix` and `devenv` run inside an apptainer sandbox, so
+`/nix/store` does not exist and every store path a devshell exports is unreachable. That is why
+`.envrc` puts `~/.local/bin` on `PATH` before `use devenv`, and why a `devenv direnvrc` run prints
+one harmless `readlink: Datei oder Verzeichnis nicht gefunden` from the generated shell hook.
 

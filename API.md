@@ -4,10 +4,17 @@
 
 This document defines the target API and identifies the currently implemented public subset.
 
-The current public root exports the `zmath.ieee`, `zmath.scalar`, and `zmath.vector` modules, their shared result types, and the C23 source surface defined in `spec/core-math-2026-08-22.md`.
-It also exports `add` and `printAnotherMessage`.
-The `zmath.complex`, `zmath.quaternion`, `zmath.matrix`, `zmath.linalg`, `zmath.geometry`, and `zmath.algebra` module paths below remain planned.
-`zmath.vector` is implemented as the portable `@Vector` layer described in [Vector API](#vector-api): 417 public entry points covering the elementwise scalar operations, including the result-struct, integer-argument, integer-returning, boolean-returning, and narrowing ones. It is distinct from the planned linear-algebra `Vec*` value types in [Vectors and quaternions](#vectors-and-quaternions), which remain unimplemented.
+The current public root exports the `zmath.ieee`, `zmath.scalar`, `zmath.vector`, `zmath.complex`,
+`zmath.quaternion`, `zmath.matrix`, `zmath.linalg`, `zmath.geometry`, and `zmath.algebra` modules,
+their shared result types, and the C23 source surface defined in
+`spec/core-math-2026-08-22.md`. Every module path listed under
+[Planned module paths](#planned-module-paths) is now implemented.
+`zmath.vector` is implemented as the portable `@Vector` layer described in [Vector API](#vector-api):
+417 public entry points covering the elementwise scalar operations, including the result-struct,
+integer-argument, integer-returning, boolean-returning, and narrowing ones. The same module also
+owns the linear-algebra `Vec*` value types from [Vectors and quaternions](#vectors-and-quaternions);
+the two layers share the module path and nothing else, and every `@Vector` entry point ends in `v`
+while no `Vec*` name does.
 
 ## Scope
 
@@ -38,6 +45,7 @@ src/
   ieee.zig
   scalar.zig
   vector.zig
+  vector_value.zig
   complex.zig
   quaternion.zig
   matrix.zig
@@ -64,9 +72,10 @@ Geometry and algebra do not depend on each other.
 
 `zmath.vector` provides `@Vector` overloads for the elementwise scalar
 operations: 417 public entry points across six modules. It is a distinct
-layer from the planned linear-algebra `Vec*` value types described in
-[Vectors and quaternions](#vectors-and-quaternions); those remain
-unimplemented.
+layer from the linear-algebra `Vec*` value types described in
+[Vectors and quaternions](#vectors-and-quaternions), which the same module
+also owns and which are implemented in `src/vector_value.zig`. The two layers
+share this module path and nothing else.
 
 Every vector operation applies the identical accepted scalar kernel to each
 lane. Lane `i` of a vector result is therefore bit-for-bit equal to the scalar
@@ -100,12 +109,14 @@ can write a further lane-parallel entry point from the same helpers, with the
 same per-lane bit-identity. `struct_family` does not use it, because every
 `core` helper returns a `@Vector`; it carries its own per-lane helpers instead.
 
-96 of the 99 top-level `pub fn` operations in `zmath` accept a `@Vector` and
-route to this layer. The three that do not are `nan`, because its type
-argument is a `comptime` type and it therefore has no lane to map over, and
-the two Zig-init template leftovers `printAnotherMessage` and `add`, which are
-not mathematics operations. The vector spelling of a NaN is `@splat` at the
-call site.
+The six `Vec*` value types are re-exported from `zmath.vector` as well, so the module path serves
+both layers. The table above is the `@Vector` surface only; `src/vector_value.zig` is not a
+lane-parallel module and its operations carry no per-lane bit-identity argument.
+
+96 of the 97 top-level `pub fn` operations in `zmath` accept a `@Vector` and
+route to this layer. The one that does not is `nan`, because its type
+argument is a `comptime` type and it therefore has no lane to map over.
+The vector spelling of a NaN is `@splat` at the call site.
 
 ### Naming
 
@@ -896,7 +907,9 @@ Finite complex results use the scalar manifest accuracy contract for each compon
 
 `zmath.vector` owns `Vec2f`, `Vec3f`, `Vec4f`, `Vec2d`, `Vec3d`, and `Vec4d`. Each is a value type with named components.
 
-These are target names and are not implemented. They are not the `@Vector` layer of [Vector API](#vector-api), which reuses the same module path for a different purpose.
+These are implemented in `src/vector_value.zig` and re-exported from `zmath.vector`. They are not
+the `@Vector` layer of [Vector API](#vector-api), which reuses the same module path for a different
+purpose.
 
 `zmath.quaternion` owns raw Hamilton types and validated rotation types:
 
@@ -911,7 +924,19 @@ pub const UnitQuatd = struct { raw: Quatd };
 
 `UnitQuatf.rotate(v)` applies `q * (v, 0) * conjugate(q)`. `a.then(b)` means apply `a` first, then `b`, and equals `b * a`.
 
-`raw` is private to `zmath.quaternion`. `UnitQuatf.init(raw)` returns `?UnitQuatf`. It rejects zero, non-finite, and non-unit values after normalization. Raw `Quatf` supports algebraic operations. It does not expose a total rotation operation.
+`UnitQuatf.init(raw)` returns `?UnitQuatf`. It rejects zero, non-finite, and non-unit values after
+normalization. Raw `Quatf` supports algebraic operations and does not expose a total rotation
+operation.
+
+The contract also states that `raw` is private to `zmath.quaternion`, and Zig 0.16 cannot make a
+struct field private: a field a function of this module can write is a field any consumer can
+write. What the language offers instead is the constructor, so `init` is the only documented and
+only validating way to build a `UnitQuatf`, `fromAxisAngle` is the second and routes through
+`init`, and the field is the read path back to the algebra. A value written with the struct literal
+can be any quaternion at all, and every `rotate` result from such a value is meaningless rather than
+merely inaccurate, because the rotation it performs scales by the norm squared. There is therefore
+no `raw()` accessor method: Zig puts fields and declarations in one namespace per struct, so a
+field named `raw` and a method named `raw` cannot both exist.
 
 ## Matrices
 
@@ -960,6 +985,18 @@ pub fn mulMat4fVec4f(matrix: Mat4f, vector: Vec4f) Vec4f;
 
 The API has no dynamic matrix, expression template, or tensor type.
 
+The implementation supplies the size-paired forms of the three named operations rather than only
+`Mat3f`, `Mat4d`, and `Mat4f`: `determinantMat2f` through `determinantMat5d`, `inverseMat2f`
+through `inverseMat4d`, and `mulMat4fVec4f` with `mulMat4dVec4d`. The singularity threshold for
+`inverse` is published as `inverse_pivot_threshold_f` and `inverse_pivot_threshold_d`, derived as
+the unit roundoff of the format times the element-growth bound of the reduction, so a caller can
+see and change it rather than discover an implicit epsilon.
+
+`zmath.matrix.mul` is declared with `anytype` parameters so that both operand shapes are checked
+while the output width is inferred. Zig has no function overloading, so a separate literal
+declaration per size pair is not expressible; the returned type is still exactly
+`Mat(rows, output_columns, Scalar)`.
+
 ## Linear algebra
 
 `zmath.linalg` owns named factorization types for named matrix sizes.
@@ -972,6 +1009,14 @@ pub const CholeskyMat4f = struct { lower: Mat4f };
 ```
 
 Each factorization type has a same-size `solve`, `reconstruct`, and `determinant` operation. A factorization returns `null` for a singular, non-positive-definite, or non-finite input, as applicable.
+
+The implementation extends this to every named size in both precisions: `LuMat2f` through
+`LuMat4d` and `CholeskyMat2f` through `CholeskyMat4d`, twelve factorization types rather than the
+four named above. `lu` and `cholesky` take `anytype` for the same reason `zmath.matrix.mul` does.
+There is also a multiple-right-hand-side solve for each factorization family. `lu` is Doolittle
+with partial pivoting, so the stored diagonal of U is the pivot sequence and the determinant is
+`parity` times the product of that diagonal; `zmath.linalg` reuses the pivot thresholds
+`zmath.matrix` publishes instead of declaring a second spelling of the same constant.
 
 ## Geometry
 
@@ -992,6 +1037,28 @@ pub const PredicatePolicy = enum { fast, adaptive_exact };
 ```
 
 `fast` reports the sign of the scalar computation. `adaptive_exact` reports the exact sign for finite f32 or f64 inputs. Predicates do not use an implicit epsilon. Every geometry operation rejects non-finite input with `error.NonFiniteInput`.
+
+The implementation adds three tags beyond the nine listed above, because the nine do not name
+every result the families can produce. `box` carries an AABB against an AABB, which is an AABB
+and not a point set. `circle` and `hypersphere` carry a flat cutting a ball, which is again a ball
+rather than a finite point set. Applicability still follows the dimension: 2D has no flat, so its
+union has neither `plane` nor `hyperplane` nor `circle`; 3D has no three-flat, so it has no
+`hyperplane`. A coincident pair of INFINITE flats returns the tag naming its own span, because
+"the intersection is this line" is the more useful answer than "coincident"; `coincident` is
+reserved for identical segments, balls, and boxes.
+
+`adaptive_exact` is exact integer arithmetic, not an error-bounded approximation with a fast path.
+Every finite `f64` is `m * 2^e` with `|m| < 2^53` and `-1074 <= e <= 971`, so scaling by `2^1074`
+reaches an exact integer; the predicate is then evaluated with schoolbook multiplication in a
+fixed `[132]u64` limb array, and the sign of that integer is the sign of the real value. An `f32`
+widens to `f64` exactly, so one representation covers both precisions. There is no epsilon, no
+value-dependent limb count, and no fallback to the `fast` answer.
+
+One limit is stated rather than hidden. In 3D and 4D the affine intersections decide coplanarity
+with the exact predicate on the ORIGINAL coordinates, then project into a plane and run the exact
+2D predicate on the PROJECTED coordinates. The coplanarity gate, which is the decision a plain
+evaluation gets wrong, is exact on the inputs as given. Intersection PARAMETERS are `f32`/`f64`
+and their range tests are ordinary comparisons.
 
 ## Concrete geometric algebras
 
@@ -1016,10 +1083,27 @@ Each algebra module publishes a normalization table before it becomes public. Th
 
 No public `Algebra(p, q, r, T)`, generic vector, generic quaternion, or `anytype` product exists.
 
+The signed complementary Poincare dual is implemented as: a grade `k` blade of mask `m` maps to
+the blade of mask `(top & ~m)` with the sign `(-1)^(k * (n - 1 - k))`, where `n` is the basis
+count. The double dual then carries the sign
+`(-1)^(k(n-1-k) + (n-k)(k-1)) = (-1)^(2k(n-k) - n) = (-1)^n`, so `dual(dual(A))` is `A` for Pga3
+and `-A` for Pga4. That involution is the test that pins the sign rule.
+
+Blade product tables are generated at comptime from the metric vector rather than written out, so
+the `Cga4` table is not a hand-maintained 64 by 64 constant. Each of the twelve types is a distinct
+concrete type built from one private comptime generic, so no public signature carries `anytype` or
+a type parameter. Storage is `[2^n]T` and is published per type as `storage_bytes`: 32 bytes for
+`Cl3f` up to 512 for `Cga4d`. Those are stack value types, not allocations.
+
 ## Tests and benchmarks
 
 `zmath` has no MPFR, GMP, FLINT, Arb, BLIS, Eigen, or C++ runtime dependency.
-`~/projects/zmath-testing` owns integration tests, oracle generation, typed corpus replay, and benchmarks.
+The sibling `zmath-testing` project owns integration tests, oracle generation, typed corpus replay,
+and benchmarks, and is the only acceptance authority for this library. It is a separate
+repository, colocated as `../zmath-testing`; the commands below are run from there, not from this
+repository. It is not currently present on the machine this document was last verified on, so the
+acceptance evidence recorded in this repository is historical rather than re-verified. See
+[PLAN.md](PLAN.md) for the restore procedure.
 
 The scalar tools use only target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe` for manifest-qualified evidence.
 These build steps install the typed tools:
@@ -1041,11 +1125,11 @@ zig-out/bin/zmath-public-helpers
 ```
 
 `zmath-public-helpers` measures the public evaluators that no corpus descriptor
-covers: `classify`, `ulpDistance`, all four `scaleB` rounding modes, all four
-`roundIntegral` rounding modes, and integer `add`. It takes no corpus root and
-no operation filter, and accepts only `--repetitions=1..100`. The typed
-benchmark accepts `--repetitions=1..1024` and `--with-zig`, which times
-same-input Zig intrinsic references beside zmath.
+covers: `classify`, `ulpDistance`, all four `scaleB` rounding modes, and all
+four `roundIntegral` rounding modes. It takes no corpus root and no operation
+filter, and accepts only `--repetitions=1..100`. The typed benchmark accepts
+`--repetitions=1..1024` and `--with-zig`, which times same-input Zig intrinsic
+references beside zmath.
 
 The corpus producer, corpus replay, and scalar-matrix executables accept an
 optional first positional corpus root. The default root is `test/corpus`.
