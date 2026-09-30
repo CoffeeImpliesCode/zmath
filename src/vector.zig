@@ -63,6 +63,7 @@
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
+const value = @import("vector_value.zig");
 
 /// The shared per-lane mapping core, behind `narrow`, `ieee_family` and
 /// `intarg`.
@@ -80,6 +81,17 @@ pub const narrow = @import("vector_narrow.zig");
 /// The remaining IEEE and miscellaneous operations, including the
 /// integer-returning and boolean-returning ones.
 pub const ieee_family = @import("vector_ieee.zig");
+
+/// The named-component vector value types. This is the value-type layer named
+/// by `API.md`, not the `@Vector` layer above; the two share this module path
+/// and nothing else. Every `@Vector` entry point here ends in `v`, and no
+/// `Vec*` name does, so the surfaces stay unambiguous at the call site.
+pub const Vec2f = value.Vec2f;
+pub const Vec3f = value.Vec3f;
+pub const Vec4f = value.Vec4f;
+pub const Vec2d = value.Vec2d;
+pub const Vec3d = value.Vec3d;
+pub const Vec4d = value.Vec4d;
 
 // ---------------------------------------------------------------------------
 // Core per-lane application

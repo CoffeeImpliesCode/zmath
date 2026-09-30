@@ -4,9 +4,6 @@ const Io = std.Io;
 const zmath = @import("zmath");
 
 pub fn main(init: std.process.Init) !void {
-    // Prints to stderr, unbuffered, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-
     // This is appropriate for anything that lives as long as the process.
     const arena: std.mem.Allocator = init.arena.allocator();
 
@@ -26,7 +23,10 @@ pub fn main(init: std.process.Init) !void {
     var stdout_file_writer: Io.File.Writer = .init(.stdout(), io, &stdout_buffer);
     const stdout_writer = &stdout_file_writer.interface;
 
-    try zmath.printAnotherMessage(stdout_writer);
+    // Report the result bits, not a rounded decimal, because bit identity to the
+    // scalar kernel is the contract this library sells.
+    const result: f64 = zmath.exp2m1(@as(f64, 1.0));
+    try stdout_writer.print("exp2m1(1.0) = 0x{x}\n", .{@as(u64, @bitCast(result))});
 
     try stdout_writer.flush(); // Don't forget to flush!
 }

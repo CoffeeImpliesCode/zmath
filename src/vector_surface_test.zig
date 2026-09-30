@@ -1303,10 +1303,9 @@ const ieee_family_ops = [_]FamilyOp{
 /// Every operation the tables above pin outside the float-to-float surface.
 const family_ops = struct_family_ops ++ intarg_ops ++ narrow_ops ++ ieee_family_ops;
 
-/// The three root operations that deliberately carry no vector dispatch line.
-/// `nan` takes a comptime type and a tag slice, `printAnotherMessage` writes
-/// to a writer, and `add` adds two integers.
-const scalar_only_ops = [_][:0]const u8{ "nan", "printAnotherMessage", "add" };
+/// The one root operation that deliberately carries no vector dispatch line.
+/// `nan` takes a comptime type and a tag slice, so it has no lane to map over.
+const scalar_only_ops = [_][:0]const u8{"nan"};
 
 /// Reports whether `name` is in the comptime-known set `set`.
 ///
@@ -1471,5 +1470,5 @@ test "the guard pins every vectorized root operation and nothing else" {
     try testing.expectEqual(@as(usize, 11), intarg_ops.len);
     try testing.expectEqual(@as(usize, 7), narrow_ops.len);
     try testing.expectEqual(@as(usize, 16), ieee_family_ops.len);
-    try testing.expectEqual(@as(usize, 3), scalar_only_ops.len);
+    try testing.expectEqual(@as(usize, 1), scalar_only_ops.len);
 }

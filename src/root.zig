@@ -1,10 +1,15 @@
 //! By convention, root.zig is the root source file when making a package.
 const std = @import("std");
-const Io = std.Io;
 
 pub const ieee = @import("ieee.zig");
 pub const scalar = @import("scalar.zig");
 pub const vector = @import("vector.zig");
+pub const complex = @import("complex.zig");
+pub const quaternion = @import("quaternion.zig");
+pub const algebra = @import("algebra.zig");
+pub const matrix = @import("matrix.zig");
+pub const geometry = @import("geometry.zig");
+pub const linalg = @import("linalg.zig");
 const generic_scalar_test = @import("generic_scalar_test.zig");
 const c23_public_surface_test = @import("c23_public_surface_test.zig");
 const scalar_c23_types = @import("scalar_c23_types.zig");
@@ -1177,17 +1182,6 @@ pub fn fsqrt(x: f64) f32 {
     return scalar_narrow.fsqrt(x);
 }
 
-/// This is a documentation comment to explain the `printAnotherMessage` function below.
-///
-/// Accepting an `Io.Writer` instance is a handy way to write reusable code.
-pub fn printAnotherMessage(writer: *Io.Writer) Io.Writer.Error!void {
-    try writer.print("Run `zig build test` to run the tests.\n", .{});
-}
-
-pub fn add(a: i32, b: i32) i32 {
-    return a + b;
-}
-
 test {
     _ = @import("ieee_test.zig");
     _ = @import("ieee_edge_test.zig");
@@ -1259,6 +1253,13 @@ test {
     _ = @import("c23_public_surface_test.zig");
     _ = @import("vector_test.zig");
     _ = @import("vector_surface_test.zig");
+    _ = @import("vector_value_test.zig");
+    _ = @import("complex_test.zig");
+    _ = @import("quaternion_test.zig");
+    _ = @import("algebra_test.zig");
+    _ = @import("matrix_test.zig");
+    _ = @import("geometry_test.zig");
+    _ = @import("linalg_test.zig");
 }
 
 test "root exports nearest-even Atan H, F, and D" {
@@ -1289,10 +1290,6 @@ test "root exports nearest-even Atanh family" {
         @as(u64, 0x3fe1_93ea_7aad_030b),
         @as(u64, @bitCast(atanh(@as(f64, 0.5)))),
     );
-}
-
-test "basic add functionality" {
-    try std.testing.expect(add(3, 7) == 10);
 }
 
 test "root exports nearest-even Asin family" {
