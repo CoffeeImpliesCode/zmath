@@ -1,3 +1,4 @@
+const std = @import("std");
 const c23_core = @import("ieee_c23_core.zig");
 const c23_optional = @import("ieee_c23_optional.zig");
 const c23_types = @import("scalar_c23_types.zig");
@@ -64,6 +65,89 @@ const sign_mask_d: u64 = 0x8000_0000_0000_0000;
 const exponent_mask_d: u64 = 0x7ff0_0000_0000_0000;
 const fraction_mask_d: u64 = 0x000f_ffff_ffff_ffff;
 const quiet_mask_d: u64 = 0x0008_0000_0000_0000;
+
+// The encoding parameters the two mode-parameterised cores derive every bound
+// from. Each entry names the masks declared above, so a field width is written
+// once per file, and `bias` is the one number no mask recovers: the exponent
+// field is `fraction_bits + 3` bits wide with its top value reserved, which
+// makes the largest finite biased exponent twice the bias.
+const HFormat = struct {
+    const Float = f16;
+    const Bits = u16;
+    const sign_mask = sign_mask_h;
+    const exponent_mask = exponent_mask_h;
+    const fraction_mask = fraction_mask_h;
+    const quiet_nan_bit = quiet_mask_h;
+    const bias: i32 = 15;
+
+    fn toBits(value: Float) Bits {
+        return @bitCast(value);
+    }
+
+    fn fromBits(bits: Bits) Float {
+        return @bitCast(bits);
+    }
+
+    fn isNaNBits(bits: Bits) bool {
+        return bits & ~sign_mask > exponent_mask;
+    }
+
+    fn quietNaN(bits: Bits) Float {
+        return @bitCast(bits | quiet_nan_bit);
+    }
+};
+
+const FFormat = struct {
+    const Float = f32;
+    const Bits = u32;
+    const sign_mask = sign_mask_f;
+    const exponent_mask = exponent_mask_f;
+    const fraction_mask = fraction_mask_f;
+    const quiet_nan_bit = quiet_mask_f;
+    const bias: i32 = 127;
+
+    fn toBits(value: Float) Bits {
+        return @bitCast(value);
+    }
+
+    fn fromBits(bits: Bits) Float {
+        return @bitCast(bits);
+    }
+
+    fn isNaNBits(bits: Bits) bool {
+        return bits & ~sign_mask > exponent_mask;
+    }
+
+    fn quietNaN(bits: Bits) Float {
+        return @bitCast(bits | quiet_nan_bit);
+    }
+};
+
+const DFormat = struct {
+    const Float = f64;
+    const Bits = u64;
+    const sign_mask = sign_mask_d;
+    const exponent_mask = exponent_mask_d;
+    const fraction_mask = fraction_mask_d;
+    const quiet_nan_bit = quiet_mask_d;
+    const bias: i32 = 1023;
+
+    fn toBits(value: Float) Bits {
+        return @bitCast(value);
+    }
+
+    fn fromBits(bits: Bits) Float {
+        return @bitCast(bits);
+    }
+
+    fn isNaNBits(bits: Bits) bool {
+        return bits & ~sign_mask > exponent_mask;
+    }
+
+    fn quietNaN(bits: Bits) Float {
+        return @bitCast(bits | quiet_nan_bit);
+    }
+};
 
 pub fn toBitsh(value: f16) u16 {
     return @bitCast(value);
@@ -212,93 +296,27 @@ pub fn nextAfterd(from: f64, to: f64) f64 {
 }
 
 pub fn scaleBh(mode: RoundMode, value: f16, exponent: i32) f16 {
-    const bits = toBitsh(value);
-    const sign = bits & sign_mask_h;
-    const magnitude = bits & ~sign_mask_h;
+    return scaleB(HFormat, mode, value, exponent);
+}
 
-    if (isNaNh(bits)) return quietNaNh(bits);
-    if (magnitude == 0 or magnitude == exponent_mask_h) return value;
+pub fn scaleBf(mode: RoundMode, value: f32, exponent: i32) f32 {
+    return scaleB(FFormat, mode, value, exponent);
+}
 
-    var significand = (magnitude & fraction_mask_h) | 0x0400;
-    var exponent_field: i64 = @intCast((magnitude & exponent_mask_h) >> 10);
-    if (exponent_field == 0) {
-        significand = magnitude & fraction_mask_h;
-        exponent_field = 1;
-        // Zero returned above, so the fraction is in 1..0x03ff. The CLZ
-        // difference is 1..10 and normalizes without losing bits. Subtracting
-        // it preserves the value and leaves exponent_field in [-9, 0].
-        const normalization_shift: u4 =
-            @intCast(@clz(significand) - @clz(@as(u16, 0x0400)));
-        significand <<= normalization_shift;
-        exponent_field -= normalization_shift;
-    }
-
-    // The finite exponent field is in [-9, 30], so adding any i32 fits i64.
-    const scaled_exponent = exponent_field + @as(i64, exponent);
-    if (scaled_exponent > 30) {
-        return overflowH(mode, sign != 0);
-    }
-    if (scaled_exponent >= 1) {
-        const result_exponent: u16 = @intCast(scaled_exponent);
-        const result_bits = sign |
-            (result_exponent << 10) |
-            (significand & fraction_mask_h);
-        return fromBitsh(result_bits);
-    }
-
-    const shift = 1 - scaled_exponent;
-    const rounded_significand = roundShiftRightH(
-        mode,
-        sign != 0,
-        significand,
-        shift,
-    );
-    return fromBitsh(sign | rounded_significand);
+pub fn scaleBd(mode: RoundMode, value: f64, exponent: i32) f64 {
+    return scaleB(DFormat, mode, value, exponent);
 }
 
 pub fn roundIntegralh(mode: RoundMode, value: f16) f16 {
-    const bits = toBitsh(value);
-    const sign = bits & sign_mask_h;
-    const magnitude = bits & ~sign_mask_h;
+    return roundIntegral(HFormat, mode, value);
+}
 
-    if (isNaNh(bits)) return quietNaNh(bits);
-    if (magnitude == 0 or magnitude == exponent_mask_h) return value;
+pub fn roundIntegralf(mode: RoundMode, value: f32) f32 {
+    return roundIntegral(FFormat, mode, value);
+}
 
-    const exponent_field: i32 = @intCast((magnitude & exponent_mask_h) >> 10);
-    const unbiased_exponent = exponent_field - 15;
-    if (unbiased_exponent >= 10) return value;
-
-    if (unbiased_exponent < 0) {
-        const rounded_magnitude: u16 = switch (mode) {
-            .nearest_even => if (unbiased_exponent == -1 and
-                magnitude & fraction_mask_h != 0)
-                0x3c00
-            else
-                0,
-            .toward_zero => 0,
-            .toward_positive => if (sign == 0) 0x3c00 else 0,
-            .toward_negative => if (sign != 0) 0x3c00 else 0,
-        };
-        return fromBitsh(sign | rounded_magnitude);
-    }
-
-    const fractional_bits: u4 = @intCast(10 - unbiased_exponent);
-    const discarded_mask = (@as(u16, 1) << fractional_bits) - 1;
-    const discarded = magnitude & discarded_mask;
-    if (discarded == 0) return value;
-
-    const truncated = magnitude & ~discarded_mask;
-    const unit = discarded_mask + 1;
-    const half = unit >> 1;
-    const increment = switch (mode) {
-        .nearest_even => discarded > half or
-            (discarded == half and (truncated >> fractional_bits) & 1 != 0),
-        .toward_zero => false,
-        .toward_positive => sign == 0,
-        .toward_negative => sign != 0,
-    };
-    const rounded_magnitude = truncated + if (increment) unit else 0;
-    return fromBitsh(sign | rounded_magnitude);
+pub fn roundIntegrald(mode: RoundMode, value: f64) f64 {
+    return roundIntegral(DFormat, mode, value);
 }
 
 pub fn totalOrderh(left: f16, right: f16) bool {
@@ -320,38 +338,65 @@ pub fn totalOrderd(left: f64, right: f64) bool {
 }
 
 fn isNaNh(bits: u16) bool {
-    return bits & ~sign_mask_h > exponent_mask_h;
+    return HFormat.isNaNBits(bits);
 }
 
 fn isNaNf(bits: u32) bool {
-    return bits & ~sign_mask_f > exponent_mask_f;
+    return FFormat.isNaNBits(bits);
 }
 
 fn isNaNd(bits: u64) bool {
-    return bits & ~sign_mask_d > exponent_mask_d;
+    return DFormat.isNaNBits(bits);
 }
 
 fn quietNaNh(bits: u16) f16 {
-    return @bitCast(bits | quiet_mask_h);
+    return HFormat.quietNaN(bits);
 }
 
-fn overflowH(mode: RoundMode, negative: bool) f16 {
-    const magnitude: u16 = switch (mode) {
-        .nearest_even => exponent_mask_h,
-        .toward_zero => exponent_mask_h - 1,
-        .toward_positive => if (negative) exponent_mask_h - 1 else exponent_mask_h,
-        .toward_negative => if (negative) exponent_mask_h else exponent_mask_h - 1,
+fn quietNaNf(bits: u32) f32 {
+    return FFormat.quietNaN(bits);
+}
+
+fn quietNaNd(bits: u64) f64 {
+    return DFormat.quietNaN(bits);
+}
+
+// The saturation magnitude of an overflow, for one mode and one sign.
+// Round-to-nearest and the directed modes all stop at the format boundary:
+// infinity when the mode lets the magnitude grow, the largest finite value
+// when it does not. The exponent mask is the whole exponent field, so one
+// unit below it is the largest finite magnitude.
+fn overflow(comptime Format: type, mode: RoundMode, negative: bool) Format.Float {
+    const maximum_finite = Format.exponent_mask - 1;
+    const magnitude: Format.Bits = switch (mode) {
+        .nearest_even => Format.exponent_mask,
+        .toward_zero => maximum_finite,
+        .toward_positive => if (negative) maximum_finite else Format.exponent_mask,
+        .toward_negative => if (negative) Format.exponent_mask else maximum_finite,
     };
-    return fromBitsh((if (negative) sign_mask_h else 0) | magnitude);
+    return Format.fromBits((if (negative) Format.sign_mask else 0) | magnitude);
 }
 
-fn roundShiftRightH(
+// The single rounding a right shift needs. The significand is in
+// [1, 2^(fraction_bits+1) - 1] and the shift is the whole exponent drop,
+// which no i32 keeps small.
+fn roundShiftRight(
+    comptime Format: type,
     mode: RoundMode,
     negative: bool,
-    significand: u16,
+    significand: Format.Bits,
     shift: i64,
-) u16 {
-    if (shift > 11) {
+) Format.Bits {
+    const Bits = Format.Bits;
+    const Shift = std.math.Log2Int(Bits);
+    // The fraction is the run of low bits under the exponent field, so its
+    // width is the trailing-zero count of the exponent mask: 10, 23, 52.
+    const fraction_bits: Shift = @intCast(@ctz(Format.exponent_mask));
+
+    // A drop of more than fraction_bits + 1 leaves less than half of the
+    // smallest subnormal quantum, so only the mode's own direction reaches
+    // one quantum and the other two reach none.
+    if (shift > @as(i64, fraction_bits) + 1) {
         return switch (mode) {
             .nearest_even, .toward_zero => 0,
             .toward_positive => if (negative) 0 else 1,
@@ -359,12 +404,15 @@ fn roundShiftRightH(
         };
     }
 
-    const shift_amount: u4 = @intCast(shift);
+    // The return above bounds the shift to [1, fraction_bits + 1]. That upper
+    // bound is 11, 24, or 53 against shift-type maxima 15, 31, and 63, so both
+    // casts hold and no shift count reaches the bit width of its own type.
+    const shift_amount: Shift = @intCast(shift);
     const quotient = significand >> shift_amount;
-    const discarded_mask = (@as(u16, 1) << shift_amount) - 1;
+    const discarded_mask = (@as(Bits, 1) << shift_amount) - 1;
     const discarded = significand & discarded_mask;
-    const half_shift: u4 = @intCast(shift - 1);
-    const half = @as(u16, 1) << half_shift;
+    const half_shift: Shift = @intCast(shift - 1);
+    const half = @as(Bits, 1) << half_shift;
     const increment = switch (mode) {
         .nearest_even => discarded > half or
             (discarded == half and quotient & 1 != 0),
@@ -372,15 +420,152 @@ fn roundShiftRightH(
         .toward_positive => !negative and discarded != 0,
         .toward_negative => negative and discarded != 0,
     };
+    // The quotient is at most (2^(fraction_bits+1) - 1) >> 1, which is
+    // 2^fraction_bits - 1, so the carry stops at the hidden bit: a caller
+    // that reads it into a zero exponent field gets the minimum normal.
     return if (increment) quotient + 1 else quotient;
 }
 
-fn quietNaNf(bits: u32) f32 {
-    return @bitCast(bits | quiet_mask_f);
+// The shared `scaleB` core: an exact power-of-two scale with one rounding, in
+// the mode the caller names. The exponent carried here is the biased exponent
+// of the width being compiled, so every bound below is a statement about that
+// width and not about binary16.
+fn scaleB(
+    comptime Format: type,
+    mode: RoundMode,
+    value: Format.Float,
+    exponent: i32,
+) Format.Float {
+    const Bits = Format.Bits;
+    const Shift = std.math.Log2Int(Bits);
+    // The fraction is the run of low bits under the exponent field, so its
+    // width is the trailing-zero count of the exponent mask: 10, 23, 52. Each
+    // is below the bit width it shifts inside, so all three fit the shift type.
+    const fraction_bits: Shift = @intCast(@ctz(Format.exponent_mask));
+    const hidden_bit: Bits = @as(Bits, 1) << fraction_bits;
+    // The largest finite biased exponent. The exponent field is
+    // `fraction_bits + 3` bits wide and its top value is reserved, which makes
+    // twice the bias 30, 254, or 2046 the last field a finite result can hold.
+    const maximum_biased: i64 = @as(i64, Format.bias) * 2;
+
+    const bits = Format.toBits(value);
+    const sign = bits & Format.sign_mask;
+    const magnitude = bits & ~Format.sign_mask;
+
+    if (Format.isNaNBits(bits)) return Format.quietNaN(bits);
+    if (magnitude == 0 or magnitude == Format.exponent_mask) return value;
+
+    var significand: Bits = (magnitude & Format.fraction_mask) | hidden_bit;
+    // NaN and infinity returned above, so a finite nonzero input carries a
+    // biased exponent in [1, maximum_biased], and that is at most 2046.
+    var exponent_field: i64 = @intCast((magnitude & Format.exponent_mask) >> fraction_bits);
+    if (exponent_field == 0) {
+        significand = magnitude & Format.fraction_mask;
+        exponent_field = 1;
+        // Zero returned above, so the fraction is in 1..2^fraction_bits - 1. The
+        // CLZ difference is 1..fraction_bits and normalizes without losing
+        // bits. Subtracting it preserves the value and leaves exponent_field in
+        // [1 - fraction_bits, 0].
+        const normalization_shift: Shift = @intCast(@clz(significand) - @clz(hidden_bit));
+        significand <<= normalization_shift;
+        exponent_field -= normalization_shift;
+    }
+
+    // The finite exponent field is in [1 - fraction_bits, maximum_biased], so
+    // adding any i32 stays inside i64.
+    const scaled_exponent = exponent_field + @as(i64, exponent);
+    if (scaled_exponent > maximum_biased) {
+        return overflow(Format, mode, sign != 0);
+    }
+    if (scaled_exponent >= 1) {
+        // This branch bounds scaled_exponent to [1, maximum_biased], at most
+        // 2046, so the cast holds. The shift cannot reach the sign bit either:
+        // maximum_biased << fraction_bits is 0x7800, 0x7f00_0000, and
+        // 0x7fe0_0000_0000_0000, all inside the format.
+        const result_exponent: Bits = @intCast(scaled_exponent);
+        const result_bits = sign |
+            (result_exponent << fraction_bits) |
+            (significand & Format.fraction_mask);
+        return Format.fromBits(result_bits);
+    }
+
+    // The exact result is subnormal or zero, and one right shift is the only
+    // rounding it can need. The shift is at most 1 + 2^31 + fraction_bits,
+    // which stays far inside i64.
+    const shift = 1 - scaled_exponent;
+    const rounded_significand = roundShiftRight(Format, mode, sign != 0, significand, shift);
+    return Format.fromBits(sign | rounded_significand);
 }
 
-fn quietNaNd(bits: u64) f64 {
-    return @bitCast(bits | quiet_mask_d);
+// The shared `roundIntegral` core: one rounding to an integer, in the mode
+// the caller names.
+fn roundIntegral(
+    comptime Format: type,
+    mode: RoundMode,
+    value: Format.Float,
+) Format.Float {
+    const Bits = Format.Bits;
+    const Shift = std.math.Log2Int(Bits);
+    // The fraction is the run of low bits under the exponent field, so its
+    // width is the trailing-zero count of the exponent mask: 10, 23, 52.
+    const fraction_bits: Shift = @intCast(@ctz(Format.exponent_mask));
+    // One has a zero fraction at the unbiased exponent zero, so its field is
+    // the bias shifted up by the fraction width: 0x3c00, 0x3f80_0000, and
+    // 0x3ff0_0000_0000_0000.
+    const one: Bits = @as(Bits, Format.bias) << fraction_bits;
+
+    const bits = Format.toBits(value);
+    const sign = bits & Format.sign_mask;
+    const magnitude = bits & ~Format.sign_mask;
+
+    if (Format.isNaNBits(bits)) return Format.quietNaN(bits);
+    if (magnitude == 0 or magnitude == Format.exponent_mask) return value;
+
+    // NaN and infinity returned above, so the field is in [0, 2 * bias], which
+    // is at most 2046 and so fits i32 with the bias subtracted from it.
+    const exponent_field: i32 = @intCast((magnitude & Format.exponent_mask) >> fraction_bits);
+    const unbiased_exponent = exponent_field - Format.bias;
+    // A value at or above one ulp of the bias exponent is a multiple of one
+    // already, so it needs no rounding.
+    if (unbiased_exponent >= @as(i32, fraction_bits)) return value;
+
+    if (unbiased_exponent < 0) {
+        const rounded_magnitude: Bits = switch (mode) {
+            .nearest_even => if (unbiased_exponent == -1 and
+                magnitude & Format.fraction_mask != 0)
+                one
+            else
+                0,
+            .toward_zero => 0,
+            .toward_positive => if (sign == 0) one else 0,
+            .toward_negative => if (sign != 0) one else 0,
+        };
+        return Format.fromBits(sign | rounded_magnitude);
+    }
+
+    // The two returns above leave unbiased_exponent in [0, fraction_bits - 1],
+    // so the discarded width is in [1, fraction_bits]: 1..10, 1..23, or 1..52,
+    // each inside its own shift type, whose maxima are 15, 31, and 63.
+    const fractional_bits: Shift = @intCast(@as(i32, fraction_bits) - unbiased_exponent);
+    const discarded_mask = (@as(Bits, 1) << fractional_bits) - 1;
+    const discarded = magnitude & discarded_mask;
+    if (discarded == 0) return value;
+
+    const truncated = magnitude & ~discarded_mask;
+    const unit = discarded_mask + 1;
+    const half = unit >> 1;
+    const increment = switch (mode) {
+        .nearest_even => discarded > half or
+            (discarded == half and (truncated >> fractional_bits) & 1 != 0),
+        .toward_zero => false,
+        .toward_positive => sign == 0,
+        .toward_negative => sign != 0,
+    };
+    // The carry is one whole quantum and the truncated magnitude has a zero
+    // fraction, so an incremented magnitude stays inside its own exponent
+    // field and never reaches the reserved top one.
+    const rounded_magnitude = truncated + if (increment) unit else 0;
+    return Format.fromBits(sign | rounded_magnitude);
 }
 
 fn totalOrderKeyH(bits: u16) u16 {

@@ -305,6 +305,7 @@ Incidental processor flags are outside this contract.
 
 Callers must keep IEEE round-to-nearest, ties-to-even active for each scalar call.
 Scalar functions do not take a general `RoundMode` argument.
+The only public functions that do are the `zmath.ieee` `scaleB` and `roundIntegral` families, which name the rounding of their own result.
 An operation-defined direction parameter, such as the `fromfp` direction, does not change the process environment.
 `zmath` does not read, validate, set, or restore the process rounding mode.
 Behavior with another active rounding mode is unsupported.
@@ -729,6 +730,37 @@ A negative nonzero, fractional, subnormal, infinite, NaN, or out-of-range argume
 Each failure returns the exact `PayloadResult(T) { value=+0, ok=false }`.
 This policy is a zmath contract, not a portable C guarantee.
 
+### Mode-parameterised scaling and integer rounding
+
+`zmath.ieee` owns the two families that name the rounding of their own result instead of reading the process rounding mode.
+`scaleB` takes any `i32` exponent, and both families take the same four directions at every width.
+
+| Family | Signatures |
+| --- | --- |
+| `scaleB` | `scaleBh(mode: RoundMode, value: f16, exponent: i32) f16`, `scaleBf(mode: RoundMode, value: f32, exponent: i32) f32`, `scaleBd(mode: RoundMode, value: f64, exponent: i32) f64` |
+| `roundIntegral` | `roundIntegralh(mode: RoundMode, value: f16) f16`, `roundIntegralf(mode: RoundMode, value: f32) f32`, `roundIntegrald(mode: RoundMode, value: f64) f64` |
+
+`RoundMode` declares exactly four values: `nearest_even`, `toward_zero`, `toward_positive`, and `toward_negative`.
+Those four are the modes both families accept, with no default and no fifth direction.
+`nearest_even` is ties to an even least-significant significand bit.
+
+`scaleB` returns `value` scaled by `2^exponent`, rounded once in the named mode.
+An exact scale never rounds: the significand is unchanged, so only a right shift into the subnormal range can discard anything.
+An exponent beyond the representable range is not an error, because the whole `i32` range is a valid argument.
+A result that leaves the format saturates at its boundary: infinity when the mode lets the magnitude grow, and the largest finite value when it does not.
+A result that rounds to zero keeps the sign of the input, so the underflow of a negative value returns `-0`.
+
+`roundIntegral` returns `value` rounded to an integer in the named mode, with the same tie, direction, and sign rules.
+A value of magnitude one or more is already integral and is returned bit-identical, while a value below one rounds to a signed zero or to plus or minus one, and the mode decides which.
+
+Both families use gradual underflow.
+A subnormal input is normalized before it is scaled, a subnormal result is never flushed to zero, and a zero and an infinity pass through at any exponent.
+A NaN input preserves its sign and diagnostic payload and sets only the format quiet bit.
+
+This contract previously named no signature for either family, and only the binary16 forms existed.
+The `f` and `d` forms are now implemented with the signatures in the table, over the same four `RoundMode` values.
+The three widths share one width-generic implementation, so a change to one width is a change to all three.
+
 ### Exact special-value policy
 
 Each manifest-accepted operation-format pair must define exact output bits for zeros, subnormals, infinities, and NaNs.
@@ -1125,11 +1157,11 @@ zig-out/bin/zmath-public-helpers
 ```
 
 `zmath-public-helpers` measures the public evaluators that no corpus descriptor
-covers: `classify`, `ulpDistance`, all four `scaleB` rounding modes, and all
-four `roundIntegral` rounding modes. It takes no corpus root and no operation
-filter, and accepts only `--repetitions=1..100`. The typed benchmark accepts
-`--repetitions=1..1024` and `--with-zig`, which times same-input Zig intrinsic
-references beside zmath.
+covers: `classify`, `ulpDistance`, and the binary16 `scaleB` and `roundIntegral`
+entry points in all four rounding modes. It takes no corpus root and no
+operation filter, and accepts only `--repetitions=1..100`. The typed benchmark
+accepts `--repetitions=1..1024` and `--with-zig`, which times same-input Zig
+intrinsic references beside zmath.
 
 The corpus producer, corpus replay, and scalar-matrix executables accept an
 optional first positional corpus root. The default root is `test/corpus`.
