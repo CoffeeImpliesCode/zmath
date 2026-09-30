@@ -111,27 +111,41 @@ zero. Six advisories in the accepted scalar kernels went unrecorded for exactly 
 
 ## Acceptance evidence, re-verified
 
-The sibling `zmath-testing` is present at `../zmath-testing`, and the recorded acceptance evidence
-has been re-verified on this host rather than merely inherited.
+The sibling `zmath-testing` is present at `../zmath-testing`. Its published evidence is
+re-verified on this host rather than merely inherited: the table below is what the tree can show
+now, measured here.
 
-| Check | Recorded | Re-verified here |
+| Check | Source of truth | Current value |
 | --- | --- | --- |
-| Accepted descriptors | 315 | 315 |
-| Corpus records | 63,160,084 | 63,160,084 |
-| Record bytes | 4,518,220,347 | 4,518,220,347 |
-| `replay-corpus` | exit 0 | exit 0, all 315 signatures |
+| Manifest descriptors | `test/corpus/manifest.toml` | 337 at `schema_version = 5` |
+| Publication digest | `generated/COMPLETE` | enforced by `corpus_set.load` |
+| Corpus records | the regenerated publication | 72,035,318 |
+| Record bytes | the regenerated publication | 5,164,903,241 |
+| `replay-corpus` | the regenerated publication | exit 0, 337 descriptors |
 
-Full regeneration is 17 minutes for 4.3 GB at a peak RSS of 173 MB. Replaying those records against
-the current runtime took 94 seconds and reported `descriptors=315 records=63160084`. That is the
-result that matters: the scalar-kernel changes in this cycle preserved every accepted result bit.
+The publication is regenerated and republished at 337 descriptors, and
+`replay-corpus` in this repository now exits 0 with `descriptors=337
+records=72035318`. Immediately before that commit the committed publication
+was 315 rows against a 337-row manifest, so a fresh checkout could not verify
+its own corpus at all: the loader rejected it with `error.IncompleteSelection`.
 
-One digest does not match, and it is not a defect. `metadata_sha256` in `verification.json` is the
-digest of the COMMITTED `generated/metadata.txt`, which is a generation-time snapshot taken when
-309 of the 315 rows still read `manifest_status=unsupported`. The manifest was promoted to
-`correct` afterwards, which is the documented promotion path, so a fresh generation correctly
-reports 315 `correct`. That digest also embeds the absolute `artifact=` path and therefore differs
-for any other output directory. Judge publication integrity by the descriptor count and the byte
-total, which match exactly, not by that digest.
+The digest authority is `generated/COMPLETE`, which records the
+`metadata_sha256` against which `corpus_set.load` recomputes the SHA-256 of
+`generated/metadata.txt` and refuses the publication on disagreement. There is
+no verification file beside it. A hand-maintained counter file has no
+producer, so every field in it is a number nobody can reproduce and every field
+goes stale silently.
+
+Full regeneration costs about 21 minutes for 5.2 GB, and the replay that
+follows takes about 2.5 minutes, both measured on this host at 337
+descriptors. They are costs, not coverage claims.
+
+A digest recomputed from a DIFFERENT run still will not match, and that is not
+a defect. Each metadata row embeds its `artifact=` path, which is that run's
+own records root joined to the record file name, so the digest depends on where
+the run wrote its records. Judge publication integrity by the digest `COMPLETE`
+carries and the loader checks, never by a digest recomputed from another
+output root or from another snapshot.
 
 Bringing the harness up on this host required repairing it; see the two commits in
 `../zmath-testing`. The oracle generator needs a flint that the host can load, and the store's
@@ -145,7 +159,7 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
 2. Correct rounding of finite power, root, and pi-scaled results is a target
    requirement that is explicitly not claimed as satisfied.
 3. The public helpers `classify`, `ulpDistance`, `scaleB`, and `roundIntegral` are now covered by
-   the manifest, but under a fifth evaluator class, `definitional`, rather than `exact_bits`,
+   the manifest under an evaluator class of their own, `definitional`, rather than `exact_bits`,
    `mpfr_arb`, or `algebraic`. They are bit-level operations whose correct results are definitional:
    no oracle computes them, so a row for one is a contract lock and not independent numerical
    evidence. The separation is enforced rather than conventional — the exact-bits entry point
@@ -156,8 +170,10 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
    not a known gap.
 5. The non-scalar modules have no independent oracle. Their accuracy rests on
    algebraic identities and on IEEE behaviour, not on the corpus.
-6. `generated/verification.json` in the sibling is a dated 2026-09-09 snapshot
-   with no checked-in producer. Its counters are not current.
+6. There is no verification file in the sibling, and there is deliberately no committed JSON of
+   run counters. A counter with no producer is a number nobody can reproduce. `generated/COMPLETE`
+   plus `generated/metadata.txt` are the digest authority; every descriptor, record, and byte
+   figure comes from a regenerated publication, not from a dated snapshot.
 7. Operations returning a struct return a lane-ordered array, not a `@Vector`.
    See above.
 
@@ -172,23 +188,27 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
    years each. The arithmetic is recorded in the scalar contract so it is not re-proposed.
    `correct` keeps meaning exact agreement on the stored tuples.
 
-2. **Manifest rows for the uncovered public helpers.** Done. The manifest is 323 descriptors at
-   `schema_version = 4`, and the four helpers are covered by 8 new rows in a fifth evaluator class
-   named `definitional`, precisely because no oracle computes them. The producer emits 323 records
-   totalling 5,149,836,937 bytes, and replay reports `descriptors=323 records=71832030` exit 0.
-   See known limit 3 for what that class does and does not claim.
+2. **Manifest rows for the uncovered public helpers.** Done. The manifest is 337 descriptors at
+   `schema_version = 5`, and the publication is regenerated and replayed to match: 72,035,318
+   records in 5,164,903,241 bytes, `replay-corpus` exit 0. The four public helpers account for 12
+   rows, three formats each, under the `definitional` evaluator class precisely because no oracle
+   computes them; ten more `definitional` rows cover the eight-operand algebra and quaternion struct
+   operations, for 22 in the class. See known limit 3 for what that class does and does not claim.
+
+3. **The `f` and `d` forms of `scaleB` and `roundIntegral`.** Done, and the decision recorded: they
+   are implemented, and the four `RoundMode` values are reached as a field value the way `fromfp`
+   does rather than as separate rows. See known limit 4 for why the contract previously named no
+   signature for either family.
+
+5. **The house gate did not build the corpus producer.** Fixed. `zig build` covers format, build,
+   test, AST check and the linters, but the producer was only built by `zig build
+   oracle-generator`, so a green gate did not mean the corpus could be produced. A schema change
+   that missed the producer passed the gate and then failed silently at generation, producing the
+   old 315-row publication from a new 323-row manifest. A `published-tools` step now depends on
+   every published tool and every tool-owning test step, and the gate runs it under the qualified
+   profile before `zig-gate`.
 
 ### Still open
 
-3. Whether `f` and `d` forms of `scaleB` and `roundIntegral` belong in the contract. See known limit
-   4; the contract declares no signature for either family and only binary16 exists.
-
-4. The `UnitQuat*.raw` privacy clause cannot be met as written, because Zig has no private struct
-   fields and a field `raw` and a method `raw()` cannot both exist. Recorded in `API.md`; no
-   further work unless the contract is amended.
-
-5. **The house gate does not build the corpus producer.** `zig build` covers format, build, test,
-   AST check and the linters, but the producer is only built by `zig build oracle-generator`, so a
-   green gate does not mean the corpus can be produced. A schema change that missed the producer
-   passed the gate and then failed silently at generation, producing the old 315-row publication
-   from a new 323-row manifest. A step that builds every published tool belongs in the gate.
+4. **The `UnitQuat*.raw` privacy clause** cannot be met as written, because Zig has no private
+   struct fields and a field `raw` and a method `raw()` cannot both exist. Recorded in `API.md`;
