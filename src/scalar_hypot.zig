@@ -243,11 +243,17 @@ fn hypotdDenorm(x_bits: u64, y_bits: u64) f64 {
     const x_value: f64 = @floatFromInt(x_bits);
     const y_value: f64 = @floatFromInt(y_bits);
     const approximate_root: f64 = @sqrt(x_value * x_value + y_value * y_value);
-    // Both inputs are subnormal significands below 2^52, so the root is
-    // nonnegative and below 2^53. The clamps make that conversion bound explicit.
-    var root: u64 = @as(u64, @intFromFloat(
-        @min(@max(approximate_root, 0.0), 0x1p+53),
-    )) << 1;
+    // Both inputs are subnormal significands below 2^52, so each square rounds
+    // to at most 2^104 - 2^51, their sum is exact and stays below 2^105, and
+    // the root is nonnegative and below 2^52.5. The clamp and the guard make
+    // that conversion bound explicit.
+    const root_bound: f64 = 0x1.8p+52;
+    const bounded_root: f64 = @min(@max(approximate_root, 0.0), root_bound);
+    const root_value: u64 = if (bounded_root >= 0.0 and bounded_root <= root_bound)
+        @intFromFloat(bounded_root)
+    else
+        unreachable;
+    var root: u64 = root_value << 1;
     const x_scaled: u128 = @as(u128, x_bits) << 1;
     const y_scaled: u128 = @as(u128, y_bits) << 1;
     const squared_sum: u128 = x_scaled * x_scaled + y_scaled * y_scaled;

@@ -2900,7 +2900,15 @@ fn crErfFast(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) f64 {
     // The index truncates toward zero on a non-negative input, so it is also
     // the floor of the range reduction. It converts back to f64 exactly, so the
     // second scaling and its rounding disappear.
-    const i: u32 = @intFromFloat(@as(f64, 16.0) * z);
+    // erfd returns for |x| above 0x4017_afb4_8dc9_6626 and the 2^-4 branch
+    // above returns for z below 2^-4, so 16*z lies in [1, 94.7453951327121].
+    // That reaches the last of the 94 rows of coefficients_fast and no
+    // further. 16 is a power of two, so the scaling is exact.
+    const scaled: f64 = @as(f64, 16.0) * z;
+    const i: u32 = if (scaled >= @as(f64, 1.0) and scaled <= @as(f64, 94.7453951327121))
+        @intFromFloat(scaled)
+    else
+        unreachable;
     const v: f64 = @floatFromInt(i);
     z = (z - @as(f64, 0.03125)) - (@as(f64, 0.0625) * v);
     var c: [*c]const f64 = @ptrCast(@alignCast(&coefficients_fast[i -% @as(u32, 1)]));
@@ -3966,7 +3974,15 @@ fn crErfAccurate(arg_h: [*c]f64, arg_l: [*c]f64, arg_z: f64) void {
     // The index truncates toward zero on a non-negative input, so it is also
     // the floor of the range reduction. It converts back to f64 exactly, so the
     // second scaling and its rounding disappear.
-    const i: u32 = @intFromFloat(@as(f64, 8.0) * z);
+    // erfd returns for |x| above 0x4017_afb4_8dc9_6626 and the 0.125 branch
+    // above returns for z below 0.125, so 8*z lies in [1, 47.37269756635605].
+    // That reaches the last of the 47 rows of coefficients_accurate and no
+    // further. 8 is a power of two, so the scaling is exact.
+    const scaled: f64 = @as(f64, 8.0) * z;
+    const i: u32 = if (scaled >= @as(f64, 1.0) and scaled <= @as(f64, 47.37269756635605))
+        @intFromFloat(scaled)
+    else
+        unreachable;
     const v: f64 = @floatFromInt(i);
     z = (z - @as(f64, 0.0625)) - (@as(f64, 0.125) * v);
     var p: [*c]const f64 = @ptrCast(@alignCast(&coefficients_accurate[i -% @as(u32, 1)]));

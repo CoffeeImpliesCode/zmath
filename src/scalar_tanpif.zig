@@ -23,6 +23,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const std = @import("std");
 const magnitude_mask: u32 = 0x7fff_ffff;
 const infinity_bits: u32 = 0x7f80_0000;
 const quiet_nan_bit: u32 = 0x0040_0000;
@@ -62,7 +63,12 @@ pub fn tanpif(value: f32) f32 {
     const reduced: f32 = value - rounded_value;
 
     if (delta_times_four == 0.0) {
-        var quadrant: i64 = @intFromFloat(@min(@max(value_times_four, -0x1p+26), 0x1p+26));
+        // The cutoff above keeps `|4 * value|` below `2^26`, so `value_times_four`
+        // is finite and this clip is the tight range an `i64` index needs. The
+        // clip is the identity on every input that reaches it, and the NaN and
+        // infinity returns above mean no NaN reaches the two spellings that
+        // could otherwise disagree here.
+        var quadrant: i64 = @intFromFloat(std.math.clamp(value_times_four, -0x1p+26, 0x1p+26));
         if ((quadrant & 1) != 0) return copySign(1.0, reduced);
         quadrant &= 6;
         if (quadrant == 0) return copySign(0.0, value);

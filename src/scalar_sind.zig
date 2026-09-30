@@ -229,7 +229,12 @@ fn dintFromDouble(value: f64) Dint {
 }
 
 fn roundRightEven(value: u128, shift_count: i64) u128 {
-    if (shift_count <= 0) return value << @as(u7, @intCast(-shift_count));
+    // `dintToDouble` is the only caller and reaches this line under
+    // `value.ex < -1021`, so `-value.ex - 946 >= 76` and this branch is empty
+    // today. `@abs` keeps it total anyway: it takes the magnitude without the
+    // `-x` overflow at `minInt(i64)`, leaving only the `u7` narrowing, which no
+    // left shift of 128 or more can satisfy.
+    if (shift_count <= 0) return value << @as(u7, @intCast(@abs(shift_count)));
     if (shift_count > 128) return 0;
     if (shift_count == 128) {
         const round_bit = (value >> 127) != 0;

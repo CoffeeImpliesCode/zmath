@@ -252,7 +252,11 @@ pub fn packDyadic(comptime destination: Format, value: Dyadic) destination.Bits(
         const result = roundRight(value.magnitude, shift, value.sticky);
         rounded = result.value + @as(u128, @intFromBool(result.up));
     } else {
-        const shift: u32 = @intCast(-shift_signed);
+        // `shift_signed` is `bitLength(magnitude) - 1 - fraction_bits` here, so
+        // it lies in `[-52, 0]` and its magnitude is the left shift. `@abs` takes
+        // that magnitude without the `-x` overflow at `minInt(i32)`, and the
+        // assert below is the width bound that keeps the shift inside a `u128`.
+        const shift: u32 = @abs(shift_signed);
         std.debug.assert(shift < 128);
         rounded = value.magnitude << @as(std.math.Log2Int(u128), @intCast(shift));
     }
@@ -511,7 +515,15 @@ pub fn packSqrt(comptime destination: Format, significand: u64, exponent: i32) d
         const base: u64 = if (odd) significand * 2 else significand;
         rounded_result = sqrtScaledPositive(base, (if (odd) shift - 1 else shift) / 2);
     } else {
-        const shift: u32 = @intCast(-square_shift);
+        // `square_shift < 0` here, so its magnitude is the denominator shift and
+        // `@abs` takes it without the `-x` overflow at `minInt(i32)`. `exponent`
+        // is a decoded binary exponent, so it is at least `-1074`: the `minimum`
+        // branch above then gives `exponent - 2 * scale >= -1074 + 2 * (14 + 10)`,
+        // and the `result_top` branch gives `exponent - 2 * scale <= 1 + 2 * 52`
+        // because `exponent - 2 * result_top` is `-bit` or `1 - bit`. So the
+        // magnitude is at most 1026, far inside `u32`, and `sqrtScaledNegative`
+        // already folds any shift of 64 or more to zero.
+        const shift: u32 = @abs(square_shift);
         const odd = shift & 1 != 0;
         const base: u64 = if (odd) significand * 2 else significand;
         const denominator_shift = if (odd) shift + 1 else shift;

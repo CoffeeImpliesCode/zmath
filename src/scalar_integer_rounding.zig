@@ -10,6 +10,13 @@ fn invalidResult() c23.IntegerResult {
     return .{ .value = 0, .ok = false };
 }
 
+/// The tight `f64` window whose truncation lands in `i64`.
+///
+/// `0x1p63` is `maxInt(i64) + 1`, the first magnitude that does not fit, so it
+/// is the exact threshold. The widest `f64` below it is `0x1.fffffffffffffp62`,
+/// which is `2^63 - 1024` and so inside `i64`, and `-0x1p63` is exactly
+/// `minInt(i64)`. Both comparisons are false for NaN, so the guard rejects NaN
+/// and both infinities together with the out-of-range magnitudes.
 fn isFiniteInI64Range(value: f64) bool {
     return value >= -0x1p63 and value < 0x1p63;
 }
@@ -19,7 +26,10 @@ fn roundNearestEven(comptime T: type, value: T) c23.IntegerResult {
     const value_wide: f64 = @floatCast(value);
     if (!isFiniteInI64Range(value_wide)) return invalidResult();
 
-    const truncated: i64 = @intFromFloat(value);
+    // The guard above admits only `[-0x1p63, 0x1p63)`, and every `f64` in that
+    // window is at most `0x1.fffffffffffffp62`, so the truncation fits `i64`.
+    // The clamp is the identity on that window and states the bound here.
+    const truncated: i64 = @intFromFloat(std.math.clamp(value_wide, -0x1p63, 0x1.fffffffffffffp62));
     const truncated_value: T = @floatFromInt(truncated);
     const fraction = value - truncated_value;
     const odd = (truncated & 1) != 0;
@@ -41,7 +51,13 @@ fn roundTiesAway(comptime T: type, value: T) c23.IntegerResult {
     if (!isFiniteInI64Range(value_wide)) return invalidResult();
 
     // At the i64 limits, every representable input is integral, so rounding stays in range.
-    return .{ .value = @intFromFloat(@round(value_wide)), .ok = true };
+    // `@round` carries a value between two integer endpoints onto an integer
+    // between them, so the rounded value is in `[-0x1p63,
+    // 0x1.fffffffffffffp62]` and this clamp is the identity on it.
+    return .{
+        .value = @intFromFloat(std.math.clamp(@round(value_wide), -0x1p63, 0x1.fffffffffffffp62)),
+        .ok = true,
+    };
 }
 
 pub fn lrinth(value: f16) c23.IntegerResult {

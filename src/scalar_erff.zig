@@ -654,7 +654,16 @@ pub fn erff(arg_x: f32) f32 {
     // The index truncates toward zero on a non-negative input, so it is also
     // the floor of the range reduction. It converts back to f64 exactly, so the
     // second scaling and its rounding disappear.
-    const i: u32 = @intFromFloat(@as(f32, 16.0) * ax);
+    // The saturation branch returns for |x| above 0x407a_d444 and the
+    // small-argument branch returns for |x| below 0x3ee0_0000 = 7/16, so
+    // 16*ax lies in [7, 62.70729064941406]. That spans exactly the 56 rows of
+    // the table once the index is shifted by 7. 16 is a power of two, so the
+    // scaling is exact.
+    const scaled: f32 = @as(f32, 16.0) * ax;
+    const i: u32 = if (scaled >= @as(f32, 7.0) and scaled <= @as(f32, 62.70729064941406))
+        @intFromFloat(scaled)
+    else
+        unreachable;
     const v: f64 = @floatFromInt(i);
     z = (z - @as(f64, 0.03125)) - (@as(f64, 0.0625) * v);
     var c: [*c]const f64 = @ptrCast(@alignCast(&static_local_table.coefficients[i -% @as(u32, 7)]));

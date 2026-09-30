@@ -896,10 +896,14 @@ pub fn atanhd(value: f64) f64 {
     const b_entry = atanhd_b[@intCast(table_i)];
     var j_numerator = normalized_th_bits + (@as(u64, @intCast(b_entry[0])) << 33);
     const d_product = d >> 16;
+    // b_entry[1] is a signed table bias. Widening it to i64 keeps the value
+    // clear of the signed minimum, so @abs yields the unsigned magnitude and
+    // the widening to u64 needs no further range check.
+    const b_magnitude: u64 = @abs(@as(i64, b_entry[1]));
     if (b_entry[1] >= 0) {
         j_numerator +%= @as(u64, @intCast(b_entry[1])) * d_product;
     } else {
-        j_numerator -%= @as(u64, @intCast(-b_entry[1])) * d_product;
+        j_numerator -%= b_magnitude * d_product;
     }
     const j: u64 = j_numerator >> (52 - 10);
     const idx1_main: usize = @intCast(j >> 5);

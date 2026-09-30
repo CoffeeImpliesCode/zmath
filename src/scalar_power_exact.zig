@@ -470,7 +470,14 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 Big.copy(&rational.denominator, &denominator);
             } else {
                 Big.copy(&rational.numerator, &numerator);
-                Big.shifted(&rational.denominator, @intCast(-total_shift), &denominator);
+                // `total_shift < 0` here, so its magnitude is the denominator
+                // shift. `@abs` takes that magnitude without the `-x` overflow
+                // at `minInt(i64)`, and `usize` holds it: `rational.shift` is a
+                // decoded exponent of at least `-1074` times a degree of at most
+                // `max_degree` = 64, and `scale` is a precision less an exponent
+                // bounded by the limb capacity, so the total stays inside
+                // `capacity_bits` = 131072.
+                Big.shifted(&rational.denominator, @intCast(@abs(total_shift)), &denominator);
             }
             std.debug.assert(denominator.bitLength() < storage_bits);
 
@@ -580,7 +587,12 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 return;
             }
 
-            const denominator_shift: usize = @intCast(-decoded.exponent);
+            // `decoded.exponent < 0` here, so its magnitude is the denominator
+            // bit. `@abs` takes that magnitude without the `-x` overflow at
+            // `minInt(i64)`, and a finite binary exponent is at least `-1074`,
+            // the binary64 minimum subnormal, which the `setBit` assert below
+            // leaves far inside the limb capacity.
+            const denominator_shift: usize = @intCast(@abs(decoded.exponent));
             var unit: Big = undefined;
             Big.zero(&unit);
             unit.setBit(denominator_shift);
