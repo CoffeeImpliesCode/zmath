@@ -17,5 +17,8 @@ rec {
     INCLUDE_DIRECTORIES = "${pkgs.lib.makeIncludePath packages}";
   };
 
+  # `zig-gate` is a host tool in ~/.local/bin, not a nix package, so it is not
+  # in `packages`; the exported environment reaches it through PATH instead.
+  # Where /nix/store holds this devshell, the store script already runs it.
   scripts.gate.exec = "zig-gate";
 }
