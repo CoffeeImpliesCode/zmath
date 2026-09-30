@@ -2,3 +2,7 @@ zig-out/
 .zig-cache/
 .devenv/
 graphify-out/
+.zig-global-cache/
+.jj/
+.direnv/
+codedb.snapshot
