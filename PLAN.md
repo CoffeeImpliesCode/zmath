@@ -144,10 +144,12 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
    design, not a pending task.
 2. Correct rounding of finite power, root, and pi-scaled results is a target
    requirement that is explicitly not claimed as satisfied.
-3. The public helpers `classify`, `ulpDistance`, the four `scaleB` modes, the
-   four `roundIntegral` modes, and integer `add` have no manifest row. `add` was
-   in that list and has been removed as Zig-init template text, so the list is
-   now `classify`, `ulpDistance`, and the eight rounding modes.
+3. The public helpers `classify`, `ulpDistance`, `scaleB`, and `roundIntegral` are now covered by
+   the manifest, but under a fifth evaluator class, `definitional`, rather than `exact_bits`,
+   `mpfr_arb`, or `algebraic`. They are bit-level operations whose correct results are definitional:
+   no oracle computes them, so a row for one is a contract lock and not independent numerical
+   evidence. The separation is enforced rather than conventional — the exact-bits entry point
+   refuses a definitional category, and a `metadata.txt` row prints `evaluator=definitional`.
 4. `scaleB` and `roundIntegral` exist only for `f16`, and `API.md` declares no
    signature for either family — it names them only in the `zmath-public-helpers`
    benchmark description. The `f` and `d` forms are an open contract question,
@@ -161,43 +163,32 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
 
 ## What remains
 
-### 1. Whole-domain evidence for `f32` and `f64` — needs a scoping decision
+### Resolved in this cycle
 
-This is no longer blocked; it is measured. The harness sustains roughly 62,000 records per second
-here, which is what it took to produce the 63,160,084-record publication in 17 minutes.
+1. **Whole-domain evidence for `f32` and `f64`.** Closed as infeasible rather than left open. The
+   harness sustains roughly 62,000 records per second, which produced the publication in 17
+   minutes. Exhaustive binary32 unary is 4,294,967,296 inputs per operation, about 19 hours each and
+   roughly 48 days for the ~60 of them; exhaustive binary64 is about 1.8e19 inputs, roughly 9,000
+   years each. The arithmetic is recorded in the scalar contract so it is not re-proposed.
+   `correct` keeps meaning exact agreement on the stored tuples.
 
-- Exhaustive binary32 unary is 4,294,967,296 inputs per operation: about 19 hours each, and
-  roughly 48 days for the ~60 binary32 unary operations.
-- Exhaustive binary64 unary is about 1.8e19 inputs per operation: roughly 9,000 years each at the
-  same rate.
+2. **Manifest rows for the uncovered public helpers.** Done. The manifest is 323 descriptors at
+   `schema_version = 4`, and the four helpers are covered by 8 new rows in a fifth evaluator class
+   named `definitional`, precisely because no oracle computes them. The producer emits 323 records
+   totalling 5,149,836,937 bytes, and replay reports `descriptors=323 records=71832030` exit 0.
+   See known limit 3 for what that class does and does not claim.
 
-Exhaustive coverage is therefore infeasible for binary64 at any budget and marginal for binary32.
-The real options are a much larger selected campaign, exhaustiveness over a declared subdomain, or
-keeping the existing limit stated. That is a scope decision, not a defect.
+### Still open
 
-### 2. Manifest rows for the uncovered public helpers — a schema change, not a data edit
+3. Whether `f` and `d` forms of `scaleB` and `roundIntegral` belong in the contract. See known limit
+   4; the contract declares no signature for either family and only binary16 exists.
 
-The manifest carries no row for `classify`, `ulpDistance`, `scaleB`, or `roundIntegral`, and adding
-them is more than an edit:
+4. The `UnitQuat*.raw` privacy clause cannot be met as written, because Zig has no private struct
+   fields and a field `raw` and a method `raw()` cannot both exist. Recorded in `API.md`; no
+   further work unless the contract is amended.
 
-- The schema already carries integer results (`integer:i32`, `integer:i64`), an unsigned integer
-  input form (`integer:u32`), and a custom enum input form (`fromfp_round`), so a `round_mode`
-  input for `scaleB` and `roundIntegral` follows an existing precedent closely.
-- `classify` returns a six-value enum and the schema has NO result form for it. One has to be
-  added rather than an existing form reused.
-- Every new descriptor also needs an entry in `test/oracle/oracle_operation_table.c`, a campaign
-  definition, and runner support.
-- Settle a prior question first. These four are bit-level operations whose correct results are
-  definitional rather than something MPFR or Arb computes. An oracle for them would re-derive the
-  same bit manipulation zmath already performs, so a `correct` row would record a contract rather
-  than independent numerical evidence. That is a defensible thing to want, but it should be
-  decided rather than arrived at by adding rows.
-
-### 3. Whether `f` and `d` forms of `scaleB` and `roundIntegral` belong in the contract
-
-See known limit 4. The contract declares no signature for either family, and only binary16
-exists.
-
-### 4. The `UnitQuat*.raw` privacy clause cannot be met as written
-
-Recorded in `API.md`; no further work unless the contract is amended.
+5. **The house gate does not build the corpus producer.** `zig build` covers format, build, test,
+   AST check and the linters, but the producer is only built by `zig build oracle-generator`, so a
+   green gate does not mean the corpus can be produced. A schema change that missed the producer
+   passed the gate and then failed silently at generation, producing the old 315-row publication
+   from a new 323-row manifest. A step that builds every published tool belongs in the gate.
