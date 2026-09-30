@@ -109,27 +109,33 @@ direnv exec . zbc src/*.zig 2>&1 | grep -c 'warning('
 That is the check to use when the question is "are there any advisories left", and it must be
 zero. Six advisories in the accepted scalar kernels went unrecorded for exactly this reason.
 
-## The harness is not present
+## Acceptance evidence, re-verified
 
-**`zmath-testing` does not exist on this machine and is not recoverable from
-here.** Verified absent: no `zmath-testing` directory under the home tree at any
-depth, no `manifest.toml`, `corpus_runner.zig`, or `oracle_generator.zig`
-anywhere, and no repository for it under the only authenticated GitHub account
-(`CoffeeImpliesCode`), either directly or by global search.
+The sibling `zmath-testing` is present at `../zmath-testing`, and the recorded acceptance evidence
+has been re-verified on this host rather than merely inherited.
 
-Consequence: the recorded acceptance evidence in the sibling project — 315
-descriptors, 63,160,084 records, and the `verification.json` digests — is
-neither confirmed nor contradicted here. It is simply uncheckable. Treat it as
-historical, not as current evidence.
+| Check | Recorded | Re-verified here |
+| --- | --- | --- |
+| Accepted descriptors | 315 | 315 |
+| Corpus records | 63,160,084 | 63,160,084 |
+| Record bytes | 4,518,220,347 | 4,518,220,347 |
+| `replay-corpus` | exit 0 | exit 0, all 315 signatures |
 
-To restore it, clone the sibling into the documented location and regenerate the
-gitignored corpus:
+Full regeneration is 17 minutes for 4.3 GB at a peak RSS of 173 MB. Replaying those records against
+the current runtime took 94 seconds and reported `descriptors=315 records=63160084`. That is the
+result that matters: the scalar-kernel changes in this cycle preserved every accepted result bit.
 
-```text
-git clone <zmath-testing> ../zmath-testing
-cd ../zmath-testing && zig build generate-corpus \
-    -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-```
+One digest does not match, and it is not a defect. `metadata_sha256` in `verification.json` is the
+digest of the COMMITTED `generated/metadata.txt`, which is a generation-time snapshot taken when
+309 of the 315 rows still read `manifest_status=unsupported`. The manifest was promoted to
+`correct` afterwards, which is the documented promotion path, so a fresh generation correctly
+reports 315 `correct`. That digest also embeds the absolute `artifact=` path and therefore differs
+for any other output directory. Judge publication integrity by the descriptor count and the byte
+total, which match exactly, not by that digest.
+
+Bringing the harness up on this host required repairing it; see the two commits in
+`../zmath-testing`. The oracle generator needs a flint that the host can load, and the store's
+build cannot be, so a flint and MPFR are built for the host into a local prefix.
 
 ## Known limits, stated so they are not mistaken for gaps
 
@@ -155,24 +161,43 @@ cd ../zmath-testing && zig build generate-corpus \
 
 ## What remains
 
-### Blocked on the missing harness
+### 1. Whole-domain evidence for `f32` and `f64` — needs a scoping decision
 
-1. **Whole-domain evidence for `f32` and `f64`.** The largest remaining evidence
-   gap. It is a budget question, not a design question: the campaigns exist in
-   the sibling project, they are simply enormous, and the sibling is not here.
-2. **Manifest rows for the uncovered public helpers.** A small, well-bounded
-   piece of work that would close a named coverage hole. The manifest is a
-   sibling file, so this cannot be started from this repository.
+This is no longer blocked; it is measured. The harness sustains roughly 62,000 records per second
+here, which is what it took to produce the 63,160,084-record publication in 17 minutes.
 
-Both are blocked on the same missing prerequisite, and neither has a reachable
-half: the deliverable for each is a harness artifact, not a runtime change.
+- Exhaustive binary32 unary is 4,294,967,296 inputs per operation: about 19 hours each, and
+  roughly 48 days for the ~60 binary32 unary operations.
+- Exhaustive binary64 unary is about 1.8e19 inputs per operation: roughly 9,000 years each at the
+  same rate.
 
-### Open on this repository
+Exhaustive coverage is therefore infeasible for binary64 at any budget and marginal for binary32.
+The real options are a much larger selected campaign, exhaustiveness over a declared subdomain, or
+keeping the existing limit stated. That is a scope decision, not a defect.
 
-3. **Commit the seven executed items.** The work is verified in the working copy
-   and uncommitted.
-4. **Decide whether `f` and `d` forms of `scaleB` and `roundIntegral` belong in
-   the contract.** See known limit 4. That is a contract decision, and the
-   contract is the thing that is under-specified.
-5. **The `UnitQuat*.raw` privacy clause cannot be met as written.** Recorded in
-   `API.md`; no further work unless the contract is amended.
+### 2. Manifest rows for the uncovered public helpers — a schema change, not a data edit
+
+The manifest carries no row for `classify`, `ulpDistance`, `scaleB`, or `roundIntegral`, and adding
+them is more than an edit:
+
+- The schema already carries integer results (`integer:i32`, `integer:i64`), an unsigned integer
+  input form (`integer:u32`), and a custom enum input form (`fromfp_round`), so a `round_mode`
+  input for `scaleB` and `roundIntegral` follows an existing precedent closely.
+- `classify` returns a six-value enum and the schema has NO result form for it. One has to be
+  added rather than an existing form reused.
+- Every new descriptor also needs an entry in `test/oracle/oracle_operation_table.c`, a campaign
+  definition, and runner support.
+- Settle a prior question first. These four are bit-level operations whose correct results are
+  definitional rather than something MPFR or Arb computes. An oracle for them would re-derive the
+  same bit manipulation zmath already performs, so a `correct` row would record a contract rather
+  than independent numerical evidence. That is a defensible thing to want, but it should be
+  decided rather than arrived at by adding rows.
+
+### 3. Whether `f` and `d` forms of `scaleB` and `roundIntegral` belong in the contract
+
+See known limit 4. The contract declares no signature for either family, and only binary16
+exists.
+
+### 4. The `UnitQuat*.raw` privacy clause cannot be met as written
+
+Recorded in `API.md`; no further work unless the contract is amended.
