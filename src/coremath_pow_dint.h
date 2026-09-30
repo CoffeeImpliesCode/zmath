@@ -462,7 +462,6 @@ static inline void mul_dint_2(dint64_t *r, int64_t b, const dint64_t *a) {
   t.r = (t.r << m);
 
   // Will pose issues if b is too large but for now we assume it never happens
-  // TODO: FIXME
   uint128_t l = {.r = (u128)(a->lo) * (u128)c};
   l.r = (l.r << (m - 1)) >> 63;
 
@@ -514,7 +513,6 @@ mul_dint_int64 (dint64_t *r, const dint64_t *a, int64_t b) {
   r->ex -= m;
 
   // Will pose issues if b is too large but for now we assume it never happens
-  // TODO: FIXME
   u128 l = (u128) a->lo * (u128) c;
   /* We have to shift l by 64 bits to the right to align with hi*c,
      and by m bits to the left to align with t.r << m. Since hi*c < 2^(128-m)

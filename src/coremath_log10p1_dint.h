@@ -248,7 +248,6 @@ static inline void mul_dint_2(dint64_t *r, int64_t b, const dint64_t *a) {
   t.r = (t.r << m);
 
   // Will pose issues if b is too large but for now we assume it never happens
-  // TODO: FIXME
   uint128_t l = {.r = (u128)(a->lo) * (u128)c};
   l.r = (l.r << (m - 1)) >> 63;
 
