@@ -66,17 +66,37 @@
 //! Every finite `f64` is `m * 2^e` with `|m| < 2^53` and
 //! `-1074 <= e <= 971`, so `x * 2^1074` is an integer below `2^2098`. An `f32`
 //! widens to `f64` exactly, so one representation covers both precisions.
+//!
+//! A difference is NEVER rounded on the way in. Two stored coordinates are
+//! converted and subtracted inside the exact arithmetic, because a
+//! floating-point subtraction is where the exact policy used to lose the
+//! sign, and on a pair of large opposite coordinates it overflows to an
+//! infinity that is not a real number at all. Both operands carry the same
+//! POSITIVE `2^1074`, so their difference carries it too and needs no
+//! rescaling. A difference of two finite values is below `2 * floatMax <
+//! 2^1025`, so the scaled difference is below `2^2099`: one binary digit more
+//! than a stored coordinate, which is the headroom the limb bound below
+//! carries.
+//!
 //! Every term of a predicate has the same degree, so every term of its integer
 //! value carries the same power of two, and that power is positive. The sign
 //! of the integer is the sign of the real value, and nothing rounded.
 //!
 //! Storage is a fixed `[132]u64` magnitude plus a sign, on the stack. 132
-//! limbs is 8448 bits. The worst predicate here is degree four: a four-by-four
-//! determinant has 24 terms, each a product of four scaled differences below
-//! `2^2099`, so its exact value is below `24 * 2^8396 < 2^8401`. The
-//! degree-three and degree-two forms fit in 66 limbs and the exact path
-//! allocates the same array for them anyway, so the storage is one size for
-//! the whole module. Nothing allocates, and no limb count depends on a value.
+//! limbs is 8448 bits. The worst predicate here is the ray-against-ball
+//! discriminant, and the ball-against-flat distance beside it. A projection
+//! of exact differences onto exact coordinates is below
+//! `4 * 2^1025 * 2^1024 = 2^2051`, so on the `2^2148` scale its square is
+//! below `2^8398`; the constant term it is compared against is below
+//! `2^4201` on the `2^2148` scale and is scaled up by that same positive
+//! `2^2148`, leaving the whole value below `2^8399`. The degree-four
+//! four-by-four determinant, whose 24 terms are products of four scaled
+//! coordinates, is below `24 * 2^8392 < 2^8397`, and every degree-three and
+//! degree-two form is smaller again. That leaves 49 bits of headroom in the
+//! 8448 the storage holds. Each predicate converts every coordinate it reads
+//! exactly once, into a fixed array of these, so the scratch one needs is a
+//! compile-time constant number of them. Nothing allocates, and no limb
+//! count depends on a value.
 //!
 //! ## Intersection unions
 //!
@@ -337,8 +357,18 @@ fn eqOf(comptime V: type, a: V, b: V) bool {
 // ---------------------------------------------------------------------------
 
 /// Limbs of exact magnitude. The module comment proves 132 is enough for the
-/// degree-four worst case.
+/// worst case, which is the ray-against-ball discriminant and not the
+/// degree-four form.
 const exact_limbs = 132;
+
+/// The bits that lift a degree-two exact value onto the scale of the SQUARE
+/// of a degree-one one. `fromFloat` scales every stored coordinate and every
+/// exact difference by `2^1074`, so a projection of two of them carries
+/// `2^2148` and its square carries `2^4296`, while a product of two `2^1074`
+/// values carries `2^2148`. `Big` holds integers rather than rationals, so
+/// such a comparison scales the SMALLER side up by this much instead of
+/// taking the larger side down, and the sign is the same either way.
+const projection_scale: u32 = 2148;
 
 /// An exact signed integer, used only to decide a sign. A degree-`k`
 /// polynomial's value here is the real value times `2^(1074 * k)`, a positive
@@ -440,6 +470,32 @@ const Big = struct {
             .limbs = limbs,
         };
     }
+
+    /// `a` scaled up by `2^bits`, the sign-preserving rescale that puts two
+    /// exact products on one scale. Whole limbs move as whole limbs, so this
+    /// is a limb pass rather than a bit loop, and the bounds in the module
+    /// comment prove the result fits.
+    fn shiftedLeft(a: Big, bits: u32) Big {
+        if (a.used == 0 or bits == 0) return a;
+        const words: usize = @intCast(bits / 64);
+        const shift: u6 = @intCast(bits % 64);
+        var limbs = [_]u64{0} ** exact_limbs;
+        var index: usize = 0;
+        while (index < a.used) : (index += 1) {
+            const target = index + words;
+            if (target >= exact_limbs) break;
+            // A 128-bit shift places both halves at once, and the high half
+            // of one limb is the low half of the next, so it accumulates.
+            const placed: u128 = @as(u128, a.limbs[index]) << shift;
+            limbs[target] |= @truncate(placed);
+            if (target + 1 < exact_limbs) limbs[target + 1] |= @as(u64, @truncate(placed >> 64));
+        }
+        return .{
+            .negative = a.negative,
+            .used = topUsed(&limbs),
+            .limbs = limbs,
+        };
+    }
 };
 
 fn topUsed(limbs: *const [exact_limbs]u64) u8 {
@@ -480,10 +536,14 @@ fn magnitudeSum(a: Big, b: Big, negative: bool) Big {
 }
 
 /// `a - b` in magnitude. The caller has already ordered the operands, so the
-/// borrow always resolves inside the loop. The arithmetic is WRAPPING, not
-/// checked: an intermediate `left - right - borrow` goes below zero exactly
-/// when the incoming borrow exceeds the two limbs, and a checked unsigned
-/// subtraction would turn that ordinary borrow into a panic.
+/// final borrow always resolves inside the loop and the result fits.
+///
+/// The arithmetic is WRAPPING, not checked: an intermediate
+/// `left - right - borrow` goes below zero exactly when it is negative, and a
+/// checked unsigned subtraction would turn that ordinary borrow into a panic.
+/// A wrapped result has every bit of `total` above the limb set, so the bit
+/// just below them is the borrow out: it is ONE exactly when the intermediate
+/// underflowed.
 fn magnitudeDifference(a: Big, b: Big, negative: bool) Big {
     var limbs = [_]u64{0} ** exact_limbs;
     var borrow: u64 = 0;
@@ -493,57 +553,125 @@ fn magnitudeDifference(a: Big, b: Big, negative: bool) Big {
         const right = if (index < b.used) b.limbs[index] else 0;
         const total: u128 = @as(u128, left) -% @as(u128, right) -% @as(u128, borrow);
         limbs[index] = @truncate(total);
-        borrow = @intCast((~(total >> 64)) & 1);
+        borrow = @intCast((total >> 64) & 1);
     }
     return .{ .negative = negative, .used = topUsed(&limbs), .limbs = limbs };
 }
 
-/// The exact sign of `a + b` over `dim` components, degree one.
-fn exactSumOfProducts(comptime dim: usize, values: [dim]f64, factors: [dim]f64) Big {
+/// `[dim]Big` of the exact values of a row of stored coordinates, built ONCE
+/// and then shared.
+///
+/// `fromFloat` writes and then scans all 132 limbs, so converting the same
+/// coordinate twice costs a whole array twice over. Every predicate below
+/// therefore takes its inputs as cached anchors and forms every factor and
+/// every difference from them, which is what bounds the work: a question that
+/// reads `k` stored coordinates converts `k` of them, exactly once, however
+/// many products and differences it goes on to form.
+///
+/// A stored coordinate and an exact difference of two of them carry the SAME
+/// `2^1074` scale, so one can stand in for the other wherever a predicate
+/// asks for a factor.
+fn exactRow(comptime dim: usize, comptime T: type, a: [dim]T) [dim]Big {
+    var out: [dim]Big = undefined;
+    inline for (0..dim) |index| {
+        out[index] = Big.fromFloat(widen(T, a[index]));
+    }
+    return out;
+}
+
+/// `[dim]Big` of the exact differences `to - from`, componentwise, taken from
+/// cached anchors.
+///
+/// The subtraction happens INSIDE the exact arithmetic, never in floating
+/// point. A floating-point subtraction is where the exact policy used to lose
+/// the sign, and on a pair of large opposite coordinates it overflows to an
+/// infinity that is not a real number at all. Both operands carry the same
+/// POSITIVE `2^1074`, so their difference carries it too and needs no
+/// rescaling. A difference of two finite values is below `2 * floatMax <
+/// 2^1025`, so the scaled result is below `2^2099`: one binary digit more
+/// than a stored coordinate.
+fn exactDeltas(comptime dim: usize, from: [dim]Big, to: [dim]Big) [dim]Big {
+    var out: [dim]Big = undefined;
+    inline for (0..dim) |index| {
+        out[index] = to[index].sub(from[index]);
+    }
+    return out;
+}
+
+/// Both tangency combinations of one pair of radii, over ONE conversion of
+/// each radius.
+///
+/// `fromFloat` writes and then scans all 132 limbs, so converting the same
+/// radius a second time costs a whole array again over. Both combinations are
+/// exact values of their own, because a rounded sum or a rounded difference is
+/// the whole difference between two balls that cross and two that touch, and
+/// both come off the same pair of anchors.
+fn exactRadiusPair(comptime T: type, a: T, b: T) ExactRadiusPair {
+    const first = Big.fromFloat(widen(T, a));
+    const second = Big.fromFloat(widen(T, b));
+    return .{ .sum = first.add(second), .difference = first.sub(second) };
+}
+
+/// The exact value of `dot(x, y)` over exact components, degree two.
+fn exactDot(comptime dim: usize, x: [dim]Big, y: [dim]Big) Big {
     var total = Big.zero();
     inline for (0..dim) |index| {
-        total = total.add(Big.fromFloat(values[index]).mul(Big.fromFloat(factors[index])));
+        total = total.add(x[index].mul(y[index]));
     }
     return total;
 }
 
-/// The exact sign of `dot(x, x) - dot(y, y)`, degree two.
-fn exactSquaredDifference(comptime dim: usize, x: [dim]f64, y: [dim]f64) Sign {
-    const left = exactSumOfProducts(dim, x, x);
-    const right = exactSumOfProducts(dim, y, y);
-    return left.sub(right).sign();
+/// The exact value of `dot(w, w)` over exact components, degree two. Naming
+/// it once keeps the squared norm from copying the whole row a second time.
+fn exactNorm(comptime dim: usize, w: [dim]Big) Big {
+    var total = Big.zero();
+    inline for (0..dim) |index| {
+        total = total.add(w[index].mul(w[index]));
+    }
+    return total;
 }
 
-/// The exact sign of `p * q - r * s`, degree two.
-fn exactDet2(p: f64, q: f64, r: f64, s: f64) Sign {
-    return Big.fromFloat(p).mul(Big.fromFloat(q))
-        .sub(Big.fromFloat(r).mul(Big.fromFloat(s)))
-        .sign();
+/// The exact sign of `p * q - r * s`, degree two, over four exact components
+/// that already carry the `2^1074` scale.
+fn exactDet2(p: Big, q: Big, r: Big, s: Big) Sign {
+    return p.mul(q).sub(r.mul(s)).sign();
 }
 
-/// The exact sign of the two-component oriented area `(b - a) x (c - a)`.
+/// The exact sign of `dot(w, w) - k * k`, degree two, over an exact difference
+/// row and an exact radius. Both carry the `2^1074` scale, so both squares
+/// carry `2^2148` and nothing needs rescaling.
+fn squaredNormMinusSquareExact(comptime dim: usize, w: [dim]Big, k: Big) Sign {
+    return exactNorm(dim, w).sub(k.mul(k)).sign();
+}
+
+/// The exact sign of the two-component oriented area `(b - a) x (c - a)`,
+/// degree two, over the ORIGINAL stored coordinates. The four differences are
+/// exact values, so a pair of coordinates whose difference is past the
+/// binary64 range still decides its own sign. `a` is converted once and both
+/// difference rows read that one anchor.
 fn exactOrient2(comptime T: type, a: [2]T, b: [2]T, c: [2]T) Sign {
-    return exactDet2(
-        widen(T, b[0]) - widen(T, a[0]),
-        widen(T, c[1]) - widen(T, a[1]),
-        widen(T, b[1]) - widen(T, a[1]),
-        widen(T, c[0]) - widen(T, a[0]),
-    );
+    const anchor = exactRow(2, T, a);
+    const ab = exactDeltas(2, anchor, exactRow(2, T, b));
+    const ac = exactDeltas(2, anchor, exactRow(2, T, c));
+    return exactDet2(ab[0], ac[1], ab[1], ac[0]);
 }
 
-/// The exact sign of `dot(cross(b - a, c - a), d - a)`, degree three. The
-/// expression matches the fast path one level down, so the two policies differ
-/// only in the arithmetic and never in the algebra.
+/// The exact sign of `dot(cross(b - a, c - a), d - a)`, degree three, over
+/// the ORIGINAL stored coordinates, with `a` converted once and the three
+/// difference rows read off that one anchor. The expression matches the fast
+/// path one level down, so the two policies differ only in the arithmetic and
+/// never in the algebra.
 fn exactOrient3(comptime T: type, a: [3]T, b: [3]T, c: [3]T, d: [3]T) Sign {
-    const u = [3]f64{ widen(T, b[0]) - widen(T, a[0]), widen(T, b[1]) - widen(T, a[1]), widen(T, b[2]) - widen(T, a[2]) };
-    const v = [3]f64{ widen(T, c[0]) - widen(T, a[0]), widen(T, c[1]) - widen(T, a[1]), widen(T, c[2]) - widen(T, a[2]) };
-    const w = [3]f64{ widen(T, d[0]) - widen(T, a[0]), widen(T, d[1]) - widen(T, a[1]), widen(T, d[2]) - widen(T, a[2]) };
-    const nx = Big.fromFloat(u[1]).mul(Big.fromFloat(v[2])).sub(Big.fromFloat(u[2]).mul(Big.fromFloat(v[1])));
-    const ny = Big.fromFloat(u[2]).mul(Big.fromFloat(v[0])).sub(Big.fromFloat(u[0]).mul(Big.fromFloat(v[2])));
-    const nz = Big.fromFloat(u[0]).mul(Big.fromFloat(v[1])).sub(Big.fromFloat(u[1]).mul(Big.fromFloat(v[0])));
-    var total = nx.mul(Big.fromFloat(w[0]));
-    total = total.add(ny.mul(Big.fromFloat(w[1])));
-    total = total.add(nz.mul(Big.fromFloat(w[2])));
+    const anchor = exactRow(3, T, a);
+    const u = exactDeltas(3, anchor, exactRow(3, T, b));
+    const v = exactDeltas(3, anchor, exactRow(3, T, c));
+    const w = exactDeltas(3, anchor, exactRow(3, T, d));
+    const nx = u[1].mul(v[2]).sub(u[2].mul(v[1]));
+    const ny = u[2].mul(v[0]).sub(u[0].mul(v[2]));
+    const nz = u[0].mul(v[1]).sub(u[1].mul(v[0]));
+    var total = nx.mul(w[0]);
+    total = total.add(ny.mul(w[1]));
+    total = total.add(nz.mul(w[2]));
     return total.sign();
 }
 
@@ -605,33 +733,41 @@ fn orient4Sign(comptime T: type, a: [4]T, b: [4]T, c: [4]T, d: [4]T, policy: Pre
     };
 }
 
-/// The exact sign of the three-by-three minor of the three-by-four matrix
-/// whose columns are `u`, `v`, and `w`, over the three selected rows. Four of
-/// these vanish exactly when the three vectors are linearly dependent, which
-/// is the four-dimensional coplanarity test.
-fn exactMinor3x4(comptime T: type, u: [4]T, v: [4]T, w: [4]T, rows: [3]usize) Sign {
-    const columns = [3][4]f64{ widenRow(T, u), widenRow(T, v), widenRow(T, w) };
-    const rows_d: [3][3]f64 = .{
-        .{ columns[0][rows[0]], columns[1][rows[0]], columns[2][rows[0]] },
-        .{ columns[0][rows[1]], columns[1][rows[1]], columns[2][rows[1]] },
-        .{ columns[0][rows[2]], columns[1][rows[2]], columns[2][rows[2]] },
+/// The three COLUMNS of the four-dimensional coplanarity matrix, as exact
+/// values: `a_finish - a_start`, `b_finish - b_start`, and `b_start -
+/// a_start`. Each of the four endpoints is converted ONCE and every minor the
+/// gate asks about reads these columns, so the gate costs sixteen conversions
+/// instead of one per minor per column.
+fn exactMinor3Columns(comptime T: type, a_start: [4]T, a_finish: [4]T, b_start: [4]T, b_finish: [4]T) [3][4]Big {
+    const first_start = exactRow(4, T, a_start);
+    const second_start = exactRow(4, T, b_start);
+    return .{
+        exactDeltas(4, first_start, exactRow(4, T, a_finish)),
+        exactDeltas(4, second_start, exactRow(4, T, b_finish)),
+        exactDeltas(4, first_start, second_start),
     };
-    return minor3Plain(rows_d).sign();
 }
 
-/// The three-by-three determinant, expanded along the THIRD column into three
-/// terms of two products each. The third column is the one the caller selected
-/// rows against, so this is the cofactor expansion the four-by-four
-/// determinant needs, and the exact and fast paths below use the same grouping.
-fn minor3Plain(rows: [3][3]f64) Big {
-    var total = Big.fromFloat(rows[0][2]).mul(
-        Big.fromFloat(rows[1][0]).mul(Big.fromFloat(rows[2][1])).sub(Big.fromFloat(rows[1][1]).mul(Big.fromFloat(rows[2][0]))),
+/// One entry of the three-by-four exact matrix, read through a pointer so a
+/// single cell never copies the columns.
+fn cellOf(comptime dim: usize, columns: *const [3][dim]Big, row: usize, column: usize) Big {
+    return columns.*[column][row];
+}
+
+/// The three-by-three determinant of three exact COLUMNS over the three
+/// selected rows, expanded along the THIRD column into three terms of two
+/// products each. The third column is the one the caller selected rows
+/// against, so this is the cofactor expansion the four-by-four determinant
+/// needs, and the exact and fast paths use the same grouping.
+fn minor3ExactOf(comptime dim: usize, columns: *const [3][dim]Big, rows: [3]usize) Big {
+    var total = cellOf(dim, columns, rows[0], 2).mul(
+        cellOf(dim, columns, rows[1], 0).mul(cellOf(dim, columns, rows[2], 1)).sub(cellOf(dim, columns, rows[1], 1).mul(cellOf(dim, columns, rows[2], 0))),
     );
-    total = total.add(Big.fromFloat(rows[1][2]).mul(
-        Big.fromFloat(rows[0][1]).mul(Big.fromFloat(rows[2][0])).sub(Big.fromFloat(rows[0][0]).mul(Big.fromFloat(rows[2][1]))),
+    total = total.add(cellOf(dim, columns, rows[1], 2).mul(
+        cellOf(dim, columns, rows[0], 1).mul(cellOf(dim, columns, rows[2], 0)).sub(cellOf(dim, columns, rows[0], 0).mul(cellOf(dim, columns, rows[2], 1))),
     ));
-    total = total.add(Big.fromFloat(rows[2][2]).mul(
-        Big.fromFloat(rows[0][0]).mul(Big.fromFloat(rows[1][1])).sub(Big.fromFloat(rows[0][1]).mul(Big.fromFloat(rows[1][0]))),
+    total = total.add(cellOf(dim, columns, rows[2], 2).mul(
+        cellOf(dim, columns, rows[0], 0).mul(cellOf(dim, columns, rows[1], 1)).sub(cellOf(dim, columns, rows[0], 1).mul(cellOf(dim, columns, rows[1], 0))),
     ));
     return total;
 }
@@ -649,18 +785,54 @@ fn fastMinor3x4(comptime T: type, u: [4]T, v: [4]T, w: [4]T, rows: [3]usize) T {
         m[2][2] * (m[0][0] * m[1][1] - m[0][1] * m[1][0]);
 }
 
-/// The sign of `dot(a - o, n)` for a `dim`-wide pair, which is the signed
-/// distance of `a` from the flat through `o` with unit normal `n`.
+/// The two sign answers a segment question needs, one per end. A segment is
+/// measured against ONE flat or ONE ball, so the shared centre is converted
+/// once and both ends read that one anchor.
+const EndSigns = struct { start: Sign, end: Sign };
+
+/// The two tangency comparisons a pair of balls turns on, named so that the
+/// sign of each is unambiguous at the call.
+const TangencySigns = struct { outer: Sign, inner: Sign };
+
+/// The two combinations of one pair of radii that a tangency comparison turns
+/// on: the SUM and the DIFFERENCE.
+const ExactRadiusPair = struct { sum: Big, difference: Big };
+
+/// The sign of `dot(a - o, n)`, which is the signed distance of `a` from the
+/// flat through `o` with unit normal `n`, degree one over the ORIGINAL stored
+/// coordinates.
 fn flatSideSign(comptime dim: usize, comptime T: type, a: [dim]T, o: [dim]T, n: [dim]T, policy: PredicatePolicy) Sign {
-    var differences: [dim]f64 = undefined;
-    var normals: [dim]f64 = undefined;
-    inline for (0..dim) |index| {
-        differences[index] = widen(T, a[index]) - widen(T, o[index]);
-        normals[index] = widen(T, n[index]);
-    }
     return switch (policy) {
         .fast => signOfScalar(T, flatDistanceFast(dim, T, a, o, n)),
-        .adaptive_exact => exactSumOfProducts(dim, differences, normals).sign(),
+        .adaptive_exact => exactDot(dim, exactDeltas(dim, exactRow(dim, T, o), exactRow(dim, T, a)), exactRow(dim, T, n)).sign(),
+    };
+}
+
+/// The two ends of a segment measured against ONE flat, over the ORIGINAL
+/// stored coordinates. The flat point and the normal are converted once and
+/// both ends read them.
+fn segmentSideSigns(
+    comptime dim: usize,
+    comptime T: type,
+    o: [dim]T,
+    n: [dim]T,
+    a: [dim]T,
+    b: [dim]T,
+    policy: PredicatePolicy,
+) EndSigns {
+    return switch (policy) {
+        .fast => .{
+            .start = signOfScalar(T, flatDistanceFast(dim, T, a, o, n)),
+            .end = signOfScalar(T, flatDistanceFast(dim, T, b, o, n)),
+        },
+        .adaptive_exact => blk: {
+            const flat = exactRow(dim, T, o);
+            const normal = exactRow(dim, T, n);
+            break :blk .{
+                .start = exactDot(dim, exactDeltas(dim, flat, exactRow(dim, T, a)), normal).sign(),
+                .end = exactDot(dim, exactDeltas(dim, flat, exactRow(dim, T, b)), normal).sign(),
+            };
+        },
     };
 }
 
@@ -1817,14 +1989,6 @@ fn SegmentOf(comptime dim: usize, comptime T: type) type {
 // Array helpers shared by the geometric construction paths
 // ---------------------------------------------------------------------------
 
-fn widenArray(comptime dim: usize, comptime T: type, a: [dim]T) [dim]f64 {
-    var out: [dim]f64 = undefined;
-    inline for (0..dim) |index| {
-        out[index] = widen(T, a[index]);
-    }
-    return out;
-}
-
 fn arrayLength(comptime dim: usize, comptime T: type, a: [dim]T) T {
     var accumulator: T = 0;
     inline for (0..dim) |index| {
@@ -1920,48 +2084,154 @@ fn pointAtArray(comptime dim: usize, comptime T: type, origin: [dim]T, direction
 // Degree-two predicate forms shared by the balls and the flats
 // ---------------------------------------------------------------------------
 
-/// The sign of `dot(v, v) - k * k`, degree two. This is the form behind ball
-/// containment and behind every ball-to-ball comparison, so both policies
-/// evaluate the same expression and differ only in the arithmetic.
-fn squaredNormMinusSquareSign(comptime dim: usize, comptime T: type, v: [dim]T, k: T, policy: PredicatePolicy) Sign {
+/// The sign of `dot(point - centre, point - centre) - radius * radius`,
+/// degree two: negative inside the ball, zero on its boundary, positive
+/// outside. Both policies read the ORIGINAL centre and point, so they differ
+/// only in where the difference is formed.
+fn ballContainsSign(comptime dim: usize, comptime T: type, center: [dim]T, radius: T, point: [dim]T, policy: PredicatePolicy) Sign {
     return switch (policy) {
-        .fast => signOfScalar(T, subRaw(T, dotOfArray(dim, T, v, v), scaleRaw(T, k, k))),
+        .fast => blk: {
+            const v = arraySub(dim, T, point, center);
+            break :blk signOfScalar(T, subRaw(T, dotOfArray(dim, T, v, v), scaleRaw(T, radius, radius)));
+        },
+        .adaptive_exact => squaredNormMinusSquareExact(
+            dim,
+            exactDeltas(dim, exactRow(dim, T, center), exactRow(dim, T, point)),
+            Big.fromFloat(widen(T, radius)),
+        ),
+    };
+}
+
+/// Whether each end of a segment lies inside a ball, over the ORIGINAL stored
+/// coordinates. The centre and the radius are converted once and both ends
+/// read them.
+fn segmentInsideSigns(
+    comptime dim: usize,
+    comptime T: type,
+    center: [dim]T,
+    radius: T,
+    a: [dim]T,
+    b: [dim]T,
+    policy: PredicatePolicy,
+) EndSigns {
+    return switch (policy) {
+        .fast => blk: {
+            const from_a = arraySub(dim, T, a, center);
+            const from_b = arraySub(dim, T, b, center);
+            break :blk .{
+                .start = signOfScalar(T, subRaw(T, dotOfArray(dim, T, from_a, from_a), scaleRaw(T, radius, radius))),
+                .end = signOfScalar(T, subRaw(T, dotOfArray(dim, T, from_b, from_b), scaleRaw(T, radius, radius))),
+            };
+        },
         .adaptive_exact => blk: {
-            const wide = widenArray(dim, T, v);
-            var total = exactSumOfProducts(dim, wide, wide);
-            const radius = Big.fromFloat(widen(T, k));
-            total = total.sub(radius.mul(radius));
-            break :blk total.sign();
+            const anchor = exactRow(dim, T, center);
+            const k = Big.fromFloat(widen(T, radius));
+            break :blk .{
+                .start = squaredNormMinusSquareExact(dim, exactDeltas(dim, anchor, exactRow(dim, T, a)), k),
+                .end = squaredNormMinusSquareExact(dim, exactDeltas(dim, anchor, exactRow(dim, T, b)), k),
+            };
         },
     };
 }
 
-/// The sign of `hb * hb - (dot(w, w) - r * r)`, the ray-against-ball
-/// discriminant, degree two.
-fn rayBallDiscriminantSign(comptime dim: usize, comptime T: type, w: [dim]T, hb: T, r: T, policy: PredicatePolicy) Sign {
+/// The two tangency comparisons a pair of balls turns on, over the ORIGINAL
+/// stored coordinates: the separation against the SUM of the radii, and
+/// against their DIFFERENCE.
+///
+/// Both combinations and the separation come from the same four stored
+/// numbers, so the exact path converts them once and reads both answers off
+/// that one anchor. The radius combinations are exact values of their own,
+/// because a rounded sum is the whole difference between two balls that cross
+/// and two that touch.
+fn ballTangencySigns(
+    comptime dim: usize,
+    comptime T: type,
+    first_center: [dim]T,
+    first_radius: T,
+    second_center: [dim]T,
+    second_radius: T,
+    policy: PredicatePolicy,
+) TangencySigns {
     return switch (policy) {
-        .fast => signOfScalar(T, subRaw(T, scaleRaw(T, hb, hb), subRaw(T, dotOfArray(dim, T, w, w), scaleRaw(T, r, r)))),
+        .fast => blk: {
+            const separation = arraySub(dim, T, second_center, first_center);
+            const sum = addRaw(T, first_radius, second_radius);
+            const difference = subRaw(T, first_radius, second_radius);
+            break :blk .{
+                .outer = signOfScalar(T, subRaw(T, dotOfArray(dim, T, separation, separation), scaleRaw(T, sum, sum))),
+                .inner = signOfScalar(T, subRaw(T, dotOfArray(dim, T, separation, separation), scaleRaw(T, difference, difference))),
+            };
+        },
         .adaptive_exact => blk: {
-            const half = Big.fromFloat(widen(T, hb));
-            const wide = widenArray(dim, T, w);
-            const radius = Big.fromFloat(widen(T, r));
-            const constant = exactSumOfProducts(dim, wide, wide).sub(radius.mul(radius));
-            break :blk half.mul(half).sub(constant).sign();
+            const separation = exactDeltas(dim, exactRow(dim, T, first_center), exactRow(dim, T, second_center));
+            const squared = exactNorm(dim, separation);
+            const pair = exactRadiusPair(T, first_radius, second_radius);
+            break :blk .{
+                .outer = squared.sub(pair.sum.mul(pair.sum)).sign(),
+                .inner = squared.sub(pair.difference.mul(pair.difference)).sign(),
+            };
         },
     };
 }
 
-/// The sign of `signed_distance * signed_distance - r * r`, the
-/// ball-against-flat comparison, degree two. The distance is degree one and
-/// the radius is degree zero, so the two squares carry the same scale and
-/// need no adjustment.
-fn flatBallSign(comptime T: type, distance: T, r: T, policy: PredicatePolicy) Sign {
+/// The sign of `p * p - (dot(w, w) - r * r)`, the ray-against-ball
+/// discriminant, degree two, with `w = to - from` and `p = dot(w, direction)`.
+///
+/// The projection `p` is a product of two exact components, so it carries
+/// `2^2148` and `p * p` carries `2^4296`, while the constant term carries
+/// `2^2148`. `Big` holds integers, so the constant term is scaled UP by the
+/// POSITIVE `2^2148` rather than the projection being scaled down, and the
+/// comparison stays exact.
+fn rayBallDiscriminantSign(
+    comptime dim: usize,
+    comptime T: type,
+    from: [dim]T,
+    to: [dim]T,
+    direction: [dim]T,
+    r: T,
+    policy: PredicatePolicy,
+) Sign {
     return switch (policy) {
-        .fast => signOfScalar(T, subRaw(T, scaleRaw(T, distance, distance), scaleRaw(T, r, r))),
+        .fast => blk: {
+            const w = arraySub(dim, T, to, from);
+            const p = dotOfArray(dim, T, w, direction);
+            break :blk signOfScalar(T, subRaw(T, scaleRaw(T, p, p), subRaw(T, dotOfArray(dim, T, w, w), scaleRaw(T, r, r))));
+        },
         .adaptive_exact => blk: {
-            const d = Big.fromFloat(widen(T, distance));
+            const deltas = exactDeltas(dim, exactRow(dim, T, from), exactRow(dim, T, to));
             const radius = Big.fromFloat(widen(T, r));
-            break :blk d.mul(d).sub(radius.mul(radius)).sign();
+            const projection = exactDot(dim, deltas, exactRow(dim, T, direction));
+            const constant = exactNorm(dim, deltas).sub(radius.mul(radius)).shiftedLeft(projection_scale);
+            break :blk projection.mul(projection).sub(constant).sign();
+        },
+    };
+}
+
+/// The sign of `distance * distance - r * r`, the ball-against-flat
+/// comparison, degree two, with `distance = dot(to - from, normal)`.
+///
+/// Same scale split as the ray discriminant: the distance carries `2^2148`
+/// and its square carries `2^4296`, so the radius square is scaled up by the
+/// POSITIVE `2^2148` before the subtraction.
+fn flatBallSign(
+    comptime dim: usize,
+    comptime T: type,
+    from: [dim]T,
+    to: [dim]T,
+    normal: [dim]T,
+    r: T,
+    policy: PredicatePolicy,
+) Sign {
+    return switch (policy) {
+        .fast => blk: {
+            const distance = dotOfArray(dim, T, arraySub(dim, T, to, from), normal);
+            break :blk signOfScalar(T, subRaw(T, scaleRaw(T, distance, distance), scaleRaw(T, r, r)));
+        },
+        .adaptive_exact => blk: {
+            const deltas = exactDeltas(dim, exactRow(dim, T, from), exactRow(dim, T, to));
+            const projection = exactDot(dim, deltas, exactRow(dim, T, normal));
+            const radius = Big.fromFloat(widen(T, r));
+            break :blk projection.mul(projection).sub(radius.mul(radius).shiftedLeft(projection_scale)).sign();
         },
     };
 }
@@ -2158,10 +2428,6 @@ fn ballBuild(comptime P: type, center: P, radius: componentType(P)) error{ NonFi
     try requireFiniteScalar(T, radius);
     if (radius < 0) return error.NegativeRadius;
     return .{ .center = center, .radius = radius };
-}
-
-fn ballContainsSign(comptime dim: usize, comptime T: type, center: [dim]T, radius: T, point: [dim]T, policy: PredicatePolicy) Sign {
-    return squaredNormMinusSquareSign(dim, T, arraySub(dim, T, point, center), radius, policy);
 }
 
 /// A two-dimensional `f32` circle.
@@ -2948,12 +3214,20 @@ fn inRangeOf(comptime T: type, object: AffineObjectOf(T), t: T) bool {
     return t >= object.lower and t <= object.upper;
 }
 
-/// The sign of `cross(direction, point - start)`, degree two.
+/// The sign of `cross(direction, point - start)`, degree two, over the
+/// ORIGINAL stored coordinates. The offset is an exact value here, so a point
+/// far from the line keeps the sign its own coordinates give it.
 fn lineSideSign2(comptime T: type, object: AffineObjectOf(T), point: [2]T, policy: PredicatePolicy) Sign {
-    const offset = arraySub(2, T, point, object.start);
     return switch (policy) {
-        .fast => signOfScalar(T, subRaw(T, scaleRaw(T, object.direction[0], offset[1]), scaleRaw(T, object.direction[1], offset[0]))),
-        .adaptive_exact => exactDet2(widen(T, object.direction[0]), widen(T, offset[1]), widen(T, object.direction[1]), widen(T, offset[0])),
+        .fast => blk: {
+            const offset = arraySub(2, T, point, object.start);
+            break :blk signOfScalar(T, subRaw(T, scaleRaw(T, object.direction[0], offset[1]), scaleRaw(T, object.direction[1], offset[0])));
+        },
+        .adaptive_exact => blk: {
+            const direction = exactRow(2, T, object.direction);
+            const offset = exactDeltas(2, exactRow(2, T, object.start), exactRow(2, T, point));
+            break :blk exactDet2(direction[0], offset[1], direction[1], offset[0]);
+        },
     };
 }
 
@@ -3078,14 +3352,40 @@ fn affine2Intersect(comptime T: type, a: AffineObjectOf(T), b: AffineObjectOf(T)
     return noneAffine(T);
 }
 
-/// The sign of the three-by-four minor over the three given rows of the
-/// matrix whose columns are `u`, `v`, and `w`. Four of these vanish exactly
-/// when the three vectors are linearly dependent, which is the
-/// four-dimensional coplanarity test, and each is degree two.
-fn minor3x4Sign(comptime T: type, u: [4]T, v: [4]T, w: [4]T, rows: [3]usize, policy: PredicatePolicy) Sign {
+/// True when the two segments SHARE a flat in four dimensions, which is what
+/// the four-dimensional affine intersections open on.
+///
+/// The three columns `a_finish - a_start`, `b_finish - b_start`, and
+/// `b_start - a_start` are formed ONCE and the four three-by-four minors that
+/// vanish exactly when those three vectors are linearly dependent all read
+/// them, so the gate converts the four endpoints once rather than once per
+/// minor. `fast` forms the same three differences in `T`, which is what `fast`
+/// means.
+fn coplanar4(
+    comptime T: type,
+    a_start: [4]T,
+    a_finish: [4]T,
+    b_start: [4]T,
+    b_finish: [4]T,
+    policy: PredicatePolicy,
+) bool {
     return switch (policy) {
-        .fast => signOfScalar(T, fastMinor3x4(T, u, v, w, rows)),
-        .adaptive_exact => exactMinor3x4(T, u, v, w, rows),
+        .fast => blk: {
+            const u = arraySub(4, T, a_finish, a_start);
+            const v = arraySub(4, T, b_finish, b_start);
+            const w = arraySub(4, T, b_start, a_start);
+            break :blk !(signOfScalar(T, fastMinor3x4(T, u, v, w, .{ 0, 1, 2 })) != .zero or
+                signOfScalar(T, fastMinor3x4(T, u, v, w, .{ 0, 1, 3 })) != .zero or
+                signOfScalar(T, fastMinor3x4(T, u, v, w, .{ 0, 2, 3 })) != .zero or
+                signOfScalar(T, fastMinor3x4(T, u, v, w, .{ 1, 2, 3 })) != .zero);
+        },
+        .adaptive_exact => blk: {
+            const columns = exactMinor3Columns(T, a_start, a_finish, b_start, b_finish);
+            break :blk !(minor3ExactOf(4, &columns, .{ 0, 1, 2 }).sign() != .zero or
+                minor3ExactOf(4, &columns, .{ 0, 1, 3 }).sign() != .zero or
+                minor3ExactOf(4, &columns, .{ 0, 2, 3 }).sign() != .zero or
+                minor3ExactOf(4, &columns, .{ 1, 2, 3 }).sign() != .zero);
+        },
     };
 }
 
@@ -3130,7 +3430,6 @@ fn seedOutsideBasis(comptime dim: usize, comptime T: type, basis: []const [dim]T
     return orthogonalized(dim, T, seed, basis);
 }
 
-///
 /// The intersection of two coplanar affine objects in three or four
 /// dimensions. The coplanarity gate is the exact predicate on the ORIGINAL
 /// coordinates; the classification after the projection is the exact
@@ -3149,18 +3448,16 @@ fn affineIntersectHigh(
     b_upper: T,
     policy: PredicatePolicy,
 ) AffineResultOf(T) {
-    const u = arraySub(dim, T, a_finish, a_start);
-    const v = arraySub(dim, T, b_finish, b_start);
-    const w = arraySub(dim, T, b_start, a_start);
-
     if (dim == 3) {
         if (orient3Sign(T, a_start, a_finish, b_start, b_finish, policy) != .zero) return noneAffine(T);
     } else {
-        if (minor3x4Sign(T, u, v, w, .{ 0, 1, 2 }, policy) != .zero) return noneAffine(T);
-        if (minor3x4Sign(T, u, v, w, .{ 0, 1, 3 }, policy) != .zero) return noneAffine(T);
-        if (minor3x4Sign(T, u, v, w, .{ 0, 2, 3 }, policy) != .zero) return noneAffine(T);
-        if (minor3x4Sign(T, u, v, w, .{ 1, 2, 3 }, policy) != .zero) return noneAffine(T);
+        if (!coplanar4(T, a_start, a_finish, b_start, b_finish, policy)) return noneAffine(T);
     }
+
+    // The gate is decided above, so the frame the projection needs is built
+    // only once the two objects are known to share a flat.
+    const u = arraySub(dim, T, a_finish, a_start);
+    const v = arraySub(dim, T, b_finish, b_start);
 
     const first = arrayNormalized(dim, T, u);
     if (arrayLength(dim, T, first) == 0) return noneAffine(T);
@@ -3263,31 +3560,30 @@ fn ballIntersect(comptime dim: usize, comptime T: type, first_center: [dim]T, fi
     // is negative. Getting either sign backwards turns every classification
     // into its opposite, which is the mistake the tests below exist to catch.
     if (arrayLength(dim, T, separation) == 0 and first_radius == second_radius) return .coincident;
-    const outer = squaredNormMinusSquareSign(dim, T, separation, addRaw(T, first_radius, second_radius), policy);
-    const inner = squaredNormMinusSquareSign(dim, T, separation, subRaw(T, first_radius, second_radius), policy);
-    if (outer == .positive) return .none;
-    if (outer == .zero or inner == .zero) {
+    const tangency = ballTangencySigns(dim, T, first_center, first_radius, second_center, second_radius, policy);
+    if (tangency.outer == .positive) return .none;
+    if (tangency.outer == .zero or tangency.inner == .zero) {
         // Tangency: one point on the line of centres, at distance `first`
         // from the first centre along the separation.
         const unit = arrayNormalized(dim, T, separation);
         const touch = arrayAdd(dim, T, first_center, arrayScale(dim, T, unit, first_radius));
         return .{ .point = fromArrayOf(P, touch) };
     }
-    if (inner == .negative) return .{ .contained = if (first_radius >= second_radius) .first else .second };
+    if (tangency.inner == .negative) return .{ .contained = if (first_radius >= second_radius) .first else .second };
     return .{ .two_points = ballCrossingPoints(dim, T, first_center, first_radius, second_center, second_radius) };
 }
 
 /// The two points where two balls cut each other. The geometry is fixed: the
 /// chord lies in the plane through both centres, perpendicular to the line of
-/// centres, at the distance the law of cosines puts it.
+/// centres, at the distance the law of cosines puts it, and its half-length is
+/// what `chordHeight` computes.
 fn ballCrossingPoints(comptime dim: usize, comptime T: type, first_center: [dim]T, first_radius: T, second_center: [dim]T, second_radius: T) [2]PointOf(dim, T) {
     const P = PointOf(dim, T);
     const separation = arraySub(dim, T, second_center, first_center);
     const distance = arrayLength(dim, T, separation);
     const unit = arrayScale(dim, T, separation, divRaw(T, 1, distance));
     const along = divRaw(T, addRaw(T, subRaw(T, scaleRaw(T, first_radius, first_radius), scaleRaw(T, second_radius, second_radius)), scaleRaw(T, distance, distance)), scaleRaw(T, 2, distance));
-    const height_squared = subRaw(T, scaleRaw(T, first_radius, first_radius), scaleRaw(T, along, along));
-    const height = sqrtOf(T, absOf(T, height_squared));
+    const height = chordHeight(T, first_radius, second_radius, distance);
     const base = arrayAdd(dim, T, first_center, arrayScale(dim, T, unit, along));
     const side = arrayScale(dim, T, anyPerpendicular(dim, T, unit), height);
     return .{
@@ -3296,20 +3592,61 @@ fn ballCrossingPoints(comptime dim: usize, comptime T: type, first_center: [dim]
     };
 }
 
+/// The half-length of the chord two balls cut, from the law of cosines.
+///
+/// The plain form of the third side is `radius * radius - along * along`, and
+/// `along` is ROUNDED to the format before that subtraction, so a small ball
+/// against the rim of a huge one leaves a half-chord of exactly zero and the
+/// two reported points on top of each other. The factored form is the same
+/// quantity with no square of a radius in it, because the product of the four
+/// tangency margins IS `4 * distance * height * height`:
+///
+///     4 d h^2 = (r1 + r2 - d) (r1 + r2 + d) (d - r1 + r2) (d + r1 - r2)
+///
+/// Every margin is a difference of stored numbers, and each is taken against
+/// the LARGER of the two it subtracts from, so no margin is ever read out of a
+/// rounded `r1 + r2`. The two SMALL margins are each below `2 * distance` and
+/// the two LARGE ones each below `3 * distance`, so dividing each PAIR by
+/// `2 * distance` before multiplying leaves both quotients below
+/// `5 * distance`, and the only value of the size of the answer is the final
+/// product, which IS the half-chord. That is what keeps the calculation inside
+/// the format at either end of the range. A margin that rounding puts below
+/// zero leaves no chord, and its sign is dropped the way the plain form drops
+/// the sign of its difference.
+fn chordHeight(comptime T: type, first_radius: T, second_radius: T, distance: T) T {
+    const total = addRaw(T, first_radius, second_radius);
+    const difference = subRaw(T, first_radius, second_radius);
+    const outer_low = if (first_radius >= distance)
+        addRaw(T, subRaw(T, first_radius, distance), second_radius)
+    else if (second_radius >= distance)
+        addRaw(T, subRaw(T, second_radius, distance), first_radius)
+    else
+        subRaw(T, total, distance);
+    const outer_high = addRaw(T, total, distance);
+    const inner_low = subRaw(T, distance, difference);
+    const inner_high = addRaw(T, distance, difference);
+    const divisor = scaleRaw(T, 2, distance);
+    return scaleRaw(
+        T,
+        sqrtOf(T, absOf(T, divRaw(T, scaleRaw(T, outer_low, inner_low), divisor))),
+        sqrtOf(T, absOf(T, divRaw(T, scaleRaw(T, outer_high, inner_high), divisor))),
+    );
+}
+
 fn ballIntersectSegment(comptime dim: usize, comptime T: type, center: [dim]T, radius: T, a: [dim]T, b: [dim]T, policy: PredicatePolicy) IntersectionOf(dim, T) {
     const P = PointOf(dim, T);
-    const from_a = arraySub(dim, T, a, center);
-    const from_b = arraySub(dim, T, b, center);
-    const start_inside = squaredNormMinusSquareSign(dim, T, from_a, radius, policy);
-    const end_inside = squaredNormMinusSquareSign(dim, T, from_b, radius, policy);
+    const inside = segmentInsideSigns(dim, T, center, radius, a, b, policy);
     // The segment is the second operand of `intersectSegment`, and it is the
     // whole of the common set, so the side is `second`.
-    if (start_inside != .positive and end_inside != .positive) return .{ .contained = .second };
+    if (inside.start != .positive and inside.end != .positive) return .{ .contained = .second };
+    // Both ends are outside, so the rounded offset and the frame below are
+    // built only for the case that reaches them.
+    const from_a = arraySub(dim, T, a, center);
     const span = arrayLength(dim, T, arraySub(dim, T, b, a));
     if (span == 0) return .none;
     const unit = arrayScale(dim, T, arraySub(dim, T, b, a), divRaw(T, 1, span));
     const along = arrayDot(dim, T, from_a, unit);
-    const discriminant = rayBallDiscriminantSign(dim, T, from_a, along, radius, policy);
+    const discriminant = rayBallDiscriminantSign(dim, T, center, a, unit, radius, policy);
     if (discriminant == .negative) return .none;
     const root = sqrtOf(T, absOf(T, subRaw(T, scaleRaw(T, along, along), subRaw(T, arrayDot(dim, T, from_a, from_a), scaleRaw(T, radius, radius)))));
     // The two roots of the ray quadratic are `-along -+ root`. The smaller one
@@ -3343,10 +3680,12 @@ fn ballIntersectSegment(comptime dim: usize, comptime T: type, center: [dim]T, r
 ///   `far == 0` is the boundary case, where that run has zero length.
 fn ballIntersectRay(comptime dim: usize, comptime T: type, center: [dim]T, radius: T, origin: [dim]T, direction: [dim]T, policy: PredicatePolicy) IntersectionOf(dim, T) {
     const P = PointOf(dim, T);
+    const discriminant = rayBallDiscriminantSign(dim, T, center, origin, direction, radius, policy);
+    if (discriminant == .negative) return .none;
+    // The discriminant is settled, so the rounded offset and projection that
+    // place the two roots are built only for the case that has them.
     const offset = arraySub(dim, T, origin, center);
     const along = arrayDot(dim, T, offset, direction);
-    const discriminant = rayBallDiscriminantSign(dim, T, offset, along, radius, policy);
-    if (discriminant == .negative) return .none;
     const root = sqrtOf(T, absOf(T, subRaw(T, scaleRaw(T, along, along), subRaw(T, arrayDot(dim, T, offset, offset), scaleRaw(T, radius, radius)))));
     // Both roots carry `-along`. The smaller is the near root, so it is
     // `-along - root`; the larger is `-along + root`.
@@ -3373,9 +3712,11 @@ fn ballIntersectRay(comptime dim: usize, comptime T: type, center: [dim]T, radiu
 }
 
 fn ballIntersectFlat(comptime dim: usize, comptime T: type, center: [dim]T, radius: T, flat_point: [dim]T, flat_normal: [dim]T, policy: PredicatePolicy) IntersectionOf(dim, T) {
-    const distance = arrayDot(dim, T, arraySub(dim, T, center, flat_point), flat_normal);
-    const sign = flatBallSign(T, distance, radius, policy);
+    const sign = flatBallSign(dim, T, flat_point, center, flat_normal, radius, policy);
     if (sign == .positive) return .none;
+    // The signed distance is settled, so the rounded one that places the foot
+    // and sizes the cut is built only for the case that uses them.
+    const distance = arrayDot(dim, T, arraySub(dim, T, center, flat_point), flat_normal);
     const foot = arraySub(dim, T, center, arrayScale(dim, T, flat_normal, distance));
     if (sign == .zero) return .{ .point = fromArrayOf(PointOf(dim, T), foot) };
     const cut_radius = sqrtOf(T, absOf(T, subRaw(T, scaleRaw(T, radius, radius), scaleRaw(T, distance, distance))));
@@ -3392,8 +3733,9 @@ fn ballIntersectFlat(comptime dim: usize, comptime T: type, center: [dim]T, radi
 
 fn flatIntersectSegment(comptime dim: usize, comptime T: type, flat_point: [dim]T, flat_normal: [dim]T, a: [dim]T, b: [dim]T, policy: PredicatePolicy) IntersectionOf(dim, T) {
     const P = PointOf(dim, T);
-    const first = flatSideSign(dim, T, a, flat_point, flat_normal, policy);
-    const second = flatSideSign(dim, T, b, flat_point, flat_normal, policy);
+    const side = segmentSideSigns(dim, T, flat_point, flat_normal, a, b, policy);
+    const first = side.start;
+    const second = side.end;
     if (first == .zero and second == .zero) return .{ .contained = .second };
     if (first == .zero) return .{ .point = fromArrayOf(P, a) };
     if (second == .zero) return .{ .point = fromArrayOf(P, b) };
@@ -3414,31 +3756,61 @@ fn flatIntersectSegment(comptime dim: usize, comptime T: type, flat_point: [dim]
 /// components of one normal and two of the other, which vanishes for every
 /// coordinate-aligned pair and would call the two axis normals parallel.
 fn normalsParallel3(comptime T: type, first: [3]T, second: [3]T, policy: PredicatePolicy) bool {
-    return minor2Sign(T, first[0], second[1], first[1], second[0], policy) == .zero and
-        minor2Sign(T, first[1], second[2], first[2], second[1], policy) == .zero and
-        minor2Sign(T, first[2], second[0], first[0], second[2], policy) == .zero;
+    return switch (policy) {
+        .fast => minor2Sign(T, first[0], second[1], first[1], second[0]) == .zero and
+            minor2Sign(T, first[1], second[2], first[2], second[1]) == .zero and
+            minor2Sign(T, first[2], second[0], first[0], second[2]) == .zero,
+        // Each of the six components is read by two of the three minors, so
+        // the exact path converts each one once and hands it to both.
+        .adaptive_exact => blk: {
+            const f = exactRow(3, T, first);
+            const s = exactRow(3, T, second);
+            break :blk exactDet2(f[0], s[1], f[1], s[0]) == .zero and
+                exactDet2(f[1], s[2], f[2], s[1]) == .zero and
+                exactDet2(f[2], s[0], f[0], s[2]) == .zero;
+        },
+    };
 }
 
 /// The four-dimensional gate, over all six index pairs. The same argument
 /// order as the three-dimensional one, and all six minors vanish exactly when
 /// the two rows are linearly dependent.
 fn normalsParallel4(comptime T: type, first: [4]T, second: [4]T, policy: PredicatePolicy) bool {
-    var parallel = true;
-    inline for (0..4) |row| {
-        inline for (row + 1..4) |column| {
-            if (minor2Sign(T, first[row], second[column], first[column], second[row], policy) != .zero) {
-                parallel = false;
+    return switch (policy) {
+        .fast => blk: {
+            var parallel = true;
+            inline for (0..4) |row| {
+                inline for (row + 1..4) |column| {
+                    if (minor2Sign(T, first[row], second[column], first[column], second[row]) != .zero) {
+                        parallel = false;
+                    }
+                }
             }
-        }
-    }
-    return parallel;
+            break :blk parallel;
+        },
+        // Every component is read by three of the six minors, so the exact
+        // path converts the eight coordinates once and hands them to all six.
+        .adaptive_exact => blk: {
+            const f = exactRow(4, T, first);
+            const s = exactRow(4, T, second);
+            var parallel = true;
+            inline for (0..4) |row| {
+                inline for (row + 1..4) |column| {
+                    if (exactDet2(f[row], s[column], f[column], s[row]) != .zero) {
+                        parallel = false;
+                    }
+                }
+            }
+            break :blk parallel;
+        },
+    };
 }
 
-fn minor2Sign(comptime T: type, a: T, b: T, c: T, d: T, policy: PredicatePolicy) Sign {
-    return switch (policy) {
-        .fast => signOfScalar(T, subRaw(T, scaleRaw(T, a, b), scaleRaw(T, c, d))),
-        .adaptive_exact => exactDet2(widen(T, a), widen(T, b), widen(T, c), widen(T, d)),
-    };
+/// The sign of `a * b - c * d`, degree two: the plain evaluation of one
+/// two-by-two minor of the matrix whose ROWS are two normals. The exact
+/// counterpart is `exactDet2` over cached anchors.
+fn minor2Sign(comptime T: type, a: T, b: T, c: T, d: T) Sign {
+    return signOfScalar(T, subRaw(T, scaleRaw(T, a, b), scaleRaw(T, c, d)));
 }
 
 /// The intersection of two planes in three dimensions.

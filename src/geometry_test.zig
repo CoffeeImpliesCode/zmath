@@ -31,6 +31,34 @@ fn expectPoint(actual: anytype, expected: @TypeOf(actual)) !void {
     try std.testing.expect(actual.eq(expected));
 }
 
+/// The two points of a `two_points` intersection, against an expected PAIR in
+/// EITHER order. The common set is the chord, and which end the construction
+/// reaches first is no part of any contract, so a test that pinned the order
+/// would be pinning an accident. A tolerance of zero is an exact comparison
+/// of the pair, whatever order the two points arrive in.
+fn expectCrossingPair(result: anytype, first: anytype, second: anytype, tolerance: anytype) !void {
+    if (std.meta.activeTag(result) != .two_points) {
+        std.debug.print("expected two_points, got {any}\n", .{std.meta.activeTag(result)});
+        return error.TestUnexpectedResult;
+    }
+    const given = result.two_points;
+    const in_order = nearPoint(given[0], first, tolerance) and nearPoint(given[1], second, tolerance);
+    const swapped = nearPoint(given[0], second, tolerance) and nearPoint(given[1], first, tolerance);
+    if (!in_order and !swapped) {
+        std.debug.print("expected the pair {any} {any}, got {any} {any}\n", .{ first, second, given[0], given[1] });
+        return error.TestUnexpectedResult;
+    }
+}
+
+fn nearPoint(actual: anytype, expected: anytype, tolerance: anytype) bool {
+    return nearCoordinate(actual.x, expected.x, tolerance) and nearCoordinate(actual.y, expected.y, tolerance);
+}
+
+fn nearCoordinate(actual: anytype, expected: anytype, tolerance: anytype) bool {
+    const difference = if (actual > expected) actual - expected else expected - actual;
+    return difference <= tolerance;
+}
+
 fn nan64() f64 {
     return @bitCast(@as(u64, 0x7ff8_0000_0000_0000));
 }
@@ -97,6 +125,34 @@ fn signOfExact(value: i128) g.Sign {
     if (value > 0) return .positive;
     if (value < 0) return .negative;
     return .zero;
+}
+
+/// The exact oriented area of a triangle whose coordinates are INTEGERS, as an
+/// `i128`.
+///
+/// This is the reference the contract names: `adaptive_exact` is the exact
+/// sign of `(b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)` over the
+/// ORIGINAL stored coordinates. The integers used below stay below `2^60`, so
+/// every difference and every product fits `i128` and nothing rounds. No step
+/// here is a floating-point subtraction, which is the whole point: a
+/// floating-point DIFFERENCE is what loses the sign, and a reference that
+/// formed one would be the reading under test rather than the truth.
+fn exactOrient2Integer(a: [2]i128, b: [2]i128, c: [2]i128) i128 {
+    return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+}
+
+/// An integer as the `f64` the module receives, with a check that the
+/// conversion lost nothing.
+///
+/// `@intFromFloat` truncates toward zero, so a coordinate that rounded on the
+/// way in comes back as a DIFFERENT integer. The exact reference above is a
+/// statement about the points the module was given only while this holds.
+fn exactCoordinate(value: i128) !f64 {
+    const out: f64 = @floatFromInt(value);
+    if (!std.math.isFinite(out) or out < -0x1p127 or out >= 0x1p127)
+        return error.UnrepresentableCoordinate;
+    try std.testing.expectEqual(value, @as(i128, @intFromFloat(out)));
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -1250,6 +1306,97 @@ test "CONSTRUCTED: the two-dimensional orientation disagrees, fast reports colli
     );
 }
 
+test "CONSTRUCTED: the two-dimensional exact orientation survives a difference that overflows" {
+    // How this was built. `floatMax(f64)` is `(2^53 - 1) * 2^971` exactly, so
+    // the three points
+    //
+    //     a = (-floatMax, 0)    b = (floatMax, 0)    c = (0, 1)
+    //
+    // have the exact determinant
+    //
+    //     (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x)
+    //   = (2 * floatMax) * 1 - 0 * floatMax
+    //   = 2 * (2^53 - 1) * 2^971
+    //
+    // and every factor on the last line is positive, so the sign of that
+    // determinant is the sign of `2^53 - 1`. Exchanging the second and third
+    // points negates a two-by-two determinant, so the same construction makes
+    // the second triangle negative.
+    const max = std.math.floatMax(f64);
+    const a = try g.Point2d.init(-max, 0);
+    const b = try g.Point2d.init(max, 0);
+    const c = try g.Point2d.init(0, 1);
+
+    // The difference a floating-point reading must form is past the binary64
+    // range, so the value it produces is not a real number at all. That is
+    // why this witness is about the exact policy's own intermediate and not
+    // about a disagreement between the policies: the plain evaluation
+    // overflows to an infinity that happens to carry the right sign here.
+    try std.testing.expect(std.math.isInf(max - -max));
+
+    try std.testing.expectEqual(g.Sign.positive, try g.Point2d.orientation(a, b, c, .adaptive_exact));
+    try std.testing.expectEqual(g.Sign.negative, try g.Point2d.orientation(a, c, b, .adaptive_exact));
+}
+
+test "CONSTRUCTED: a translated cancellation the two-dimensional exact orientation must not lose" {
+    // How this was built. The two products of the determinant are made to
+    // differ by ONE, and that one sits inside a DIFFERENCE binary64 cannot
+    // represent:
+    //
+    //     b.x - a.x = 2^54 - (2^53 - 1) = 2^53 + 1
+    //     c.x - a.x = 3 * 2^53 - (2^53 - 1) = 2^54 + 1
+    //
+    // `2^53 + 1` needs 54 significant bits and the spacing at `2^53` is 2, so
+    // that difference is the exact halfway tie and round-to-nearest-even sends
+    // it to `2^53`. The spacing at `2^54` is 4 and `2^54 + 1` sits one unit
+    // from `2^54` and three from the next value, so that one rounds to `2^54`.
+    // Each difference therefore loses the one that decides the sign, before
+    // any multiplication happens, and the exact determinant is
+    //
+    //     (2^53 + 1) * 2 - 1 * (2^54 + 1) = 1
+    //
+    // Take the translation away and the same triangle is `(0, 0)`,
+    // `(2^53 + 1, 1)`, `(2^54 + 1, 2)`, whose second and third points are not
+    // binary64 numbers at all, so this sign is reachable only by exact
+    // arithmetic.
+    const a_int = [2]i128{ (@as(i128, 1) << 53) - 1, 0 };
+    const b_int = [2]i128{ @as(i128, 1) << 54, 1 };
+    const integer_c = [2]i128{ 3 * (@as(i128, 1) << 53), 2 };
+
+    // The reference, derived twice: on the stored coordinates and on the same
+    // triangle with the translation removed. Two exact derivations that agree
+    // are what pins the sign to the geometry rather than to a reading.
+    const stored = exactOrient2Integer(a_int, b_int, integer_c);
+    const translated = exactOrient2Integer(
+        .{ 0, 0 },
+        .{ (@as(i128, 1) << 53) + 1, 1 },
+        .{ (@as(i128, 1) << 54) + 1, 2 },
+    );
+    try std.testing.expectEqual(@as(i128, 1), translated);
+    try std.testing.expectEqual(translated, stored);
+    try std.testing.expect(stored > 0);
+    try std.testing.expectEqual(-stored, exactOrient2Integer(a_int, integer_c, b_int));
+
+    const a = try g.Point2d.init(try exactCoordinate(a_int[0]), try exactCoordinate(a_int[1]));
+    const b = try g.Point2d.init(try exactCoordinate(b_int[0]), try exactCoordinate(b_int[1]));
+    const c = try g.Point2d.init(try exactCoordinate(integer_c[0]), try exactCoordinate(integer_c[1]));
+
+    // The two differences, read off the STORED coordinates. Neither exact
+    // value is a binary64 number, and each rounds DOWN to the power of two
+    // below it, which is what lets the two products become the same number.
+    try std.testing.expectEqual(@as(i128, 9007199254740993), b_int[0] - a_int[0]);
+    try std.testing.expectEqual(@as(i128, 18014398509481985), integer_c[0] - a_int[0]);
+    try std.testing.expectEqual(@as(f64, 9007199254740992), b.x - a.x);
+    try std.testing.expectEqual(@as(f64, 18014398509481984), c.x - a.x);
+
+    // With those two roundings both products are `2^54` and they cancel to
+    // zero, so the plain evaluation reports three collinear points where the
+    // exact evaluation reports a determinant of one.
+    try std.testing.expectEqual(g.Sign.zero, try g.Point2d.orientation(a, b, c, .fast));
+    try std.testing.expectEqual(g.Sign.positive, try g.Point2d.orientation(a, b, c, .adaptive_exact));
+    try std.testing.expectEqual(g.Sign.negative, try g.Point2d.orientation(a, c, b, .adaptive_exact));
+}
+
 test "CONSTRUCTED: the three-dimensional orientation disagrees on the SIGN in binary64" {
     // How this was built. The cross product's x component is the difference
     // of the SAME colliding pair of products the two-dimensional case used:
@@ -1427,33 +1574,336 @@ test "the exact sign of a degree-four form matches an integer recomputation" {
     try std.testing.expectEqual(hard_expected, try g.Point4f.orientation(ha, hb, hc, hd, .adaptive_exact));
 }
 
-test "CONSTRUCTED: a point exactly on a circle is reported strictly inside by the plain evaluation" {
-    // How this was built. A point on a circle of radius r at distance d from
-    // the centre has `d*d - r*r` exactly zero. Scaling a three-four-five
-    // triangle by `k = 2^26 + 1` puts every product past the 24-bit binary32
-    // significand, and the plain evaluation of `dx*dx + dy*dy - r*r` then
-    // returns -16 where the exact value is 0.
-    const k: i64 = (1 << 26) + 1;
+test "CONSTRUCTED: a binary32 circle reports a point outside whose difference rounded onto the boundary" {
+    // How this was built. The binary32 form of the boundary witness below. The
+    // centre and the radius are the consecutive binary32 numbers `2^24 - 1`
+    // and `2^24`, and the point sits at `(2^25, 0)`, so
+    //
+    //     dx = 2^25 - (2^24 - 1) = 2^24 + 1
+    //
+    // `2^24 + 1` needs 25 significant bits and the spacing at `2^24` is `2`,
+    // so that difference is the exact halfway tie and round-to-nearest-even
+    // sends it to `2^24`. The exact squared distance from the centre is
+    //
+    //     (2^24 + 1)^2 = 2^48 + 2^25 + 1
+    //
+    // and the radius square is exactly `2^48`, so the exact residual is
+    // `2^25 + 1`, positive: the point is strictly OUTSIDE the closed ball. The
+    // rounded difference leaves a residual of exactly `0`, which is the
+    // boundary the inclusive test counts as inside.
+    const centre = try g.Point2f.init(16777215.0, 0);
+    const circle = try g.Circle2f.init(centre, 16777216.0);
+    const point = try g.Point2f.init(33554432.0, 0);
+
+    // The reference, re-derived on the integers the stored coordinates hold.
+    const exact_dx: i128 = (@as(i128, 1) << 25) - (@as(i128, 1) << 24) + 1;
+    try std.testing.expectEqual(@as(i128, 16777217), exact_dx);
+    const exact_residual = exact_dx * exact_dx - (@as(i128, 1) << 48);
+    try std.testing.expect(exact_residual > 0);
+    // And the difference the plain evaluation actually forms.
+    try std.testing.expectEqual(@as(f32, 16777216.0), point.x - centre.x);
+
+    try std.testing.expect(!(try circle.contains(point, .adaptive_exact)));
+    try std.testing.expect(try circle.contains(point, .fast));
+}
+
+test "CONSTRUCTED: a point exactly on a binary32 circle is inside under both policies" {
+    // The inclusive test on a point that is exactly ON the rim, with every
+    // stored coordinate below `2^24` and so a number binary32 holds exactly.
+    // The three-four-five triangle gives a residual of exactly `0` under both
+    // policies, and a residual of `0` is inside.
     const centre = try g.Point2f.init(0, 0);
-    const circle = try g.Circle2f.init(centre, @as(f32, @floatFromInt(5 * k)));
-    const on_the_circle = try g.Point2f.init(@floatFromInt(3 * k), @floatFromInt(4 * k));
-
-    // The exact residual, re-derived: (3k)^2 + (4k)^2 - (5k)^2 is exactly 0.
-    const exact: i128 = @as(i128, 3 * k) * (3 * k) + @as(i128, 4 * k) * (4 * k) - @as(i128, 5 * k) * (5 * k);
-    try std.testing.expectEqual(@as(i128, 0), exact);
-
-    // The containment answer is INCLUSIVE, so a point on the boundary is
-    // inside under BOTH policies. Only the residual's sign differs, and the
-    // two signs are on the same side of the test, so this disagreement does
-    // not change the boolean. No `contains` case was found where the two
-    // policies return DIFFERENT booleans; the report says so.
+    const circle = try g.Circle2f.init(centre, 5);
+    const on_the_circle = try g.Point2f.init(3, 4);
     try std.testing.expect(try circle.contains(on_the_circle, .fast));
     try std.testing.expect(try circle.contains(on_the_circle, .adaptive_exact));
-    // Just outside the boundary, where neither policy is in doubt.
-    try std.testing.expect(!(try circle.contains(try g.Point2f.init(1.0e9, 1.0e9), .fast)));
-    try std.testing.expect(!(try circle.contains(try g.Point2f.init(1.0e9, 1.0e9), .adaptive_exact)));
-    // The centre, which is inside by a wide margin.
+    // One step past the rim, where neither policy is in doubt.
+    const past_the_rim = try g.Point2f.init(5, 1);
+    try std.testing.expect(!(try circle.contains(past_the_rim, .fast)));
+    try std.testing.expect(!(try circle.contains(past_the_rim, .adaptive_exact)));
+    // The centre, which is inside by the whole radius.
     try std.testing.expect(try circle.contains(centre, .adaptive_exact));
+}
+
+test "CONSTRUCTED: the three-dimensional exact orientation survives a difference that overflows" {
+    // How this was built. The two-dimensional overflow witness lifted into
+    // three dimensions, with `M` for `floatMax(f64)`:
+    //
+    //     a = (-M, 0, 0)   b = (M, 0, 0)
+    //     c = (0, 1, 0)    d = (0, 0, 1)
+    //
+    // The three differences the predicate takes are
+    //
+    //     u = b - a = (2M, 0, 0)
+    //     v = c - a = (M, 1, 0)
+    //     w = d - a = (M, 0, 1)
+    //
+    // and the cross product of the first two is
+    //
+    //     cross(u, v) = (u.y*v.z - u.z*v.y, u.z*v.x - u.x*v.z, u.x*v.y - u.y*v.x)
+    //                 = (0, 0, 2M)
+    //
+    // because every term but `u.x*v.y` is a product of a zero. The signed
+    // volume is then `2M * 1 = 2M`, positive, and `2 * floatMax` is not a
+    // binary64 number at all, so a reading that forms the differences first
+    // has no value to carry that sign. Exchanging `b` and `c` exchanges `u`
+    // and `v`, which negates the cross product and the volume with it.
+    const max = std.math.floatMax(f64);
+    const a = try g.Point3d.init(-max, 0, 0);
+    const b = try g.Point3d.init(max, 0, 0);
+    const c = try g.Point3d.init(0, 1, 0);
+    const d = try g.Point3d.init(0, 0, 1);
+
+    // The difference a floating-point reading must form, and what it is.
+    try std.testing.expect(std.math.isInf(max - -max));
+    // And the exact sign of the volume, re-derived. The cross product of the
+    // first two differences is `2M` along the third axis, so the volume is
+    // `2M * 1`, and `2M` is `(2^54 - 2) * 2^971`, whose every factor is
+    // positive. It is far past an `i128`, so the sign is read off the factors.
+    try std.testing.expectEqual(g.Sign.positive, try g.Point3d.orientation(a, b, c, d, .adaptive_exact));
+    try std.testing.expectEqual(g.Sign.negative, try g.Point3d.orientation(a, c, b, d, .adaptive_exact));
+}
+
+test "CONSTRUCTED: a circle reports a point outside whose difference rounded onto the boundary" {
+    // How this was built. The centre and the radius are the consecutive
+    // binary64 numbers `2^53 - 1` and `2^53`, and the point sits at
+    // `(2^54, 2)`, so
+    //
+    //     dx = 2^54 - (2^53 - 1) = 2^53 + 1
+    //     dy = 2 - 0              = 2
+    //
+    // `2^53 + 1` needs 54 significant bits and the spacing at `2^53` is 2,
+    // so that difference is the halfway tie and round-to-nearest-even sends
+    // it to `2^53`. The exact squared distance from the centre is
+    //
+    //     (2^53 + 1)^2 + 2^2 = 2^106 + 2^54 + 5
+    //
+    // and the radius square is exactly `2^106`, so the exact residual is
+    // `2^54 + 5`, positive: the point is strictly OUTSIDE the closed ball.
+    // The rounded difference leaves a residual of exactly `0`, which is the
+    // boundary the inclusive test counts as inside.
+    const centre_x: f64 = 9007199254740991.0;
+    const radius_x: f64 = 9007199254740992.0;
+    const centre = try g.Point2d.init(centre_x, 0);
+    const circle = try g.Circle2d.init(centre, radius_x);
+    const point = try g.Point2d.init(18014398509481984.0, 2);
+
+    // The reference, re-derived on the integers the stored coordinates hold.
+    const exact_dx: i128 = (@as(i128, 1) << 54) - (@as(i128, 1) << 53) + 1;
+    try std.testing.expectEqual(@as(i128, 9007199254740993), exact_dx);
+    const exact_residual = exact_dx * exact_dx + 4 - (@as(i128, 1) << 106);
+    try std.testing.expect(exact_residual > 0);
+    // And the two differences the plain evaluation actually forms.
+    try std.testing.expectEqual(@as(f64, 9007199254740992.0), point.x - centre.x);
+    try std.testing.expectEqual(@as(f64, 2), point.y - centre.y);
+
+    try std.testing.expect(!(try circle.contains(point, .adaptive_exact)));
+    try std.testing.expect(try circle.contains(point, .fast));
+}
+
+test "CONSTRUCTED: two circles cross where a rounded radius sum calls them tangent" {
+    // How this was built. The big circle has centre `(0, 0)` and radius
+    // `2^53`, the small one centre `(2^53, 0)` and radius `1`, so the
+    // centres are exactly `2^53` apart and
+    //
+    //     2^53 < 2^53 + 1     the radii sum past the separation, so the small
+    //                         circle reaches out beyond the big rim
+    //     2^53 > 2^53 - 1     the radii differ by less than the separation,
+    //                         so the big circle does not swallow the small
+    //
+    // The two circles therefore CROSS, in two distinct points. The sum
+    // `2^53 + 1` needs 54 significant bits, so the plain evaluation reads it
+    // as `2^53`, the separation EQUALS the sum, and the pair looks exactly
+    // tangent.
+    //
+    // What the two points ARE is the point of this test, because a tag of
+    // `two_points` with two coincident coordinates is a claim the tag alone
+    // cannot keep. The chord stands on the line of centres at
+    //
+    //     along = (r1^2 - r2^2 + d^2) / (2 d)
+    //           = (2^106 - 1 + 2^106) / 2^54
+    //           = 2^53 - 2^-54
+    //
+    // which rounds to `2^53`, the spacing at `2^53` being `2`. Measured from
+    // the small centre the same plane is `2^-54` away, so the half-chord is
+    // the law of cosines' third side
+    //
+    //     h^2 = r2^2 - (d - along)^2 = 1 - 2^-108
+    //
+    // and its square root rounds to `1` for the same reason. The two points
+    // are therefore `(2^53, 1)` and `(2^53, -1)`: a chord of length `2`
+    // across a rim of radius `2^53`, one rounding away from a single point.
+    const big = try g.Circle2d.init(try g.Point2d.init(0, 0), 9007199254740992.0);
+    const small = try g.Circle2d.init(try g.Point2d.init(9007199254740992.0, 0), 1);
+
+    // And the sum the plain evaluation reads.
+    try std.testing.expectEqual(@as(f64, 9007199254740992.0), 9007199254740992.0 + 1.0);
+
+    try expectTag(g.Intersection2d, try big.intersect(small, .adaptive_exact), .two_points);
+    try expectTag(g.Intersection2d, try big.intersect(small, .fast), .point);
+
+    // The payload, exactly, in either order. Both coordinates are whole
+    // numbers, so nothing is left to a tolerance here.
+    const up = try g.Point2d.init(9007199254740992.0, 1);
+    const down = try g.Point2d.init(9007199254740992.0, -1);
+    try expectCrossingPair(try big.intersect(small, .adaptive_exact), up, down, 0.0);
+}
+
+test "CONSTRUCTED: the same crossing measured from the small circle first" {
+    // The same two circles with the operands exchanged, so the chord is
+    // measured from the small centre. That centre is `2^-54` from the chord
+    // plane, and the margin that says so is `(r2 - d) + r1`, taken against
+    // the larger radius first: the plain evaluation forms the radii sum
+    // `2^53 + 1`, rounds it to `2^53`, and the margin comes out ZERO, which
+    // is the whole defect. The pair reported is the same set, and it is
+    // still two distinct points a chord of length `2` apart.
+    const big = try g.Circle2d.init(try g.Point2d.init(0, 0), 9007199254740992.0);
+    const small = try g.Circle2d.init(try g.Point2d.init(9007199254740992.0, 0), 1);
+    const up = try g.Point2d.init(9007199254740992.0, 1);
+    const down = try g.Point2d.init(9007199254740992.0, -1);
+
+    try expectTag(g.Intersection2d, try small.intersect(big, .adaptive_exact), .two_points);
+    try expectCrossingPair(try small.intersect(big, .adaptive_exact), up, down, 1e-15);
+}
+
+test "CONSTRUCTED: the same crossing at binary32, where the rim is 2^24" {
+    // The binary32 form of the witness above. The big circle has centre
+    // `(0, 0)` and radius `2^24`, the small one centre `(2^24, 0)` and radius
+    // `1`, and the exact half-chord is `sqrt(1 - 2^-50)`, which is `1` to
+    // within a rounding. The plain evaluation reads the radii sum as `2^24`,
+    // so it reports tangency, and the payload is the same pair of points one
+    // binary32 ulp below the exact half-chord.
+    const big = try g.Circle2f.init(try g.Point2f.init(0, 0), 16777216.0);
+    const small = try g.Circle2f.init(try g.Point2f.init(16777216.0, 0), 1);
+    const up = try g.Point2f.init(16777216.0, 1);
+    const down = try g.Point2f.init(16777216.0, -1);
+
+    try expectTag(g.Intersection2f, try big.intersect(small, .adaptive_exact), .two_points);
+    try expectTag(g.Intersection2f, try big.intersect(small, .fast), .point);
+    try expectCrossingPair(try big.intersect(small, .adaptive_exact), up, down, 1e-6);
+}
+
+test "CONSTRUCTED: an ordinary crossing reports the chord of the law of cosines" {
+    // How this was built. A three-four-five triangle, so both points are whole
+    // numbers. The big circle has centre `(0, 0)` and radius `5`, the small
+    // one centre `(4, 0)` and radius `3`; the centres are `4` apart,
+    // `2 < 4 < 8`, and
+    //
+    //     along = (25 - 9 + 16) / 8 = 4     h^2 = 25 - 16 = 9
+    //
+    // so the pair is `(4, 3)` and `(4, -3)`. The same call with the operands
+    // exchanged measures `along` from the small centre, where it is `0`, and
+    // the pair is the same set. That second pair lands a rounding away from
+    // `3` on the half-chord, because the factored form takes one square root
+    // of each pair of margins rather than one of their product, so it is
+    // compared to within a rounding.
+    const big = try g.Circle2d.init(try g.Point2d.init(0, 0), 5);
+    const small = try g.Circle2d.init(try g.Point2d.init(4, 0), 3);
+    const up = try g.Point2d.init(4, 3);
+    const down = try g.Point2d.init(4, -3);
+
+    try expectTag(g.Intersection2d, try big.intersect(small, .adaptive_exact), .two_points);
+    try expectCrossingPair(try big.intersect(small, .adaptive_exact), up, down, 0.0);
+    try expectTag(g.Intersection2d, try small.intersect(big, .adaptive_exact), .two_points);
+    try expectCrossingPair(try small.intersect(big, .adaptive_exact), up, down, 1e-15);
+}
+
+test "CONSTRUCTED: a crossing near the top of the binary64 range keeps a finite chord" {
+    // How this was built. The same three-four-five construction, scaled until
+    // the product of the four tangency margins leaves the format. Both radii
+    // are `5 * 2^260` and the centres are `6 * 2^260` apart, so
+    //
+    //     along = d / 2 = 3 * 2^260     h = sqrt(25 - 9) * 2^260 = 2^262
+    //
+    // and the four margins multiply to `4 d^2 h^2 = 2^1051`, which is NOT a
+    // binary64 number at all. A chord formed as one product of the four
+    // margins overflows to an infinity here, and one formed as
+    // `r1^2 - along^2` survives only because the squares still fit. The pair
+    // is compared to the exact one to within a rounding, and every coordinate
+    // is finite: an infinity in the payload is the failure this guards.
+    const radius: f64 = 9.263367138985296e78; // 5 * 2^260
+    const gap: f64 = 1.1116040566782355e79; // 6 * 2^260
+    const base: f64 = 5.558020283391177e78; // 3 * 2^260
+    const chord: f64 = 7.410693711188237e78; // 2^262
+    const left = try g.Circle2d.init(try g.Point2d.init(0, 0), radius);
+    const right = try g.Circle2d.init(try g.Point2d.init(gap, 0), radius);
+
+    try expectTag(g.Intersection2d, try left.intersect(right, .adaptive_exact), .two_points);
+    try expectTag(g.Intersection2d, try left.intersect(right, .fast), .two_points);
+
+    const crossing = try left.intersect(right, .adaptive_exact);
+    for (crossing.two_points) |point| {
+        try std.testing.expect(std.math.isFinite(point.x));
+        try std.testing.expect(std.math.isFinite(point.y));
+    }
+    try expectCrossingPair(crossing, try g.Point2d.init(base, chord), try g.Point2d.init(base, -chord), base * 1e-15);
+}
+
+test "CONSTRUCTED: a ray misses a ball whose offset difference rounded onto it" {
+    // How this was built. The ray runs along `+y` from `(2^54, 0, 0)`, so it
+    // lies on the line `x = 2^54`. The ball is centred at `(2^53 - 1, 1, 0)`
+    // with radius `2^53`, and the distance from the centre to that whole LINE
+    // is
+    //
+    //     2^54 - (2^53 - 1) = 2^53 + 1 > 2^53
+    //
+    // A distance to the whole line that already exceeds the radius leaves the
+    // ray no point in the ball at all, whichever way it points. `2^53 + 1` is
+    // not a binary64 number, so the plain evaluation reads the offset as
+    // `2^53`, the distance becomes exactly the radius, and the ray appears
+    // to graze the ball and cut it in two.
+    const ball = try g.Sphere3d.init(try g.Point3d.init(9007199254740991.0, 1, 0), 9007199254740992.0);
+    const ray = try g.Ray3d.init(try g.Point3d.init(18014398509481984.0, 0, 0), try g.Vector3d.init(0, 1, 0));
+
+    // The exact discriminant, re-derived on the integers. The projection is
+    // `-1` because the only non-zero component of the offset that the unit
+    // direction `(0, 1, 0)` reads is `-1`.
+    const offset: i128 = (@as(i128, 1) << 54) - (@as(i128, 1) << 53) + 1;
+    try std.testing.expectEqual(@as(i128, 9007199254740993), offset);
+    const radius: i128 = @as(i128, 1) << 53;
+    const constant = offset * offset + 1 - radius * radius;
+    try std.testing.expect(1 - constant < 0);
+    // And the offset the plain evaluation forms.
+    try std.testing.expectEqual(@as(f64, 9007199254740992.0), 18014398509481984.0 - 9007199254740991.0);
+
+    try expectTag(g.Intersection3d, try ball.intersectRay(ray, .adaptive_exact), .none);
+    try expectTag(g.Intersection3d, try ball.intersectRay(ray, .fast), .two_points);
+}
+
+test "CONSTRUCTED: two parallel hyperplanes a rounded difference called one flat" {
+    // How this was built. Both hyperplanes carry the normal `(1, -1, 1, -1)`,
+    // whose length is exactly two, so `normalize` stores
+    // `(0.5, -0.5, 0.5, -0.5)` and no coefficient rounds. The first flat
+    // passes through `(-M, -M, 0, 0)` and the second through `(M, M, 0, 1)`,
+    // with `M = floatMax(f64)`. The signed distance of the second origin from
+    // the first flat is the exact
+    //
+    //     (M - (-M)) * 0.5 + (M - (-M)) * -0.5 + (0 - 0) * 0.5 + (1 - 0) * -0.5
+    //   = 2M * 0.5 - 2M * 0.5 - 0.5
+    //   = -0.5
+    //
+    // so the second origin is strictly off the first flat, the two hyperplanes
+    // are DISTINCT, and the common set is empty. Each of the first two
+    // differences is past the binary64 range, so the plain evaluation forms
+    // two infinities of OPPOSITE sign; their sum is not a real number, and a
+    // distance with no sign reads as a point on the flat.
+    const max = std.math.floatMax(f64);
+    const flat = try g.Hyperplane4d.init(try g.Point4d.init(-max, -max, 0, 0), try g.Vector4d.init(1, -1, 1, -1));
+    const shifted = try g.Hyperplane4d.init(try g.Point4d.init(max, max, 0, 1), try g.Vector4d.init(1, -1, 1, -1));
+
+    // The normal the module stored, read back, so the derivation above is a
+    // statement about the coefficients that ran. Nothing about it rounds.
+    try std.testing.expectEqual(@as(f64, 0.5), flat.normal.x);
+    try std.testing.expectEqual(@as(f64, -0.5), flat.normal.y);
+    try std.testing.expectEqual(@as(f64, 0.5), flat.normal.z);
+    try std.testing.expectEqual(@as(f64, -0.5), flat.normal.w);
+    // The distance, re-derived on the halves of `M` that do not overflow.
+    try std.testing.expect(0.5 * max - 0.5 * max - 0.5 == -0.5);
+    // And the difference the plain evaluation forms for each coordinate.
+    try std.testing.expect(std.math.isInf(max - -max));
+
+    try expectTag(g.Intersection4d, try flat.intersect(shifted, .adaptive_exact), .none);
+    try expectTag(g.Intersection4d, try flat.intersect(shifted, .fast), .hyperplane);
 }
 
 test "the coplanarity gate a policy drives is the one the higher dimensions use" {
