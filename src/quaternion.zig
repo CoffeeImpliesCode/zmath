@@ -6,8 +6,16 @@
 //! that can rotate a vector. The split exists because "a quaternion" and "a
 //! rotation" are different claims: a rotation is only a rotation when the
 //! quaternion is unit, and `q * (v, 0) * conjugate(q)` for a non-unit `q`
-//! scales `v` by `normSquared(q)` instead of leaving its length alone. Putting
-//! the proof in the type is what keeps that mistake off the API.
+//! scales `v` by `normSquared(q)` instead of leaving its length alone.
+//!
+//! The unit norm is an invariant the constructors maintain and the caller
+//! preserves, not one the language enforces. Zig 0.16 has no private struct
+//! fields, this type is a plain struct with no opaque handle, and `raw` is a
+//! public field, so nothing stops `UnitQuatf{ .raw = q }` from compiling and
+//! from storing a non-unit quaternion. `init` is the constructor that
+//! normalizes and validates, `fromAxisAngle` routes through it, and `rotate`
+//! and the composition methods take the unit norm as a precondition. A caller
+//! that writes `raw` directly gives up the rotation guarantee, not the type.
 //!
 //! `w` is the scalar component and `x`, `y`, `z` are the vector part, which is
 //! the order `API.md:901-905` spells the fields in. Hamilton multiplication is
@@ -373,9 +381,9 @@ fn normalizedOf(comptime T: type, a: [4]T) ?[4]T {
 /// The value made unit, or the value unchanged when it cannot be made unit.
 /// Every operation of the validated type re-normalizes its result, and for the
 /// documented inputs the division always succeeds. The fallback is reachable
-/// only through a struct literal, where there is nothing to correct towards
-/// and handing back the arithmetic result is more honest than inventing a
-/// direction.
+/// only from a value whose unit norm the caller did not maintain, where there
+/// is nothing to correct towards and handing back the arithmetic result is
+/// more honest than inventing a direction.
 fn renormalizedOf(comptime T: type, a: [4]T) [4]T {
     return normalizedOf(T, a) orelse a;
 }
@@ -609,28 +617,36 @@ fn Quat(comptime T: type) type {
 /// A quaternion of precision `T` that `init` has proved is unit, and therefore
 /// stands for an active, right-handed rotation of a column vector.
 ///
-/// `raw` is private to `zmath.quaternion` as the contract states, and Zig
-/// cannot make it so. A struct field that a function of this module can write
-/// is a field every consumer can write too, because `UnitQuatf{ .raw = q }`
-/// compiles outside this file whatever this file says. What the language gives
-/// instead is the constructor, and the constructor is the contract:
-/// `UnitQuatf.init(q)` is the only way to build one of these that is
-/// documented, it is the only one that validates, and it is the one a caller
-/// should use. A value written with the struct literal can be any quaternion
-/// at all, and every `rotate` result from such a value is meaningless rather
-/// than merely inaccurate, because the rotation it performs scales by the norm
-/// squared. `fromAxisAngle` is the second way in, and it routes through
-/// `init`, so it cannot produce an unvalidated value either. The field stays
-/// named `raw` because that is the name the contract gives it, and it is the
-/// read path back to the algebra: read `q.raw` and hand it to a `Quat` when the
-/// algebra is what is wanted.
+/// `raw` is a public field. Zig 0.16 cannot make a struct field private, and
+/// this type is a plain struct with no opaque handle, so `UnitQuatf{ .raw = q }`
+/// compiles for any consumer and can store any quaternion at all. The unit norm
+/// is therefore an invariant the constructors maintain and the caller
+/// preserves, not something this type can enforce.
+///
+/// `init` is the constructor that normalizes and validates, and the one a
+/// caller should use; `fromAxisAngle` is the second way in and routes through
+/// `init`, so it cannot produce a value that `init` would have rejected. The
+/// field stays named `raw` because that is the name the contract gives it, and
+/// it is the read path back to the algebra: read `q.raw` and hand it to a `Quat`
+/// when the algebra is what is wanted.
+///
+/// A consumer must not write `raw` with an arbitrary quaternion and must not
+/// bypass validation to get one. A forged non-unit value has no rotation
+/// guarantee: `rotate` and the composition methods take the unit norm as a
+/// precondition, and the rotation such a value performs scales by the norm
+/// squared, so the answer is meaningless rather than merely inaccurate. There
+/// is no `raw()` accessor method, because Zig puts fields and declarations in
+/// one namespace per struct, so a field named `raw` and a method named `raw`
+/// cannot both exist.
 fn Unit(comptime T: type) type {
     const Q = Quat(T);
     const Vec = Vec3Of(T);
     return struct {
         const Self = @This();
 
-        /// The stored quaternion, which `init` made unit.
+        /// The stored quaternion. `init` and `fromAxisAngle` fill it with a
+        /// unit value, but the field is public, so a consumer that assigns to
+        /// it owns the unit-norm invariant from that point on.
         raw: Q,
 
         /// The unit quaternion for `raw`, or `null` when there is none. A
@@ -650,8 +666,9 @@ fn Unit(comptime T: type) type {
         /// quaternion with a single subnormal component and three zeros does
         /// normalize, because folding zeros changes nothing.
         ///
-        /// This is the only documented constructor, and it is the only one that
-        /// validates; see the type comment.
+        /// This is the constructor that maintains the unit-norm invariant: it
+        /// normalizes and validates, and it is the one a caller should use. See
+        /// the type comment for what a consumer owes in return.
         pub fn init(raw: Q) ?Self {
             const value = toArrayOf(Q, raw);
             if (!isFiniteOf(T, value)) return null;
@@ -700,9 +717,9 @@ fn Unit(comptime T: type) type {
         /// the division below corrects the few ulps the two products rounded
         /// away, and it is applied rather than assumed because a quaternion
         /// that drifts from the unit ball drifts out of it faster than a
-        /// pipeline of rotations can measure. A caller that can only reach
-        /// values through `init` never sees the fallback: it is reachable only
-        /// through the struct literal, where there is nothing to correct
+        /// pipeline of rotations can measure. A caller that keeps the unit norm
+        /// never sees the fallback: it is reachable only from a value whose norm
+        /// the caller did not maintain, where there is nothing to correct
         /// towards.
         pub fn mul(self: Self, b: Self) Self {
             const product = self.raw.mul(b.raw);
@@ -725,6 +742,10 @@ fn Unit(comptime T: type) type {
         /// contract names and not a rearranged matrix form. The result has the
         /// same length as `v`: a unit quaternion is a rotation, and the
         /// conjugate is the inverse, so the two products cancel the scale.
+        ///
+        /// The length claim rests on the unit norm, so it holds for a value
+        /// built by `init` or `fromAxisAngle`. A forged non-unit value scales `v`
+        /// by its norm squared and carries no rotation guarantee.
         pub fn rotate(self: Self, v: Vec) Vec {
             const q = self.raw;
             const moved = q.mul(Q.init(v.x, v.y, v.z, 0.0)).mul(q.conjugate());
@@ -735,8 +756,9 @@ fn Unit(comptime T: type) type {
         /// the axis normalized first, so a non-unit axis is accepted. A zero
         /// axis has no direction and gives `null`, as does a non-finite axis or
         /// a non-finite angle. The raw quaternion is built by
-        /// `Quat.fromAxisAngle` and validated by `init`, so this cannot produce
-        /// a value that `init` would have rejected.
+        /// `Quat.fromAxisAngle` and routed through `init`, which normalizes and
+        /// validates, so this cannot produce a value that `init` would have
+        /// rejected.
         pub fn fromAxisAngle(axis: Vec, radians: T) ?Self {
             return init(Q.fromAxisAngle(axis, radians) orelse return null);
         }
@@ -779,9 +801,9 @@ fn Unit(comptime T: type) type {
             const theta = acosOf(T, clampedDotOf(T, d));
             const s = sinOf(T, theta);
             if (s == 0.0) {
-                // Only a value built with the struct literal can make the two
-                // unit directions identical, and then the lerp is the defined
-                // answer rather than a division by a zero sine.
+                // Only a value whose unit norm the caller did not maintain can
+                // make the two directions identical, and then the lerp is the
+                // defined answer rather than a division by a zero sine.
                 return .{ .raw = fromArrayOf(Q, renormalizedOf(T, lerpOf(T, from, to, t))) };
             }
             const left = sinOf(T, (1.0 - t) * theta) / s;
@@ -812,10 +834,10 @@ pub const Quatf = Quat(f32);
 /// A raw `f64` quaternion, the algebra and not a rotation.
 pub const Quatd = Quat(f64);
 
-/// A validated `f32` rotation, an active right-handed rotation of a column
-/// vector.
+/// A `f32` rotation, an active right-handed rotation of a column vector, for a
+/// caller that keeps the unit-norm invariant `init` established.
 pub const UnitQuatf = Unit(f32);
 
-/// A validated `f64` rotation, an active right-handed rotation of a column
-/// vector.
+/// A `f64` rotation, an active right-handed rotation of a column vector, for a
+/// caller that keeps the unit-norm invariant `init` established.
 pub const UnitQuatd = Unit(f64);
