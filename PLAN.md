@@ -26,12 +26,13 @@ Two colocated repositories:
 | Property | Value |
 | --- | --- |
 | Public modules | 9, every path in `API.md` implemented |
-| Top-level operations | 97 |
-| Public root types and module aliases | 25 |
-| Operations accepting `@Vector` | 96 (`nan` does not) |
+| Runtime callable exports at root | 103: 97 `pub fn` plus 6 callable aliases (`fmaximum_mag`, `fminimum_mag`, `fmaximum_num`, `fminimum_num`, `fmaximum_mag_num`, `fminimum_mag_num`) |
+| Root `const` declarations | 25: 9 module re-exports, 10 result types, and those 6 callable aliases |
+| Root names legal as a `@Vector` overload | 96: 90 of the `pub fn` names plus all 6 callable aliases |
+| Root names with no `@Vector` spelling | 7, and it is not `nan` alone: `nan`, plus the six narrowing forms `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, `fsqrt`, whose lane-parallel entry points live in `zmath.vector` as `faddv` and its five siblings |
 | Public `@Vector` entry points | 417 across six modules |
-| Source files under `src/` | 209 |
-| Local tests | 856 |
+| Source files under `src/` | 241: 209 Zig, 27 C, 5 headers, from a complete directory read rather than a capped glob |
+| Local unit tests | 903/903 in both `Debug` and `ReleaseSafe`; the whole-surface optimization round recorded 890/890 in `ReleaseSafe`, and the frozen pre-expansion baseline tree carried 873 |
 
 The vector layer is portable Zig `@Vector`, lowered by the compiler per target.
 There is no SIMD dispatch, no hand-written per-ISA kernel, no runtime CPU
@@ -48,7 +49,7 @@ configure time and by a `_Static_assert` in the generated ABI guard.
 | `quaternion` | `Quatf`, `Quatd`, `UnitQuatf`, `UnitQuatd` | `UnitQuat*` has no `raw()` method: Zig puts fields and decls in one namespace, so a field `raw` and a method `raw` cannot both exist, and Zig has no private fields |
 | `matrix` | `Mat` generic, `Mat2f`..`Mat5d` | Storage is column-major, `at` is row-major, and the `init` literal is row-major. `Mat` is the one sanctioned public generic |
 | `linalg` | `LuMat2f`..`LuMat4d`, `CholeskyMat2f`..`CholeskyMat4d` | Doolittle with partial pivoting; reuses the pivot thresholds `zmath.matrix` publishes rather than declaring a second spelling |
-| `geometry` | 59 types | `PredicatePolicy` is explicit; `adaptive_exact` is exact integer arithmetic on a fixed `[132]u64` limb array |
+| `geometry` | 59 module declarations, of which 48 are concrete types | 59 is the declaration count, not a count of concrete geometry types. The remainder is the `Vector2f`..`Vector4d` and `Bivector4f`/`Bivector4d` aliases and the three enums `PredicatePolicy`, `Sign`, and `ContainedSide`. `PredicatePolicy` is explicit; `adaptive_exact` is exact integer arithmetic on a fixed `[132]u64` limb array |
 | `algebra` | `Cl3`, `Cl4`, `Pga3`, `Pga4`, `Cga3`, `Cga4` in `f` and `d` | Comptime-generated blade product tables; published normalization table; every row implemented |
 
 ## How the work stays correct
@@ -82,31 +83,75 @@ gate
 zig build run
 ```
 
-Last recorded results, all green:
+Earlier whole-surface check receipts; the unit-suite row includes current counts:
 
 | Check | Result |
 | --- | --- |
-| Runtime tests | 856/856 |
-| Runtime gate | passed |
-| House gate invocation | `direnv exec . gate`, or `direnv exec . zig-gate` |
+| Local unit suite | 903/903 in `Debug` and 903/903 in `ReleaseSafe`, qualified profile. The whole-surface optimization round recorded 890/890 in `ReleaseSafe`; that is that round's own number and is kept as history, not as the current one |
+| Demo, `zig build run` | `exp2m1(1.0) = 0x3ff0000000000000` |
+| `zig fmt --check`, 210 files | 0 findings |
+| `zlint -S`, 210 files | 0 errors, 271 warnings, on the baseline tree and the live tree alike |
+| `zbc`, whole tree | selected 210, analyzed 210, failed 0, findings 0, parser Zig-0.16.0, 6 unresolved import lookups |
+| `ziglint`, 210 files | 210 findings, down from 231, with no added finding class |
+| AST check | passed, 210 files, no failures |
+| LSP over the 13 changed files | no issues |
+| House gate | not claimed; see below |
+
+The receipts behind these rows are `final-verification.json`, `final-tests.txt`,
+and `final-demo.txt` in the round's consumer scratch.
+
+The gate is external to this repository and was being revised while this round
+ran. One invocation reached format, build, test, the AST check, and the zlint and
+zbc sections before aborting with a shell parse error; a second reached format,
+build, and test before aborting the same way. Both aborted partway, so no
+completed house gate pass exists for this round. That is a fact about the tool,
+not about this tree: the tool is unrelated global state, was not edited, and was
+not exercised again. The checks are therefore verified standalone, above.
 
 `gate` is the devenv script wrapping `zig-gate`. It runs format, build, test,
 AST check, and three linters. On a host with a `/nix/store` the store script runs
 it directly; on this host there is no `/nix/store` at all, so `.envrc`
 synthesizes a `gate` shim into the gitignored `.devenv/host-bin`.
 
-**The gate truncates its own linter output.** `zig-gate` pipes zbc's findings through `head -30`,
-so any advisory past the thirtieth line is invisible in the gate result. It also counts findings
-with `grep -c 'error('`, which is why a run with warnings still prints "found 0 potential
-issue(s)". Neither number is a reliable census. To get the truth, run the linter directly on the
-whole tree:
+**The gate used to truncate its own linter output.** An earlier `zig-gate`
+piped zbc's findings through `head -30` and counted them with `grep -c 'error('`,
+so an advisory past the thirtieth line could not reach the result and a run
+carrying warnings still printed "found 0 potential issue(s)". Six advisories in
+the accepted scalar kernels went unrecorded for that reason. The tool on this
+host is being revised to per-rule histograms and a warning census, so this is
+history, not a description of it. The durable part is the method: a census comes
+from the tool that produces the findings, over every file, with nothing in
+between. That is why the census below is a whole-tree run, not a wrapper's
+summary.
 
-```text
-direnv exec . zbc src/*.zig 2>&1 | grep -c 'warning('
-```
+The explicit lint census covers all 210 Zig files the project lints: the 209
+under `src/` plus `build.zig`. The 27 C files and 5 headers under `src/` are not
+Zig and are not in that count. The receipts are `full-baseline-ziglint.txt` for
+the frozen pre-expansion tree and `full-live-ziglint.txt` for the live tree.
 
-That is the check to use when the question is "are there any advisories left", and it must be
-zero. Six advisories in the accepted scalar kernels went unrecorded for exactly this reason.
+| Check | Frozen baseline tree | Live tree |
+| --- | --- | --- |
+| `ziglint` findings | 231 | 210 |
+| `zig fmt --check`, 210 files | | 0 findings |
+| `zlint -S`, 210 files | 0 errors, 271 warnings, 398 ms | 0 errors, 271 warnings, 61 ms |
+| `zbc`, whole tree | | exit 0, no `error(` and no `warning(` |
+| AST check | | passed, 210 files; `final-ast-check.json` reports `failures` empty |
+
+No finding class was added. Comparing the two receipts by rule, path, and
+normalized message, every class in the live receipt is one the baseline receipt
+already contained, and 21 findings are gone: 18 long-line rows in
+`src/scalar_power_exact.zig`, which is the `zig fmt` re-wrap of the
+`"binary64 exact arithmetic compareScaled orders shifted integer pairs"` test
+block, and 3 in `src/geometry.zig`.
+
+The 271 `zlint` warnings are the same five rules on both trees, in the same
+counts: `unused-decls` 13, `unsafe-undefined` 246, `no-print` 4, `avoid-as` 5,
+and `suppressed-errors` 3. The two run times above are the linter's own wall
+time on the two trees and say nothing about the library.
+
+The 210 live `ziglint` findings are not zero, so no lint-clean claim is made.
+What the receipts support is narrower, and it is what this file claims: the
+round added no new class of finding and removed 21.
 
 ## Acceptance evidence, re-verified
 
@@ -276,3 +321,467 @@ Its successful replay resolves the selected-coverage and range-engineering steps
 resolve the deferred exhaustive binary32 campaign, which needs explicit user approval.
 The scalar benchmark measured all 347 descriptors and its receipt is retained,
 but a timing is not coverage.
+
+## Renewed execution authorization for this round
+
+The user renewed the execution budget for the optimization round recorded
+below, and the renewal is narrow. It covers exactly this:
+
+- Local `f32` unit and smoke checks run uncapped. The per-operation cap that
+  bounded earlier rounds does not apply to them.
+- Profiling and paired reference measurements are capped at 4,096 actual input
+  evaluations per canonical `f32` operation. That is one budget for the whole
+  round, summed across every consumer, every lane, every version, every
+  repetition, and every reference check. It is not 4,096 apiece.
+- Benchmark mode has `f64` and `f16` only, and runs with no warmup and no
+  calibration.
+
+It does not cover, and does not authorize:
+
+- The deferred exhaustive binary32 campaign. Step 4 above keeps its own wording
+  and its own conditions unchanged, including that the original smoke
+  evaluation budget is exhausted and that further numerical evaluation of
+  binary32 inputs needs explicit user approval. Nothing in this renewal
+  reaches it.
+- A full corpus regeneration, an exhaustive campaign, a cluster run, or the
+  sibling harness's default benchmarks.
+
+The historical accepted corpus evidence in this file is untouched by the
+renewal and remains exactly what it was before the round.
+
+## Whole-surface optimization round: assessment and evidence
+
+The round covered the whole public surface rather than one family, because the
+previous round had already taken the binary64 power path and the question was
+what the rest of the surface still had. The reference tree for every comparison
+is a frozen copy of `src/` taken after that power work and before this round.
+
+### Structural and source assessment
+
+This is a source review of the whole API. A row states what the source does and
+what changed in it. The timing for those changes is the cohort table below, and
+it is per consumer rather than a property of the API. No blanket improvement is
+claimed. "None" means this round's review retained no source candidate, not that
+the unit has been shown unimprovable.
+
+All nine public module paths `API.md` lists appear below. Two units sit outside
+those paths and are carried anyway: the root umbrella that re-exports them, and
+the vendored CORE-MATH C kernels the scalar families call.
+
+| Assessment unit | Source | What the assessment found | Change made |
+| --- | --- | --- | --- |
+| Root umbrella | `src/root.zig` | the 103 callable exports are `pub fn` dispatch lines and `pub const` aliases. A `pub fn` body tests the argument's type and returns the accepted kernel's result, and the test folds at comptime, so the choice of kernel is made when the call is elaborated rather than per call | none |
+| `zmath.ieee` | `src/ieee*.zig` | the representation, successor, and mode-parameterised families. Their contract is exact output bits for every special value, so a change here is measured against that contract and not against a faster spelling. This round's review retained no candidate | none |
+| Vendored CORE-MATH C kernels | `src/*.c`, `src/*.h`, 27 and 5 of them | the upstream kernels the scalar families accept and against which the corpus was generated; they are called, never edited | none |
+| `zmath.scalar` leaf remainder and narrowing | `src/scalar_remainder.zig`, `src/scalar_narrow_common.zig` | a power-of-two divisor in the exact remainder made the chunk loop reproduce a shift and a mask, and the narrowing round-to-nearest test divided a 128-bit numerator by a 128-bit divisor on every call | a closed form for a power-of-two divisor, and a single 64-bit division when the scaled numerator and the divisor both fit in 64 bits, with the nearest-even test comparing against `divisor >> 1` |
+| `zmath.vector`, the portable lane layer | `src/vector*.zig`, 417 entry points across six modules | every lane calls the identical accepted scalar kernel, so this layer owns no arithmetic that a lane-parallel rewrite could replace, and it inherits whatever the scalar families do. The remainder and narrowing work this round took therefore reaches the vector lanes with no vector-side edit. The layer was reviewed against that argument and retained no candidate of its own | none |
+| `zmath.vector` `Vec*` values and `zmath.quaternion` | `src/vector_value.zig`, `src/quaternion.zig` | `lengthOf` in both started the fold at `+0` and spent a whole kernel evaluation folding the first component into it. That evaluation is exactly `|x|` for a non-NaN `x`, and for a NaN it is the operand quieted with its sign and payload intact, which is why `@abs` alone is not the seed: `@abs` leaves a signaling NaN unquieted and the fold is required to quiet it. `unitAxisOf` measured the already-normalized axis to test a length it had itself taken | seed each fold with `quietNaNOf(first)` for a NaN first component and `@abs(first)` otherwise, and divide the axis by the length already computed |
+| `zmath.complex` | `src/complex.zig` | 54 suffixed functions over two concrete types, and not all of them are straight-line: the families carry guard branches and scaled branches for principal-value selection and for rescaling on overflow. This round's review retained no source candidate, which is a statement about the review and not a proof that none exists | none |
+| `zmath.matrix` | `src/matrix.zig` | private determinant and minor helpers took matrices by value; pointer reads make sharing explicit but do not prove that the compiler previously copied them. Gauss-Jordan also updated dead left-block columns | `entryAt`, `minorOf`, `det2`, `det3`, and `cofactorDet` read `*const M`; inverse and multiply keep their value-based signatures. Minors use comptime index maps. Row swaps cover `k..2n`; normalization and elimination cover `k+1..2n`. No allocation or copy-elimination claim follows without IR evidence |
+| `zmath.linalg` | `src/linalg.zig` | Doolittle with partial pivoting and Cholesky carry their own factor and reduction loops over compile-time-fixed sizes, which the compiler already unrolls. That work does not live in the matrix kernels, which were optimized separately in this round. The sparse skips that would shorten those loops would change which IEEE zeros and signs the arithmetic produces, and this library does not make that trade | none |
+| Exact geometry predicates | `src/geometry.zig` | `fromFloat` zero-filled all 132 limbs and then scanned all 132 to find its own two, `Big.mul` walked every row of the left operand, and the degree-four determinant re-converted each stored coordinate once per minor per column | derive the used-limb count from the two limbs just written, scan down from a proved bound in `mul`, `add`, and `sub`, skip a zero left limb, and convert the four points once into a `[4][4]Big` cell grid read through a pointer |
+| `zmath.algebra` | `src/algebra.zig` | `scalarProduct` and the sandwich residue scan each built a complete blade product only to keep its grade-0 part | take the diagonal of the product table directly for `scalarProduct`, and read the scale from the product the sandwich had already built |
+
+`src/scalar_power_exact.zig` differs from the frozen tree only in the line
+wrapping of one test block, which is the `zig fmt` change in the linter section
+and not an optimization unit.
+
+One candidate from this review was implemented, measured, and dropped. Moving
+the quaternion operand NaN scan out of line, as `binaryNaNOf` and `unaryNaNOf`,
+made `rotate` slower in all 9 of 9 alternating pairs, 55.5 against 71.61, and it
+is not in the tree. The restored form measures 57.81 against 61.83 over the same
+cohort, mixed at 3 of 9 pairs. Both numbers are kept: the first is the evidence
+that removed the candidate, the second is what the shipped code does.
+
+Measurement context is not neutral, and this round kept the counterexample. In
+the scoped cohort the axis change measured opposed, 538.75 against 772.62; in the
+whole-surface cohort the same edit measures as a gain, 489.38 against 188.50.
+Same edit, opposite signs, different consumers. The whole-surface number is the
+one that stands in the table below, and it is a gain for those consumers rather
+than a portable guarantee for the API.
+
+### Bounded paired comparison
+
+The behavioural comparison between the frozen tree and the current tree is
+complete, and it is not a timing result.
+
+| Quantity | Value |
+| --- | --- |
+| Consumer slices | all 6 |
+| Calls per version | 3,570 case plus 1,610 sample, 5,180 in total |
+| Declarations compared | 535 |
+| Checksum, shape, status, and declaration differences | 0 |
+
+The binary32 evaluation budget accounts as follows. The first baseline pass
+failed and, before it panicked, conservatively reserved the entire plan for its
+operation rather than a partial count. That failed pass is included below, there
+is no refund, and the reservation is never reset between consumers.
+
+| Quantity | Value |
+| --- | --- |
+| Maximum canonical binary32 evaluations reserved by any operation | 3,939 |
+| Approved cap per canonical binary32 operation | 4,096 |
+| Refunds or per-consumer resets applied | none |
+
+Four wide `Mat.mulVec` shapes carried a constraint in the frozen tree this round
+measured: `1x3` f32, `1x5` f32, `2x3` f32, and `2x3` f64. Each keeps the same label
+and was declared rather than discovered, because in that tree a shape with more
+columns than rows panicked on a `mulVec` that read a row-sized argument. A source
+audit found 17 shape classes in total: those 4 are constrained and 13 run. The
+runtime API was unchanged by that round and `API.md` recorded the defect at the
+time. Every figure in this section belongs to that pre-repair tree. The
+rectangular `mulVec` repair landed after the measurements were taken, so the four
+labels, the 17 shape classes, the 5,180 calls, the 3,570 case and 1,610 sample
+plans, the 535 declarations, the 5,933 plan labels, the 3,939 reserved binary32
+evaluations against the 4,096 cap, and the cohort latencies recorded below stand
+exactly as that round recorded them. They describe the pre-repair tree and are not
+restated for the repaired one.
+
+### Paired measurement receipt
+
+Every measurement recorded under this section shares the round's parameters:
+
+| Parameter | Value |
+| --- | --- |
+| Target | `x86_64-linux-gnu.2.38`, `haswell` |
+| Optimization mode | `ReleaseSafe` |
+| Host | Intel Xeon Gold 6354 |
+| CPU pinning | CPU 0 |
+| Formats under measurement | binary64 and binary16 only |
+| Binary32 kernels in the profile | none, as an input, as a result, or transitively |
+| Warmup and calibration | none |
+| Repetitions | 9 alternating baseline and optimized pairs |
+| Binary32 evaluation budget | 4,096 actual input evaluations per canonical `f32` operation, summed over all consumers, lanes, versions, repetitions, and references |
+| Unit and smoke checks | authorized separately, uncapped |
+
+Binary32 performance is not timed. The approval covers bounded paired
+comparison, and that is what the six consumer slices are.
+
+Median nanoseconds per call. Calls are per version and repetition; every table
+row has zero binary32 profiling evaluations.
+
+| Cohort | Calls | Baseline | Optimized | Latency change | Faster pairs |
+| --- | --- | --- | --- | --- | --- |
+| `fmodd`, low mantissa wide | 2048 | 30.30 | 13.96 | 53.9% lower | 7/9 |
+| `fmodd`, small | 2048 | 20.14 | 17.18 | 14.7% lower | 5/9 |
+| `f16divf64` tie, odd | 2048 | 34.94 | 31.76 | 9.1% lower | 6/9 |
+| `Vec2d.length` | 2048 | 28.54 | 20.64 | 27.7% lower | 8/9 |
+| `Vec3d.normalize` | 2048 | 66.77 | 60.64 | 9.2% lower | 8/9 |
+| `Quatd.fromAxisAngle` | 16 | 489.38 | 188.50 | 61.5% lower | 9/9 |
+| `Quatd.length` | 64 | 100.98 | 91.75 | 9.1% lower | 6/9 |
+| `matrix.inverseMat4d` | 1024 | 215.06 | 194.73 | 9.5% lower | 7/9 |
+| `matrix.determinantMat4d` | 2048 | 66.36 | 67.88 | 2.3% higher | 3/9 |
+| `Point4d.orientation`, exact integer fixture | 256 | 58500.75 | 26830.64 | 54.1% lower | 9/9 |
+| `Cga4d.dot`, dense | 2048 | 4541.36 | 216.22 | 95.2% lower | 9/9 |
+| `Cga4d.inverseChecked`, rotor | 1024 | 713.26 | 416.62 | 41.6% lower | 9/9 |
+
+Three unit-quaternion cohorts moved the other way and are recorded here rather
+than left out: `UnitQuatd.init` 302.06 against 340.19, `UnitQuatd.mul` 84.09
+against 112.31, `UnitQuatd.lerp` 81.19 against 111.25.
+
+The receipt is `final-whole-benchmark-statistics.json` in the round's consumer
+scratch. It covers all 218 cohorts at 9 alternating baseline and optimized pairs,
+and every pair matched on checksum, shape, status, errors, and declarations. The
+final plans carry the same 5,933 labels as the behavioural comparison: 3,570
+case, 1,610 sample, 535 declarations, and 218 benchmark cohorts.
+
+Two limits on reading the table. `complex` and `linalg` are unchanged in source
+this round and still show negative deltas in some cohorts; unchanged source is
+not a claim of unchanged latency, and every cohort that moved or did not is in
+the classification JSON. The frozen baseline already carries the previous
+round's binary64 power work, and none of these deltas is attributed to it.
+
+The behavioural comparison above was taken before the cold-scan out-lining was
+restored. That restoration is not semantic, so the comparison still describes the
+shipped behaviour, and that round's own 890/890 unit run and this binary64
+profile both come after it rather than from a new binary32 run.
+
+## Rectangular `Mat.mulVec` repair
+
+`Mat.mulVec` read a row-sized argument and returned a row-sized result while
+contracting over `columns`, so every shape with more columns than rows indexed past
+the lanes it had read. Those are exactly the four wide shapes the round above had
+to constrain, and the other 13 of the 17 audited shape classes ran only because
+they were tall or square.
+
+The repair makes the argument the column vector the operator already claims to be.
+`Mat(rows, columns, Scalar).mulVec` takes exactly `columns` lanes and returns
+exactly `rows`. The input is a named vector where one matches the column count and
+the entry type, `Vec2f` through `Vec4f` for real `f32` and `Vec2d` through `Vec4d`
+for real `f64`, and a plain `[columns]Scalar` array for every other real column
+count and for every complex column count. `Mat.vector_type` keeps its row-sized
+meaning as the result type, and it is still the right-hand side the square
+`solveLu` and `solveCholesky` callers pass. Square declarations are unchanged by
+this, so no linalg or square oracle call site moved.
+
+The arithmetic did not move with the shape. Each row still seeds from its
+column-zero product and adds the remaining columns in increasing order under strict
+float mode, with no reassociation and no fused multiply-add, and the entry NaN
+kernels are the same ones. The four previously constrained shapes become ordinary
+calls. The old row-sized argument is now a type error rather than a checked-build
+panic, and there is no compatibility overload for it: every caller was migrated in
+place rather than kept working through a shim.
+
+The coverage the repair needed, and now carries, on top of the square cases that
+already passed:
+
+- one hand-computed product per rectangular orientation, wide and tall, compared
+  lane by lane against the printed derivation and not against the implementation
+- the named-vector input path on rectangular shapes with two, three, and four
+  columns, and the plain-array input path on a rectangular shape whose column count
+  has no named vector, in both real formats
+- the complex rectangular path, wide and tall, in both complex formats, which is an
+  array on each side there
+- strict cancellation order and separate multiply/add rounding: strict evaluation
+  gives `+0` where a fused multiply-add gives `-2^-46` in binary32 and `-2^-104`
+  in binary64
+- competing NaN payloads in both real formats: the first-column payload wins,
+  quieted and with its sign preserved
+- type-level rejection of obsolete row-sized rectangular arguments, observed by
+  the compiler rather than at runtime
+
+Post-fix numerical runs use the qualified `x86_64-linux-gnu.2.38` / `haswell`
+profile. Static checks operate on the listed files; the final row records the
+pre-fix compiler failure and its passing post-fix counterpart.
+
+| Check | Result |
+| --- | --- |
+| Focused `zig test src/matrix_test.zig -O ReleaseSafe -target x86_64-linux-gnu.2.38 -mcpu haswell -lc` | 39/39, including the 11 new tests |
+| `zig build test -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=Debug --summary all` | 901/901, 4/4 steps |
+| The same full suite in `ReleaseSafe` | 901/901, 4/4 steps |
+| `zig build run`, same qualified profile | 6/6 steps; `exp2m1(1.0)` prints `0x3ff0000000000000` |
+| `zig fmt --check`, 210 explicit files | 0 |
+| AST check, same 210 files | 0 failures |
+| `zbc`, 210 selected files | 210 analyzed, 0 failed, 0 findings, 6 unresolved import lookups |
+| `zlint` | 0 errors, 271 warnings, same rules and counts as before: `unsafe-undefined` 246, `avoid-as` 5, `unused-decls` 13, `suppressed-errors` 3, `no-print` 4 |
+| `ziglint` legacy findings | the normalized `rule, path, message` multiset is exactly unchanged against the pre-repair live receipt, exit 1 included |
+| LSP on `src/matrix.zig` and `src/matrix_test.zig` | no issues |
+| Runtime grid over real shapes and formats | 54 cases match independent closed-form products; composition `[34, 70]`, checksum 54124 |
+| The `API.md` sample, executed as written | `x = 16, y = 20` |
+| The old `Mat(5, 4, f32)` row-sized argument | compiler-rejected, expected `Vec4f`, found `[5]f32` |
+| Red before the fix, at `src/matrix_test.zig:592` | `expected type 'vector_value.Vec2f', found 'vector_value.Vec3f'`, and that site passing afterward: focused 1/1, then 39/39 |
+
+That last row is the old bug at the type level, and it is a named-type failure
+rather than an array one: the old parameter was `Vec2f`, and the repaired call site
+supplies `Vec3f`.
+
+No completed house-gate wrapper pass is claimed. That wrapper is externally broken,
+was left untouched, and was not rerun; the receipts above are its standalone
+constituents. This repair adds no benchmark, no paired binary32 profiling, no
+corpus, no manifest, and no commit, and it re-measures nothing in the round above:
+the 3,939 reservation, the 4,096 cap, the 5,180 calls, the 5,933 labels, and every
+latency table there still describe the pre-repair tree. Raw receipts and provenance
+are under `/tmp/zmath-rect-mulvec.y8E4Zg/`; the three smoke sources
+and their consumer cache were deleted once the proofs were taken, and the receipts
+were kept. Cleanup deleted no caches outside this repair's scratch directory and
+left shared tooling and the prior optimization receipts in place.
+
+## Post-repair QA and isolated binary64 re-measurement
+
+The round below followed the rectangular `Mat.mulVec` repair. It ran the local
+QA suite against the repaired tree and re-measured the binary64 cohorts the
+whole-surface round had left negative. It changed no published evidence: the
+formal publication at 347 descriptors, the immutable corpus, the oracle, and
+the ten-row non-scalar tranche stand exactly as the sections above record them,
+and no exhaustive, corpus, or cluster campaign was part of it.
+
+### What the local QA found
+
+Four QA programs were built and run against the repaired tree under the same
+qualified profile. Every one of them is green.
+
+| Program | Cases or scenarios | Assertions | Failures |
+| --- | --- | --- | --- |
+| Leaf kernels, `qa_leaf` | 844 cases | 11,252 | 0 |
+| Public values, `qa_values` | 36 cases | 465 | 0 |
+| Exact geometry, `qa_geometry` | 32 cases | 286 | 0 |
+| Algebra, `qa_algebra` | 114 scenarios | 109,574 | 0 |
+
+The geometry program includes an `orient4/maximum_scaled_identity` witness:
+`floatMax(f64)^4`, scaled by the module's `2^4296`, is
+`(2^53 - 1)^4 * 2^8180`, an 8,392-bit integer that needs all 132 limbs of the
+fixed 8,448-bit storage. This is a bounded adversarial case, not exhaustive
+predicate-domain evidence. The program's coverage digest is
+`0x170e840802c9bb96`.
+
+### The one library defect the QA found
+
+The QA found one real, pre-existing library bug: the geometry contained-side
+predicate reported the side opposite to the one asked for. Three tests failed
+on that, and the full suite read 900/903 before the repair. The defect is now
+fixed and the suite reads 903/903 in both `Debug` and `ReleaseSafe`. Two tests
+were added with the repair, so 903 is the 901 the rectangular-repair round
+recorded plus those two.
+
+No other library defect was found by these finite checks. The remaining
+observed failures were in the QA programs' fixtures and were resolved by
+re-deriving them against independent oracles, not by changing the library or
+re-pinning its behaviour.
+
+### Full-suite and static state after the repair
+
+| Check | Result |
+| --- | --- |
+| `zig build test`, `Debug`, qualified profile | 903/903, 4/4 steps |
+| The same full suite in `ReleaseSafe` | 903/903 |
+| `zig build run`, same qualified profile | 6/6 steps, `exp2m1(1.0) = 0x3ff0000000000000` |
+| `zig fmt --check` | exit 0, no output, from the repository root |
+| AST check | 210 files, 0 failures |
+| `zlint` | 0 errors, 271 warnings, unchanged |
+| `ziglint` legacy findings | 210 before and 210 after, added set empty, removed set empty |
+| `zbc` | 210 selected, 210 unique, all passed, 0 findings, 6 unresolved import lookups |
+
+The `zbc` coverage is a complete 210-file sweep assembled as five 30-file groups
+and sixty single-file checks. The broad 210-file command and two of the 30-file
+commands timed out on this host and are not counted as successes. No finding
+was suppressed to reach the zero and no global tool was repaired.
+
+### Isolated paired binary64 re-measurement
+
+The cohort set is the 109 binary64 cohorts the whole-surface round had
+classified negative on either of its two criteria, aggregate reduction or paired
+median. All 109 were re-measured; none was dropped and none was added.
+
+| Parameter | Value |
+| --- | --- |
+| Profile | `x86_64-linux-gnu.2.38` / `haswell` / `ReleaseSafe` |
+| Host and pinning | Intel Xeon Gold 6354, CPU 0 |
+| Cohorts | 109 |
+| Repetitions | 9 alternating baseline and current pairs, pair 1 baseline-first and pair 2 current-first |
+| Validated rows | 1,962, which is 109 cohorts by 2 variants by 9 pairs, one receipt each |
+| Warmup and calibration | none |
+| New binary32 profiling evaluations | 0 |
+| Result contracts against the original receipts | match on every row |
+| Paired input checksums | match on every row |
+
+Classification is descriptive, not inferential. A cohort counts as a consistent
+improvement when the paired median absolute reduction is at least 2% and the
+direction holds in at least 8 of the 9 pairs.
+
+| Classification | Cohorts |
+| --- | --- |
+| Consistent improvement | 12 |
+| Mixed | 97 |
+| Consistent regression | 0 |
+
+The twelve consistent improvements, in median nanoseconds per call:
+
+| Cohort | Baseline | Current | Paired median reduction | Faster pairs |
+| --- | --- | --- | --- | --- |
+| `leaf.bench.fmodd.pow2_wide_gap` | 27.75 | 25.24 | 19.5% | 8/9 |
+| `leaf.bench.remquod.pow2_wide_gap_full_mantissa` | 43.98 | 42.27 | 9.6% | 9/9 |
+| `leaf.bench.f16divf64.underflow_tie` | 46.70 | 42.66 | 8.6% | 8/9 |
+| `bench.vector.hypotdv` | 169.70 | 168.26 | 5.0% | 9/9 |
+| `bench.quaternion.UnitQuatd.init` | 831.63 | 583.44 | 14.1% | 8/9 |
+| `bench.quaternion.UnitQuatd.mul` | 267.66 | 190.75 | 29.8% | 8/9 |
+| `bench.quaternion.UnitQuatd.then` | 471.09 | 405.28 | 7.5% | 9/9 |
+| `bench.quaternion.UnitQuatd.lerp` | 230.81 | 186.22 | 19.3% | 9/9 |
+| `bench/Point2d.orientation/allMaximum/adaptive_exact` | 11202.97 | 10596.93 | 6.4% | 8/9 |
+| `bench.algebra.Cl3d.inverseChecked.motor` | 120.42 | 76.01 | 35.4% | 9/9 |
+| `bench.algebra.Cl4d.inverseChecked.motor` | 403.39 | 337.14 | 15.1% | 8/9 |
+| `bench.algebra.Pga3d.inverseChecked.motor` | 318.07 | 251.54 | 19.0% | 9/9 |
+
+Two limits on reading that. The host is shared and the pairs are finite, so the
+table describes nine alternating pairs on one machine under one qualified
+profile. It is not a portable throughput result and it is not a whole-domain
+accuracy claim. And it is not a causal claim: the round re-measured a tree
+rather than isolating each source change, so a cohort that moved says the tree
+moved on this host, not which edit moved it.
+
+The timed-path comparison is complete.
+Each of the 109 cohorts carries a verdict over 15 named components: the timed
+call's own instruction text and its listing window, the volatile traffic and
+branch text in the basic block containing that call, the callback closure's
+membership and bodies,
+the callback's attribute token union and both body normalizations, the library
+subprograms inlined into the callback and into the timed block, the module's
+attribute, globals and declaration hashes, and the callback's listing text with
+its padding-directive counts. An identity verdict requires all reported
+components to match within the normalization limits below; a single matching
+component is insufficient.
+The block window does not compare the complete loop latch or derive an iteration
+bound. Fixed call counts are checked against the original measurement receipts,
+not inferred from that block's branch.
+
+| Timed-path verdict over the 109 cohorts | Cohorts |
+| --- | --- |
+| All reported comparison components match | 14 |
+| Callback body text changed under both normalizations | 24 |
+| Not proven identical, at least one component unequal | 69 |
+| Symbol identity unresolved, `c053` and `c061` | 2 |
+
+Both analyses report 0 problems across all 109 cohorts, and the fifteen labels
+the core pass carries as the prior consistent-regression set match the prior
+list in the same order. Under this re-measurement those fifteen old consistent
+regressions read 4 consistent improvements and 11 mixed, with no consistent
+regression under the stated criterion.
+
+Four limits on that. A body-text difference is not an arithmetic difference:
+unnamed SSA values are compared as written, so a renumbered temporary reads as a
+change. The assembly evidence is the GNU-assembler listing text, never emitted
+machine bytes, padding the assembler inserts, or symbol sizes in a linked image.
+External C bodies, libc `memcpy` and friends, are declared in these artifacts and
+defined elsewhere, so no verdict here covers a change inside one. And no verdict
+attributes a timing difference to a source change or carries to another target.
+
+The boundary of the comparison is itself evidenced. A constant-only global
+change and an attribute-only change are each detected with an unchanged body
+hash in the same case, and the metadata-expansion recursive cycle cache probe
+passes, with no arithmetic executed to produce any of it.
+
+The receipts are `codegen-comparison.json` for the 109 core comparisons,
+`timed-path-comparison.json` for the exact timed call-site and its basic block,
+callback-closure, inlined-library, globals-and-declarations and
+assembly-listing verdicts, and `regression-conclusions.json` for the aggregate
+and the fifteen prior labels. `codegen-synthetic-evidence.json` carries the
+synthetic boundary proof.
+`isolated-analysis-provenance.tar.zst` retains both analysis producers, the
+boundary reproducer, and its exact fixtures. After extracting it under the
+receipt prefix, run `python3 reproduce_codegen_boundaries.py` there to reproduce
+the eleven boundary checks. The resulting receipt records the command, UTC
+timestamp, Python version, input hashes, and observed comparison hashes.
+
+### Fixture reconstruction, and what was discarded
+
+The isolated measurement of the three geometry cohorts `c092`, `c093`, and
+`c095` was redone after their fixtures were reconstructed from the original
+agent event log rather than from an earlier scratch copy that omitted the final
+correction. The successful source was `WholeGeometryOptimize.jsonl` events 863
+and 865 on the zero-based native event index, which carry the final `unit4`
+normalization, summing over the stored dimension rather than over all four
+components, together with the `mkFlat` normalization.
+
+37 early attempts were discarded rather than kept: 36 rows whose outputs looked
+well formed but whose inputs were the wrong fixtures, and 1 row that failed its
+checksum. They were rejected by the fixture reconstruction contract, not
+treated as warmup or as calibration. The affected cohort indices are 92, 93, and
+95, which is what `fixture-recovery-evidence.json` records, and that file also
+records that the old expected checksums were left unchanged.
+
+No original result was re-pinned. The three cohorts were re-derived from the
+corrected fixtures and then compared against the original receipts, which is
+what the contract-agreement column on all 1,962 validated rows records.
+
+### Budget and what this round did not touch
+
+| Item | Value |
+| --- | --- |
+| New binary32 profiling or paired-reference evaluations | 0 |
+| Prior binary32 reservation | 3,939 against the approved 4,096, unchanged |
+| Local `f32` unit and QA checks | uncapped, and accounted separately from the paired profile |
+| Exhaustive binary32 campaign | not run; step 4 above keeps its own wording and its own conditions |
+| Corpus, manifest, oracle, and cluster changes | none |
+| Formal publication and the non-scalar tranche | 347 descriptors and the ten selected rows, unchanged |
+
+### Raw receipts
+
+Every figure above comes from receipts under the exact prefix
+`/tmp/zmath-qa-perf.dWn4yw/`. The four that carry this section are
+`qa-phase-evidence.json`, `isolated-statistics.json`,
+`isolated-measurement-metadata.json`, and `fixture-recovery-evidence.json`. The
+1,962 per-cohort pair receipts and the sample ledger sit under the same prefix.
+`isolated-artifact-sha256.json` fingerprints the 654 built artifacts.
+`isolated-codegen-evidence.tar.zst` retains the 436 IR and assembly files;
+`evidence-archive-verification.json` records a streaming SHA-256 check of every
+member against that manifest. Owned binaries, build caches and loose scaffolds
+are removed; raw measurements, corrected ledgers and archived provenance remain.
