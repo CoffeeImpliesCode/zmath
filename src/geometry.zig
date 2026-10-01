@@ -3635,7 +3635,7 @@ fn ballIntersect(comptime dim: usize, comptime T: type, first_center: [dim]T, fi
         const touch = arrayAdd(dim, T, first_center, arrayScale(dim, T, unit, first_radius));
         return .{ .point = fromArrayOf(P, touch) };
     }
-    if (tangency.inner == .negative) return .{ .contained = if (first_radius >= second_radius) .first else .second };
+    if (tangency.inner == .negative) return .{ .contained = if (first_radius >= second_radius) .second else .first };
     return .{ .two_points = ballCrossingPoints(dim, T, first_center, first_radius, second_center, second_radius) };
 }
 

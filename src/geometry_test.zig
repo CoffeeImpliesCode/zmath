@@ -706,14 +706,18 @@ test "two circles report every configuration and each one pins to a tag" {
     try expectSign(f64, inner_tangent.point.x, 2.0, 1e-12);
 
     // Concentric with different radii: the smaller lies wholly inside the
-    // larger, so the common set is the whole smaller circle, which is the
-    // argument of the call.
+    // larger, so the common set is the whole smaller circle, which here is
+    // `unit`, the RECEIVER of the call. `ContainedSide` names the operand the
+    // intersection EQUALS by its position in the call, so this one is `first`.
     const big = try g.Circle2d.init(centre, 2.0);
     const concentric = try unit.intersect(big, policy);
     try expectTag(g.Intersection2d, concentric, .contained);
-    try std.testing.expectEqual(g.ContainedSide.second, concentric.contained);
-    // The order of the call flips the side.
-    try std.testing.expectEqual(g.ContainedSide.first, (try big.intersect(unit, policy)).contained);
+    try std.testing.expectEqual(g.ContainedSide.first, concentric.contained);
+    // The order of the call flips the side: now the common set is the
+    // argument, so it is `second`.
+    const reversed = try big.intersect(unit, policy);
+    try expectTag(g.Intersection2d, reversed, .contained);
+    try std.testing.expectEqual(g.ContainedSide.second, reversed.contained);
 
     // Coincident: same centre, same radius.
     try expectTag(g.Intersection2d, try same.intersect(same_again, policy), .coincident);
@@ -766,6 +770,74 @@ test "sphere and hypersphere share the ball classification in their dimensions" 
         try g.Hypersphere4d.init(try g.Point4d.init(9, 0, 0, 0), 1.0),
         policy,
     ), .none);
+}
+
+test "the contained side names the common set itself in a strict enclosure" {
+    // How this was built. The common set of two balls when one lies strictly
+    // inside the other IS the inner ball, whole, so the only question the tag
+    // leaves open is WHICH of the two operands it is, and that is answered by
+    // the position in the call rather than by any comparison the code makes.
+    // Two things keep the fixture from answering that question by accident:
+    //
+    // - The centres are NOT the same, so the pair is classified from a real
+    //   separation instead of the zero-length one a concentric pair has. The
+    //   side answers the same question in both cases, and the two-dimensional
+    //   concentric pair above covers the other one.
+    // - Every number is a small dyadic, and the two tangency comparisons are
+    //   built from the separation squared against the sum and the difference
+    //   squared. Those are `5/16`, `25/16` and `9/16`: all exact in binary32,
+    //   so `fast` and `adaptive_exact` reach the same classification and the
+    //   fixture is not a rounding artefact under either policy. Both
+    //   comparisons are strictly negative with room to spare, so this is a
+    //   strict enclosure and not a tangency or a coincidence.
+    const outer = try g.Sphere3f.init(try g.Point3f.init(0, 0, 0), 1);
+    const inner = try g.Sphere3f.init(try g.Point3f.init(0.5, 0.25, 0), 0.25);
+
+    // The receiver holds the argument, so the whole common set is the
+    // ARGUMENT, and the side is `second`.
+    const holds = try outer.intersect(inner, .fast);
+    try expectTag(g.Intersection3f, holds, .contained);
+    try std.testing.expectEqual(g.ContainedSide.second, holds.contained);
+    const holds_exact = try outer.intersect(inner, .adaptive_exact);
+    try expectTag(g.Intersection3f, holds_exact, .contained);
+    try std.testing.expectEqual(g.ContainedSide.second, holds_exact.contained);
+
+    // Reversed, the receiver is the one wholly inside, so the side is `first`.
+    const inside = try inner.intersect(outer, .fast);
+    try expectTag(g.Intersection3f, inside, .contained);
+    try std.testing.expectEqual(g.ContainedSide.first, inside.contained);
+    const inside_exact = try inner.intersect(outer, .adaptive_exact);
+    try expectTag(g.Intersection3f, inside_exact, .contained);
+    try std.testing.expectEqual(g.ContainedSide.first, inside_exact.contained);
+}
+
+test "a ball of zero radius inside another is the whole common set in either order" {
+    // Zero radius is the boundary of the classification, and it is the case
+    // where a side computed from the radii alone is most likely to go wrong:
+    // the inner ball is a single point, so it is also what an internal
+    // tangency would report, and the common set really is that whole point.
+    // The point is NOT the outer's centre, so the answer cannot fall out of a
+    // zero-length separation: the separation squared is `5/16` against a
+    // squared difference of `4`, both tangency comparisons are strictly
+    // negative, and containment is the only classification left.
+    const containing = try g.Hypersphere4d.init(try g.Point4d.init(0, 0, 0, 0), 2);
+    const dot_ball = try g.Hypersphere4d.init(try g.Point4d.init(0.5, 0, 0, 0.25), 0);
+
+    // The zero-radius ball is the receiver here, so it is `first`.
+    const dot_first = try dot_ball.intersect(containing, .fast);
+    try expectTag(g.Intersection4d, dot_first, .contained);
+    try std.testing.expectEqual(g.ContainedSide.first, dot_first.contained);
+    const dot_first_exact = try dot_ball.intersect(containing, .adaptive_exact);
+    try expectTag(g.Intersection4d, dot_first_exact, .contained);
+    try std.testing.expectEqual(g.ContainedSide.first, dot_first_exact.contained);
+
+    // Reversed, the same point is the argument, so the side is `second`.
+    const dot_second = try containing.intersect(dot_ball, .fast);
+    try expectTag(g.Intersection4d, dot_second, .contained);
+    try std.testing.expectEqual(g.ContainedSide.second, dot_second.contained);
+    const dot_second_exact = try containing.intersect(dot_ball, .adaptive_exact);
+    try expectTag(g.Intersection4d, dot_second_exact, .contained);
+    try std.testing.expectEqual(g.ContainedSide.second, dot_second_exact.contained);
 }
 
 test "a ball against a segment is none, a point, a segment, or the whole segment" {
