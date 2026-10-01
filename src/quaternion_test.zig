@@ -851,6 +851,55 @@ test "the length does not overflow and does not flush a subnormal to zero" {
     try std.testing.expect(@abs(identityf().raw.length() - 1.0) <= unit_tolerance_f);
 }
 
+test "the length quietens a NaN in the first component and keeps its payload" {
+    // The fold seeds itself with the first component instead of folding a
+    // positive zero into it, so that component reaches the special-value rule
+    // by a different route than the other three. Both routes owe the same
+    // answer: the operand with its sign and its payload, and the quiet bit set.
+    // The canonical NaN is the wrong answer for either, because the payload is
+    // the only diagnostic a caller has.
+    const signaling = f32FromBits(snan_f);
+    const negative_signaling = f32FromBits(snan_f | 0x8000_0000);
+    try std.testing.expectEqual(snan_f, bits(f32, Quatf.init(signaling, 1, 1, 1).length()));
+    try std.testing.expectEqual(
+        snan_f | 0x8000_0000,
+        bits(f32, Quatf.init(negative_signaling, 1, 1, 1).length()),
+    );
+    try std.testing.expectEqual(
+        qnan_f,
+        bits(f32, Quatf.init(f32FromBits(qnan_f), 1, 1, 1).length()),
+    );
+    // A NaN in a later component is found by the kernel instead, and it has to
+    // reach the same answer.
+    try std.testing.expectEqual(snan_f, bits(f32, Quatf.init(1, 1, signaling, 1).length()));
+    // An infinite component wins over every later operand, because the fold is
+    // a maximum once one of its operands is unbounded.
+    try std.testing.expectEqual(
+        @as(u32, 0x7f80_0000),
+        bits(f32, Quatf.init(std.math.inf(f32), 1, 1, 1).length()),
+    );
+    // The binary64 fold owes the same, with the wider payload.
+    try std.testing.expectEqual(snan_d, bits(f64, Quatd.init(f64FromBits(snan_d), 1, 1, 1).length()));
+    try std.testing.expectEqual(qnan_d, bits(f64, Quatd.init(f64FromBits(qnan_d), 1, 1, 1).length()));
+    // The case that separates a seed from a plain absolute value: a genuinely
+    // signaling NaN has its quiet bit clear, and the seed has to set it without
+    // touching the sign or the payload. An `@abs` that only cleared the sign
+    // would report the input back, which is not a number the specification
+    // allows a result to be.
+    try std.testing.expectEqual(
+        snan_f,
+        bits(f32, Quatf.init(f32FromBits(0x7f80_0001), 1, 1, 1).length()),
+    );
+    try std.testing.expectEqual(
+        snan_f | 0x8000_0000,
+        bits(f32, Quatf.init(f32FromBits(0xff80_0001), 1, 1, 1).length()),
+    );
+    try std.testing.expectEqual(
+        snan_d,
+        bits(f64, Quatd.init(f64FromBits(0x7ff0_0000_0000_0001), 1, 1, 1).length()),
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Interpolation
 // ---------------------------------------------------------------------------
@@ -1121,6 +1170,59 @@ test "fromAxisAngle rejects an axis or an angle with no direction" {
     // A zero angle is not an error: it is the identity rotation.
     try std.testing.expect(UnitQuatf.fromAxisAngle(Vec3f.init(0, 0, 1), 0.0).?.eq(identityf()));
     try std.testing.expect(UnitQuatf.fromAxisAngle(Vec3f.init(1, 2, 3), 0.0).?.eq(identityf()));
+}
+
+test "the axis accept and reject sets are the length's, not the quotient's" {
+    // A finite axis whose length fold overflows the format has no direction
+    // left, and the raw constructor owes the same answer the validated one
+    // gives, in both precisions.
+    const largest = std.math.floatMax(f32);
+    const largest_d = std.math.floatMax(f64);
+    const overflowing = Vec3f.init(largest, largest, largest);
+    const overflowing_d = Vec3d.init(largest_d, largest_d, largest_d);
+    try std.testing.expect(std.math.isInf(overflowing.length()));
+    try std.testing.expect(std.math.isInf(overflowing_d.length()));
+    try std.testing.expect(Quatf.fromAxisAngle(overflowing, 1.0) == null);
+    try std.testing.expect(Quatd.fromAxisAngle(overflowing_d, 1.0) == null);
+    try std.testing.expect(UnitQuatf.fromAxisAngle(overflowing, 1.0) == null);
+    try std.testing.expect(UnitQuatd.fromAxisAngle(overflowing_d, 1.0) == null);
+
+    // At the other end, an axis of subnormals is a direction and not a
+    // rejection: the fold cannot scale a subnormal, so the length it reports is
+    // a small multiple of the last place rather than the exact norm, but it is
+    // finite and nonzero and the quotient is a positive multiple of the axis.
+    const smallest = subnormal_f;
+    const tiny = Vec3f.init(smallest, smallest, smallest);
+    try std.testing.expect(std.math.isFinite(tiny.length()));
+    try std.testing.expect(tiny.length() > 0.0);
+    const tiny_raw = Quatf.fromAxisAngle(tiny, 0.5).?;
+    // The axis is (1, 1, 1), so one factor scales all three vector components
+    // and the scalar component is the cosine of the half angle.
+    try std.testing.expect(tiny_raw.x > 0.0);
+    try std.testing.expectEqual(bits(f32, tiny_raw.x), bits(f32, tiny_raw.y));
+    try std.testing.expectEqual(bits(f32, tiny_raw.y), bits(f32, tiny_raw.z));
+    try std.testing.expect(tiny_raw.w > 0.0);
+    try std.testing.expect(tiny_raw.isFinite());
+
+    // A single subnormal component is already a direction, and folding a zero
+    // into the length changes nothing, so there the quotient is exactly one.
+    const single = Vec3f.init(smallest, 0, 0);
+    try std.testing.expectEqual(smallest, single.length());
+    const axial = Quatf.fromAxisAngle(single, 0.5).?;
+    try std.testing.expect(axial.x > 0.0 and axial.w > 0.0);
+    try std.testing.expectEqual(@as(u32, 0), bits(f32, axial.y));
+    try std.testing.expectEqual(@as(u32, 0), bits(f32, axial.z));
+    // The binary64 constructor rejects and accepts the same axes.
+    const smallest_d = subnormal_d;
+    const tiny_d = Vec3d.init(smallest_d, smallest_d, smallest_d);
+    try std.testing.expect(std.math.isFinite(tiny_d.length()));
+    try std.testing.expect(tiny_d.length() > 0.0);
+    try std.testing.expect(Quatd.fromAxisAngle(tiny_d, 0.5).?.isFinite());
+
+    // A unit axis passes through the same division unchanged, which is what
+    // makes the ordinary case a copy and not a rounding.
+    try std.testing.expectEqual([3]f32{ 0, 0, 1 }, Vec3f.init(0, 0, 1).normalize().toArray());
+    try std.testing.expect(UnitQuatf.fromAxisAngle(Vec3f.init(0, 0, 1), 0.5) != null);
 }
 
 // ---------------------------------------------------------------------------

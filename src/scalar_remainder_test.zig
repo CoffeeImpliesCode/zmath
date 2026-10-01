@@ -363,6 +363,142 @@ test "extreme exponent gaps preserve low quotient bits and signed subnormals" {
     try std.testing.expectEqual(@as(i32, 0), zero_quotient.quotient);
 }
 
+test "power-of-two divisors keep the masked remainder and the quotient low bits" {
+    const one = common.D.fromBits(0x3ff0_0000_0000_0000);
+    const two = common.D.fromBits(0x4000_0000_0000_0000);
+    const one_and_a_half = common.D.fromBits(0x3ff8_0000_0000_0000);
+    const two_and_a_half = common.D.fromBits(0x4004_0000_0000_0000);
+    const three = common.D.fromBits(0x4008_0000_0000_0000);
+
+    // 1.5 and 2.5 leave exactly half the divisor, so only the parity of the
+    // retained quotient decides the nearest-even direction.
+    try expectBits(common.D, 0x3fe0_0000_0000_0000, remainder.fmodd(one_and_a_half, one));
+    const odd_half = remainder.remquod(one_and_a_half, one);
+    try expectBits(common.D, 0xbfe0_0000_0000_0000, odd_half.value);
+    try std.testing.expectEqual(@as(i32, 2), odd_half.quotient);
+
+    const even_half = remainder.remquod(two_and_a_half, one);
+    try expectBits(common.D, 0x3fe0_0000_0000_0000, even_half.value);
+    try std.testing.expectEqual(@as(i32, 2), even_half.quotient);
+
+    const halved = remainder.remquod(two_and_a_half, two);
+    try expectBits(common.D, 0x3fe0_0000_0000_0000, halved.value);
+    try std.testing.expectEqual(@as(i32, 1), halved.quotient);
+
+    const three_over_two = remainder.remquod(three, two);
+    try expectBits(common.D, 0xbff0_0000_0000_0000, three_over_two.value);
+    try std.testing.expectEqual(@as(i32, 2), three_over_two.quotient);
+    try expectBits(common.D, 0x3ff0_0000_0000_0000, remainder.fmodd(three, two));
+
+    // Truncating reduction keeps the sign of the dividend. The nearest-even
+    // reduction takes whatever sign the selected multiple leaves behind:
+    // -1.5 against 1.0 is -2 * 1.0 + 0.5, and against -1.0 it is 2 * -1.0 + 0.5,
+    // so both nearest-even remainders are positive while the quotient sign is
+    // the one the exact ratio has.
+    try expectBits(common.D, 0xbfe0_0000_0000_0000, remainder.fmodd(-one_and_a_half, one));
+    const negative_ratio = remainder.remquod(-one_and_a_half, one);
+    try expectBits(common.D, 0x3fe0_0000_0000_0000, negative_ratio.value);
+    try std.testing.expectEqual(@as(i32, -2), negative_ratio.quotient);
+    const matching_signs = remainder.remquod(-one_and_a_half, -one);
+    try expectBits(common.D, 0x3fe0_0000_0000_0000, matching_signs.value);
+    try std.testing.expectEqual(@as(i32, 2), matching_signs.quotient);
+
+    // (2^52 + 3) * 2^k against 1.0 is an exact multiple: the remainder is zero
+    // and the quotient keeps the three low bits that the shift moves up.
+    inline for (.{
+        .{ .bits = 0x4330_0000_0000_0003, .quotient = 3 },
+        .{ .bits = 0x4340_0000_0000_0003, .quotient = 6 },
+        .{ .bits = 0x4350_0000_0000_0003, .quotient = 4 },
+        .{ .bits = 0x4360_0000_0000_0003, .quotient = 0 },
+    }) |case| {
+        const dividend = common.D.fromBits(case.bits);
+        try expectBits(common.D, 0, remainder.fmodd(dividend, one));
+        try expectBits(common.D, 0, remainder.remainderd(dividend, one));
+        const exact = remainder.remquod(dividend, one);
+        try expectBits(common.D, 0, exact.value);
+        try std.testing.expectEqual(@as(i32, case.quotient), exact.quotient);
+    }
+
+    // The widest exponent gap still reduces to an exact zero remainder.
+    const maximum = common.D.fromBits(0x7fef_ffff_ffff_ffff);
+    try expectBits(common.D, 0, remainder.fmodd(maximum, one));
+    const maximum_exact = remainder.remquod(maximum, one);
+    try expectBits(common.D, 0, maximum_exact.value);
+    try std.testing.expectEqual(@as(i32, 0), maximum_exact.quotient);
+
+    // A subnormal power-of-two divisor keeps the dividend bits below its width,
+    // and three halves of that width is the exact half the parity rounds away.
+    const least_denormal = common.D.fromBits(0x0000_0000_0000_0001);
+    const two_denormals = common.D.fromBits(0x0000_0000_0000_0002);
+    const three_denormals = common.D.fromBits(0x0000_0000_0000_0003);
+    const four_denormals = common.D.fromBits(0x0000_0000_0000_0004);
+    try expectBits(common.D, 0x0000_0000_0000_0001, remainder.fmodd(three_denormals, two_denormals));
+    const denormal_half = remainder.remquod(three_denormals, two_denormals);
+    try expectBits(common.D, 0x8000_0000_0000_0001, denormal_half.value);
+    try std.testing.expectEqual(@as(i32, 2), denormal_half.quotient);
+    const exact_multiple = remainder.remquod(two_denormals, least_denormal);
+    try expectBits(common.D, 0, exact_multiple.value);
+    try std.testing.expectEqual(@as(i32, 2), exact_multiple.quotient);
+    try expectBits(common.D, 0, remainder.fmodd(three, four_denormals));
+}
+
+test "binary16 and binary32 power-of-two divisors keep the same reductions" {
+    const h_one = common.H.fromBits(0x3c00);
+    const h_two = common.H.fromBits(0x4000);
+    try expectBits(common.H, 0x3800, remainder.fmodh(common.H.fromBits(0x3e00), h_one));
+    const h_half = remainder.remquoh(common.H.fromBits(0x3e00), h_one);
+    try expectBits(common.H, 0xb800, h_half.value);
+    try std.testing.expectEqual(@as(i32, 2), h_half.quotient);
+    const h_three_over_two = remainder.remquoh(common.H.fromBits(0x4200), h_two);
+    try expectBits(common.H, 0xbc00, h_three_over_two.value);
+    try std.testing.expectEqual(@as(i32, 2), h_three_over_two.quotient);
+    try expectBits(common.H, 0x3c00, remainder.fmodh(common.H.fromBits(0x4200), h_two));
+
+    // 65504 is 2047 * 2^5, so the gap against 1.0 exhausts the quotient bits.
+    const h_wide = remainder.remquoh(common.H.fromBits(0x7bff), h_one);
+    try expectBits(common.H, 0, h_wide.value);
+    try std.testing.expectEqual(@as(i32, 0), h_wide.quotient);
+    try expectBits(common.H, 0, remainder.fmodh(common.H.fromBits(0x7bff), h_one));
+
+    const h_least = common.H.fromBits(0x0001);
+    const h_two_subnormal = common.H.fromBits(0x0002);
+    const h_three_subnormal = common.H.fromBits(0x0003);
+    try expectBits(common.H, 0x0001, remainder.fmodh(h_three_subnormal, h_two_subnormal));
+    const h_denormal_half = remainder.remquoh(h_three_subnormal, h_two_subnormal);
+    try expectBits(common.H, 0x8001, h_denormal_half.value);
+    try std.testing.expectEqual(@as(i32, 2), h_denormal_half.quotient);
+    const h_exact = remainder.remquoh(h_three_subnormal, h_least);
+    try expectBits(common.H, 0, h_exact.value);
+    try std.testing.expectEqual(@as(i32, 3), h_exact.quotient);
+
+    const f_one = common.F.fromBits(0x3f80_0000);
+    const f_two = common.F.fromBits(0x4000_0000);
+    try expectBits(common.F, 0x3f00_0000, remainder.fmodf(common.F.fromBits(0x3fc0_0000), f_one));
+    const f_half = remainder.remquof(common.F.fromBits(0x3fc0_0000), f_one);
+    try expectBits(common.F, 0xbf00_0000, f_half.value);
+    try std.testing.expectEqual(@as(i32, 2), f_half.quotient);
+    const f_three_over_two = remainder.remquof(common.F.fromBits(0x4040_0000), f_two);
+    try expectBits(common.F, 0xbf80_0000, f_three_over_two.value);
+    try std.testing.expectEqual(@as(i32, 2), f_three_over_two.quotient);
+    try expectBits(common.F, 0x3f80_0000, remainder.fmodf(common.F.fromBits(0x4040_0000), f_two));
+
+    const f_wide = remainder.remquof(common.F.fromBits(0x7f7f_ffff), f_one);
+    try expectBits(common.F, 0, f_wide.value);
+    try std.testing.expectEqual(@as(i32, 0), f_wide.quotient);
+    try expectBits(common.F, 0, remainder.fmodf(common.F.fromBits(0x7f7f_ffff), f_one));
+
+    const f_least = common.F.fromBits(0x0000_0001);
+    const f_two_subnormal = common.F.fromBits(0x0000_0002);
+    const f_three_subnormal = common.F.fromBits(0x0000_0003);
+    try expectBits(common.F, 0x0000_0001, remainder.fmodf(f_three_subnormal, f_two_subnormal));
+    const f_denormal_half = remainder.remquof(f_three_subnormal, f_two_subnormal);
+    try expectBits(common.F, 0x8000_0001, f_denormal_half.value);
+    try std.testing.expectEqual(@as(i32, 2), f_denormal_half.quotient);
+    const f_exact = remainder.remquof(f_three_subnormal, f_least);
+    try expectBits(common.F, 0, f_exact.value);
+    try std.testing.expectEqual(@as(i32, 3), f_exact.quotient);
+}
+
 test "remainder public signatures use shared RemquoResult" {
     comptime {
         std.debug.assert(@TypeOf(remainder.fmodh) == fn (f16, f16) f16);

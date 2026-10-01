@@ -350,11 +350,23 @@ fn cross3Of(comptime V: type, a: V, b: V) V {
 /// both directions. Nesting the kernel is not correctly rounded for three or
 /// four components; it is the accepted kernel applied again, never a
 /// re-derived polynomial.
+///
+/// The first component enters the fold as the value the kernel would have
+/// returned for `hypot(+0, x)`, which is that value exactly: a NaN comes back
+/// with its sign and payload and its quiet bit set, an infinity comes back
+/// positive, and every other value comes back as `|x|`. For finite `x`, binary32
+/// uses an exact wider-format square and root; binary64 returns the magnitude
+/// bits when the smaller operand is zero. Both routes are exact. The remaining
+/// fold is unchanged, and
+/// it still decides an infinity against a later signaling or quiet NaN by the
+/// kernel's own rules, in the kernel's own order.
 fn lengthOf(comptime V: type, a: V) Component(V) {
     const T = Component(V);
-    var accumulator: T = 0.0;
-    inline for (toArrayOf(V, a)) |component| {
-        accumulator = hypotOf(T, accumulator, component);
+    const width = comptime componentCount(V);
+    const first = @field(a, component_names[0]);
+    var accumulator: T = if (std.math.isNan(first)) quietNaNOf(T, first) else @abs(first);
+    inline for (1..width) |index| {
+        accumulator = hypotOf(T, accumulator, @field(a, component_names[index]));
     }
     return accumulator;
 }

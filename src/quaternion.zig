@@ -266,15 +266,31 @@ fn dotOf(comptime T: type, a: [4]T, b: [4]T) T {
     return sum;
 }
 
-/// The Euclidean length, folded through the accepted `hypot` kernel from a
-/// positive zero. The fold cannot overflow while a single component cannot,
-/// and it cannot flush a representable norm to zero, which
-/// `sqrt(x*x + y*y + z*z + w*w)` does in both directions. Nesting the kernel is
-/// not correctly rounded for four components; it is the accepted kernel
-/// applied again, never a re-derived polynomial.
+/// The Euclidean length, folded through the accepted `hypot` kernel. The fold
+/// cannot overflow while a single component cannot, and it cannot flush a
+/// representable norm to zero, which `sqrt(x*x + y*y + z*z + w*w)` does in both
+/// directions. Nesting the kernel is not correctly rounded for four
+/// components; it is the accepted kernel applied again, never a re-derived
+/// polynomial.
+///
+/// The fold is seeded with the first component, which is the value
+/// `hypot(+0, x)` returns for it anyway, so the seed drops a kernel call the
+/// fold would otherwise have made. The two formats get there by different
+/// routes, and the seed has to match both. In binary32 an infinite component
+/// takes the special path, which answers `+inf`, and on the ordinary finite
+/// path the square of `+0` is `+0`, the square of `x` is exact in binary64
+/// because a 24-bit significand squared still fits, the root of an exact square
+/// is exact there, and the narrowing back to binary32 is exact, so every exit
+/// returns `|x|`. In binary64 there is no wider format and no narrowing: the
+/// kernel puts the smaller magnitude first, a `+0` operand makes that magnitude
+/// zero, and it returns the larger magnitude's bits outright, with no square and
+/// no root. For a NaN the special path answers the operand quieted, its sign
+/// and payload intact, which is the value the seed below builds; `@abs` alone
+/// would be wrong there, because it does not quiet and the fold is required to.
 fn lengthOf(comptime T: type, a: [4]T) T {
-    var accumulator: T = 0.0;
-    inline for (0..4) |index| {
+    const first = a[0];
+    var accumulator: T = if (std.math.isNan(first)) quietNaNOf(T, first) else @abs(first);
+    inline for (1..4) |index| {
         accumulator = hypotOf(T, accumulator, a[index]);
     }
     return accumulator;
@@ -397,15 +413,23 @@ fn Vec3Of(comptime T: type) type {
     };
 }
 
-/// The unit direction of `axis`, or `null` when the axis has none. A component
-/// that overflows the format has no representable direction left once the
-/// length is taken, and comes back as zeros, so one zero-length test covers
-/// both ways of having no axis.
+/// The unit direction of `axis`, or `null` when the axis has none.
+///
+/// The length is taken once and the components are divided by it, which is the
+/// same quotient `normalize` forms, because `normalize` divides by that same
+/// length. Measuring the quotient afterwards, as an earlier spelling of this
+/// did, folds the kernel over the axis a second time to decide something the
+/// length already decided. Two lengths are the only outcomes: zero, which is
+/// a vector of signed zeros with no direction, and a length that overflowed
+/// the format, which is the answer the old form also reached, by dividing a
+/// finite axis down to signed zeros and measuring those. A finite nonzero
+/// length cannot leave the quotient at zero either, because some component is
+/// at least `length / sqrt(3)`.
 fn unitAxisOf(comptime T: type, axis: Vec3Of(T)) ?Vec3Of(T) {
     if (!axis.isFinite()) return null;
-    const direction = axis.normalize();
-    if (direction.length() == 0.0) return null;
-    return direction;
+    const length = axis.length();
+    if (length == 0.0 or !std.math.isFinite(length)) return null;
+    return axis.divScalar(length);
 }
 
 /// The dot product above which `slerp` stops following the great circle. Below

@@ -723,6 +723,203 @@ test "the determinant of a singular Mat4d is far below its entry scale" {
 }
 
 // ---------------------------------------------------------------------------
+// The cofactor expansion against an exact oracle
+// ---------------------------------------------------------------------------
+
+/// The exact determinant of a small integer square matrix, by the Leibniz sum.
+///
+/// This is an ORACLE and not a second implementation of the library. It works
+/// in `i64` with no floating-point step at all, and it enumerates the 120
+/// permutations of a 5 by 5 where the library expands cofactors, so it shares
+/// no index mapping, no sign rule and no accumulation order with
+/// `Mat.determinant`. An entry read from the wrong row or column, a sign
+/// applied to the wrong term, or a different way of walking the minors all
+/// produce a different number here.
+fn exactDet(comptime n: usize, m: [n][n]i64) i64 {
+    var used = [_]bool{false} ** n;
+    return leibnizTerm(n, m, 0, 1, &used);
+}
+
+/// One row of the Leibniz enumeration: the running product with the parity of
+/// the partial permutation chosen so far applied to it.
+fn leibnizTerm(
+    comptime n: usize,
+    m: [n][n]i64,
+    row: usize,
+    acc: i64,
+    used: *[n]bool,
+) i64 {
+    if (row == n) return acc;
+    var total: i64 = 0;
+    for (0..n) |column| {
+        if (used[column]) continue;
+        // Every row already chosen that sits to the RIGHT of `column` forms an
+        // inversion with it, so the parity falls out of the enumeration and no
+        // separate permutation has to be counted.
+        var to_right: usize = 0;
+        for (0..n) |other| {
+            if (used[other] and other > column) to_right += 1;
+        }
+        const signed = if (to_right % 2 == 1) -acc else acc;
+        used[column] = true;
+        total += leibnizTerm(n, m, row + 1, signed * m[row][column], used);
+        used[column] = false;
+    }
+    return total;
+}
+
+test "the size-four and size-five determinants equal an exact integer oracle" {
+    // Every entry of every fixture below is an integer of magnitude at most
+    // FOUR. That bound is set by the repeated-row fixture, which carries a 4,
+    // and it is the bound the exactness argument is made against. Every partial
+    // product of the expansion is an integer below `4^5 = 1024` and every
+    // partial sum is below `5! * 4^5 = 122880`, so every value the expansion
+    // forms is an exact integer in binary32 as well as in binary64, whose
+    // largest exactly representable integers are `2^24` and `2^53`. The
+    // expansion therefore has nothing to round, and the comparisons below are
+    // equalities rather than tolerances. A larger entry would silently weaken
+    // the whole test, which is why the bound is part of the fixture choice and
+    // not an afterthought.
+    const four_dense = [4][4]i64{
+        .{ 2, -1, 3, 0 },
+        .{ 1, 2, 0, -3 },
+        .{ -2, 0, 1, 2 },
+        .{ 3, -2, 1, 1 },
+    };
+    // Rows 0 and 1 are equal, so the determinant is zero as a fact about the
+    // numbers. The exact zero is what catches a minor that keeps the wrong row.
+    const four_repeat = [4][4]i64{
+        .{ 1, 2, 3, 4 },
+        .{ 1, 2, 3, 4 },
+        .{ -1, 0, 2, 1 },
+        .{ 3, -3, 1, 2 },
+    };
+    // A zero column forces an exact zero determinant. This boundary fixture
+    // does not distinguish a permutation of the dropped-column minors.
+    const four_zero_column = [4][4]i64{
+        .{ 1, -2, 3, 0 },
+        .{ 0, 1, 2, 0 },
+        .{ 3, 1, 1, 0 },
+        .{ -1, 2, -3, 0 },
+    };
+    const five_dense = [5][5]i64{
+        .{ 2, -1, 3, 0, 1 },
+        .{ 1, 2, 0, -3, 2 },
+        .{ -2, 0, 1, 2, -1 },
+        .{ 3, -2, 1, 1, 3 },
+        .{ 0, 1, -2, 2, 1 },
+    };
+    // Columns 1 and 3 are equal, so the determinant is zero again, and this
+    // time the repetition is in the COLUMN the expansion indexes by, which is
+    // the axis a transposed implementation would get wrong.
+    const five_repeat_column = [5][5]i64{
+        .{ 2, -1, 2, -1, 1 },
+        .{ 1, 2, 1, 2, -3 },
+        .{ -2, 0, -2, 0, 1 },
+        .{ 3, -2, 3, -2, 3 },
+        .{ 0, 1, 0, 1, 1 },
+    };
+    // Upper triangular with a negative diagonal, whose determinant is the
+    // product `(-1) * 2 * (-3) * 1 * 2 = 12` by hand, and whose minors are full
+    // of the zeros a sparsity shortcut would have to keep.
+    const five_triangular = [5][5]i64{
+        .{ -1, 2, -1, 3, 0 },
+        .{ 0, 2, 1, -2, 1 },
+        .{ 0, 0, -3, 1, 2 },
+        .{ 0, 0, 0, 1, -1 },
+        .{ 0, 0, 0, 0, 2 },
+    };
+
+    // The triangular fixture's determinant is a fact about the numbers: it is
+    // the product of the diagonal, `(-1) * 2 * (-3) * 1 * 2 = 12`, and its off
+    // diagonal entries are non-zero on purpose so an implementation that only
+    // works on a triangular matrix cannot pass. The oracle agrees, and the
+    // library then has to agree with both, so this row is pinned without
+    // leaning on the oracle alone.
+    try testing.expectEqual(@as(f64, 12), @as(f64, @floatFromInt(exactDet(5, five_triangular))));
+    try testing.expectEqual(@as(f64, 12), matrix.determinantMat5d(Mat5d.init(.{
+        .{ -1, 2, -1, 3, 0 },
+        .{ 0, 2, 1, -2, 1 },
+        .{ 0, 0, -3, 1, 2 },
+        .{ 0, 0, 0, 1, -1 },
+        .{ 0, 0, 0, 0, 2 },
+    })));
+
+    // The binary64 names, against the same oracle, one matrix at each size and
+    // each degeneracy the expansion can meet.
+    try testing.expectEqual(
+        @as(f64, @floatFromInt(exactDet(4, four_dense))),
+        matrix.determinantMat4d(Mat4d.init(.{
+            .{ 2, -1, 3, 0 },
+            .{ 1, 2, 0, -3 },
+            .{ -2, 0, 1, 2 },
+            .{ 3, -2, 1, 1 },
+        })),
+    );
+    try testing.expectEqual(
+        @as(f64, @floatFromInt(exactDet(4, four_repeat))),
+        matrix.determinantMat4d(Mat4d.init(.{
+            .{ 1, 2, 3, 4 },
+            .{ 1, 2, 3, 4 },
+            .{ -1, 0, 2, 1 },
+            .{ 3, -3, 1, 2 },
+        })),
+    );
+    try testing.expectEqual(
+        @as(f64, @floatFromInt(exactDet(4, four_zero_column))),
+        matrix.determinantMat4d(Mat4d.init(.{
+            .{ 1, -2, 3, 0 },
+            .{ 0, 1, 2, 0 },
+            .{ 3, 1, 1, 0 },
+            .{ -1, 2, -3, 0 },
+        })),
+    );
+    try testing.expectEqual(
+        @as(f64, @floatFromInt(exactDet(5, five_dense))),
+        matrix.determinantMat5d(Mat5d.init(.{
+            .{ 2, -1, 3, 0, 1 },
+            .{ 1, 2, 0, -3, 2 },
+            .{ -2, 0, 1, 2, -1 },
+            .{ 3, -2, 1, 1, 3 },
+            .{ 0, 1, -2, 2, 1 },
+        })),
+    );
+    try testing.expectEqual(
+        @as(f64, @floatFromInt(exactDet(5, five_repeat_column))),
+        matrix.determinantMat5d(Mat5d.init(.{
+            .{ 2, -1, 2, -1, 1 },
+            .{ 1, 2, 1, 2, -3 },
+            .{ -2, 0, -2, 0, 1 },
+            .{ 3, -2, 3, -2, 3 },
+            .{ 0, 1, 0, 1, 1 },
+        })),
+    );
+
+    // The binary32 names, where the same bound has to hold in 24 bits rather
+    // than 53. Both sizes are covered because the size-5 form is the deepest
+    // recursion the module reaches and the one with the most partial sums.
+    try testing.expectEqual(
+        @as(f32, @floatFromInt(exactDet(4, four_dense))),
+        matrix.determinantMat4f(Mat4f.init(.{
+            .{ 2, -1, 3, 0 },
+            .{ 1, 2, 0, -3 },
+            .{ -2, 0, 1, 2 },
+            .{ 3, -2, 1, 1 },
+        })),
+    );
+    try testing.expectEqual(
+        @as(f32, @floatFromInt(exactDet(5, five_dense))),
+        matrix.determinantMat5f(Mat5f.init(.{
+            .{ 2, -1, 3, 0, 1 },
+            .{ 1, 2, 0, -3, 2 },
+            .{ -2, 0, 1, 2, -1 },
+            .{ 3, -2, 1, 1, 3 },
+            .{ 0, 1, -2, 2, 1 },
+        })),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Inverse
 // ---------------------------------------------------------------------------
 
@@ -985,6 +1182,161 @@ test "the size-four and size-three inverses invert their own matrices" {
         .{ 2, 4, 6 },
         .{ 1, 1, 1 },
     })) == null);
+}
+
+/// The bits of a `f32` or `f64`, widened to a common width, for a comparison
+/// that has to see past `==`.
+fn floatBits(comptime T: type, value: T) u64 {
+    return switch (@bitSizeOf(T)) {
+        32 => @as(u64, @as(u32, @bitCast(value))),
+        64 => @bitCast(value),
+        else => @compileError("floatBits is for a binary32 or a binary64"),
+    };
+}
+
+/// Equality on a float that is exact EXCEPT that `+0` and `-0` are the same
+/// number, and reports a mismatch by its bits.
+///
+/// The relaxation is one property, and it is derived rather than observed.
+/// Every non-zero entry of the two fixtures below is a dyadic rational that
+/// binary32 and binary64 both hold exactly, and the reductions run in exact
+/// arithmetic, so for those entries this test and a bit comparison are the same
+/// test. What a bit comparison would add is the SIGN of a zero entry, and that
+/// follows only from which pivot a zero was divided by: both fixtures have a
+/// pivot of `-1/2` at step 1, the pivot row's zero entries are normalized by it,
+/// and IEEE answers `+0 / -1/2 = -0`. Nothing in the contract gives a zero a
+/// sign, `0.0 == -0.0` is what a caller compares, and the module's own
+/// accumulation-order comment is about which zeros SURVIVE a contraction, not
+/// about their sign. Everything else still has to match to the last bit,
+/// including a NaN, which `==` alone would report only as "not equal".
+fn expectSameNumber(comptime T: type, expected: T, actual: T) !void {
+    if (expected == actual) return;
+    try testing.expectEqual(floatBits(T, expected), floatBits(T, actual));
+}
+
+test "every inverse settles each column once, and the two exact fixtures pin the values" {
+    // The reduction writes each entry of the working row several times: once
+    // when its own step normalizes the pivot row, once for each step below it
+    // that eliminates its column. What makes a shorter sweep legal is that the
+    // LAST of those writes is the only one a later step or the result ever
+    // reads, so the earlier ones are not observable. Both fixtures below are
+    // dyadic and every quotient in them is exact, so the reduction runs in
+    // exact arithmetic and its answer is the one the derivations give, bit for
+    // bit. A sweep that kept a column one step too long, stopped one step too
+    // early, or interchanged the wrong row changes at least one of these bits.
+
+    //     [ 1  0    0  0 ]        x0 = b0
+    //     [ 2  1    0  0 ]        x1 = b1 - 2 b0
+    //     [ 0  1/2  1  0 ]        x2 = b2 - (b1 - 2 b0)/2 = b0 - b1/2 + b2
+    //     [ 0  0    1/2 1 ]       x3 = b3 - (b0 - b1/2 + b2)/2
+    //                              = -b0/2 + b1/4 - b2/2 + b3
+    //
+    // Step 0 MUST interchange, because 2 is below the 1 on the diagonal. That
+    // is the whole of the single-interchange case: after it the pivots are
+    // 1/2, 1 and 1 and each step has one multiplier.
+    const one_swap = Mat4d.init(.{
+        .{ 1, 0, 0, 0 },
+        .{ 2, 1, 0, 0 },
+        .{ 0, 0.5, 1, 0 },
+        .{ 0, 0, 0.5, 1 },
+    });
+    const one_swap_expected = Mat4d.init(.{
+        .{ 1, 0, 0, 0 },
+        .{ -2, 1, 0, 0 },
+        .{ 1, -0.5, 1, 0 },
+        .{ -0.5, 0.25, -0.5, 1 },
+    });
+    const one_swap_inverse = matrix.inverseMat4d(one_swap) orelse return error.TestUnexpectedResult;
+    for (0..4) |row| {
+        for (0..4) |column| {
+            try expectSameNumber(
+                f64,
+                one_swap_expected.at(row, column),
+                one_swap_inverse.at(row, column),
+            );
+        }
+    }
+    // The product is exact for the same reason, and it comes from a different
+    // kernel: `mul` knows nothing about pivots or interchanges.
+    const one_product = matrix.mul(4, one_swap_inverse, one_swap);
+    for (0..4) |row| {
+        for (0..4) |column| {
+            const identity_entry: f64 = if (row == column) 1 else 0;
+            try expectSameNumber(f64, identity_entry, one_product.at(row, column));
+        }
+    }
+
+    //     [ 1  0    0  0 ]        the same forward substitution with the last
+    //     [ 2  1    0  0 ]        row's THIRD entry raised from 1/2 to 2,
+    //     [ 0  1/2  1  0 ]        which moves the pivot of step 2 off the diagonal:
+    //     [ 0  0    2  1 ]        x0 = b0
+    //                              x1 = b1 - 2 b0
+    //                              x2 = b2 - (b1 - 2 b0)/2 = b0 - b1/2 + b2
+    //                              x3 = b3 - 2 (b0 - b1/2 + b2)
+    //                                 = -2 b0 + b1 - 2 b2 + b3
+    //
+    // TWO interchanges follow: step 0 takes the 2 from row 1, and step 2 then
+    // finds 2 below the diagonal in a column whose diagonal entry is 1. The
+    // second one is the case worth having, because at step 2 most of the row is
+    // already settled and the sweep has to move exactly the columns that are
+    // still live.
+    const two_swaps = Mat4d.init(.{
+        .{ 1, 0, 0, 0 },
+        .{ 2, 1, 0, 0 },
+        .{ 0, 0.5, 1, 0 },
+        .{ 0, 0, 2, 1 },
+    });
+    const two_swaps_expected = Mat4d.init(.{
+        .{ 1, 0, 0, 0 },
+        .{ -2, 1, 0, 0 },
+        .{ 1, -0.5, 1, 0 },
+        .{ -2, 1, -2, 1 },
+    });
+    const two_swaps_inverse = matrix.inverseMat4d(two_swaps) orelse
+        return error.TestUnexpectedResult;
+    for (0..4) |row| {
+        for (0..4) |column| {
+            try expectSameNumber(
+                f64,
+                two_swaps_expected.at(row, column),
+                two_swaps_inverse.at(row, column),
+            );
+        }
+    }
+    const two_product = matrix.mul(4, two_swaps_inverse, two_swaps);
+    for (0..4) |row| {
+        for (0..4) |column| {
+            const identity_entry: f64 = if (row == column) 1 else 0;
+            try expectSameNumber(f64, identity_entry, two_product.at(row, column));
+        }
+    }
+
+    // The binary32 names, where the halves are exact as well, so the same two
+    // derivations pin 24 bits of mantissa instead of 53.
+    const one_f = matrix.inverseMat4f(Mat4f.init(.{
+        .{ 1, 0, 0, 0 },
+        .{ 2, 1, 0, 0 },
+        .{ 0, 0.5, 1, 0 },
+        .{ 0, 0, 0.5, 1 },
+    })) orelse return error.TestUnexpectedResult;
+    for (0..4) |row| {
+        for (0..4) |column| {
+            const expected_entry: f32 = @floatCast(one_swap_expected.at(row, column));
+            try expectSameNumber(f32, expected_entry, one_f.at(row, column));
+        }
+    }
+    const two_f = matrix.inverseMat4f(Mat4f.init(.{
+        .{ 1, 0, 0, 0 },
+        .{ 2, 1, 0, 0 },
+        .{ 0, 0.5, 1, 0 },
+        .{ 0, 0, 2, 1 },
+    })) orelse return error.TestUnexpectedResult;
+    for (0..4) |row| {
+        for (0..4) |column| {
+            const expected_entry: f32 = @floatCast(two_swaps_expected.at(row, column));
+            try expectSameNumber(f32, expected_entry, two_f.at(row, column));
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

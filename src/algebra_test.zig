@@ -57,6 +57,17 @@ fn expectCoefficients(comptime A: type, expected: A, actual: A) !void {
     }
 }
 
+/// The bit exact comparison the identities below need: `sameValue` accepts
+/// either sign of zero, and a coefficient wise comparison cannot see the sign
+/// of zero at all, so a change that only moves a zero between `+0` and `-0`
+/// would pass both.
+fn expectSameBits(comptime T: type, expected: T, actual: T) !void {
+    if (asBits(T, expected) != asBits(T, actual)) {
+        std.debug.print("want {x}, got {x}\n", .{ asBits(T, expected), asBits(T, actual) });
+        return error.BitMismatch;
+    }
+}
+
 fn expectClose(comptime T: type, expected: T, actual: T, tolerance: T) !void {
     if (!std.math.isFinite(actual)) return error.NonFiniteResult;
     if (@abs(expected - actual) > tolerance) {
@@ -420,6 +431,153 @@ test "the scalar form is symmetric and is the dot product on vectors" {
         try testing.expectEqual(@as(A.element, 0), A.dot(x, y));
         try testing.expectEqual(@as(A.element, 1.5), A.dot(x, euclidean(A, 1)));
         try testing.expectEqual(A.dot(x, x), x.norm());
+    }
+}
+
+/// The ascending basis index list of the blade at `mask`, and its length.
+fn bladeIndexList(comptime A: type, mask: usize, out: *[A.basis_count]usize) usize {
+    var length: usize = 0;
+    for (0..A.basis_count) |index| {
+        if (mask & (@as(usize, 1) << @as(u6, @intCast(index))) != 0) {
+            out[length] = index;
+            length += 1;
+        }
+    }
+    return length;
+}
+
+/// The sign of `e_I * e_I` before the metric is folded in: the inversion count
+/// of the two concatenated index lists, which is the number of swaps that puts
+/// that concatenation in ascending order.
+fn swapParity(comptime A: type, mask: usize) i32 {
+    var indices: [A.basis_count]usize = undefined;
+    const length = bladeIndexList(A, mask, &indices);
+    var sign: i32 = 1;
+    for (0..length) |first| {
+        for (0..length) |second| {
+            if (indices[first] > indices[second]) sign = -sign;
+        }
+    }
+    return sign;
+}
+
+/// The product of the metric signs of the basis vectors in the blade, so the
+/// leading null direction of `Pga` folds the whole blade to the zero scale.
+fn bladeMetricProduct(comptime A: type, mask: usize) i32 {
+    var indices: [A.basis_count]usize = undefined;
+    const length = bladeIndexList(A, mask, &indices);
+    var sign: i32 = 1;
+    for (indices[0..length]) |index| {
+        const metric_value = A.metric[index];
+        if (metric_value == 0) return 0;
+        if (metric_value < 0) sign = -sign;
+    }
+    return sign;
+}
+
+/// The scalar form recomputed from the published metric alone: one term per
+/// blade in ascending mask order, with the zero left skip, the zero scale skip,
+/// and the operand order of the library. A change in the sign, in the order, or
+/// in either skip shows up here as a different bit pattern.
+fn diagonalDot(comptime A: type, left: A, right: A) A.element {
+    var sum: A.element = 0;
+    for (0..A.coefficient_count) |mask| {
+        const value = left.bladeValue(mask);
+        if (value == 0) continue;
+        const parity = swapParity(A, mask);
+        const scale_sign = parity * bladeMetricProduct(A, mask);
+        if (scale_sign == 0) continue;
+        const product: A.element = @floatFromInt(scale_sign);
+        const reverse: A.element = @floatFromInt(parity);
+        sum += product * value * (reverse * right.bladeValue(mask));
+    }
+    return sum;
+}
+
+test "the scalar form is the diagonal blade square sum, bit for bit" {
+    inline for (all_algebras) |A| {
+        const left = dense(A);
+        const right = A.one().add(dense(A).scale(0.25));
+        try expectSameBits(A.element, diagonalDot(A, left, right), A.dot(left, right));
+        try expectSameBits(A.element, diagonalDot(A, left, left), A.norm(left));
+        // A single blade leaves one term, so this pins the sign of the top
+        // blade, which is the only place a grade above four appears.
+        const top = bladeOf(A, A.pseudoscalar_mask);
+        try expectSameBits(A.element, diagonalDot(A, top, top), A.norm(top));
+        // Coefficients that no binary format holds exactly pin the
+        // accumulation order: the sum rounds at every step, so summing the
+        // same terms in another order gives other bits.
+        var left_values: [A.coefficient_count]A.element = undefined;
+        var right_values: [A.coefficient_count]A.element = undefined;
+        for (0..A.coefficient_count) |mask| {
+            left_values[mask] = @as(A.element, @floatFromInt(mask + 3)) / 7;
+            right_values[mask] = @as(A.element, @floatFromInt(mask + 5)) / 11;
+        }
+        std.mem.doNotOptimizeAway(&left_values);
+        std.mem.doNotOptimizeAway(&right_values);
+        const rounded_left = A.fromCoefficients(left_values);
+        const rounded_right = A.fromCoefficients(right_values);
+        try expectSameBits(A.element, diagonalDot(A, rounded_left, rounded_right), A.dot(rounded_left, rounded_right));
+    }
+}
+
+test "the scalar form skips zero terms and keeps the non-finite rule" {
+    inline for (all_algebras) |A| {
+        const positive_zero: A.element = 0;
+        var infinite = [_]A.element{0} ** A.coefficient_count;
+        // The second basis vector squares to `+1` in all three families, so its
+        // diagonal scale is a unit and the infinity is not skipped by it.
+        infinite[2] = std.math.inf(A.element);
+        const broken = A.fromCoefficients(infinite);
+        // A zero left factor annihilates every term, so a non-finite right
+        // operand never reaches the sum and the result is positive zero.
+        try expectSameBits(A.element, positive_zero, A.dot(A.zero(), broken));
+        try expectSameBits(A.element, positive_zero, A.norm(A.zero()));
+        // Negative zero is zero, so it takes the same skip.
+        var negative_zeros = [_]A.element{0} ** A.coefficient_count;
+        for (&negative_zeros) |*slot| slot.* = -@as(A.element, 0);
+        const signed_zero = A.fromCoefficients(negative_zeros);
+        try expectSameBits(A.element, positive_zero, A.dot(signed_zero, broken));
+        try expectSameBits(A.element, positive_zero, A.dot(signed_zero, signed_zero));
+        try expectSameBits(A.element, positive_zero, signed_zero.norm());
+        // The leading null direction of `Pga` carries the zero metric, so a
+        // nonzero coefficient there is not a term at all and the sum is still
+        // the positive zero it starts at.
+        if (A.metric[0] == 0) {
+            var null_values = [_]A.element{0} ** A.coefficient_count;
+            null_values[1] = 1;
+            const null_blade = A.fromCoefficients(null_values);
+            try expectSameBits(A.element, positive_zero, null_blade.norm());
+            try expectSameBits(A.element, positive_zero, A.dot(null_blade, dense(A)));
+        }
+        // A non-finite left coefficient is not a zero row, so it propagates.
+        try testing.expect(!std.math.isFinite(A.dot(broken, broken)));
+        try testing.expect(!std.math.isFinite(A.norm(broken)));
+    }
+}
+
+test "the checked inverse is the unchecked inverse whenever it accepts" {
+    inline for (all_algebras) |A| {
+        // A scalar plus a bivector and a pure Euclidean bivector are versors in
+        // all three families, and the checked form has to return exactly what
+        // the unchecked one returns, bit for bit. The bivector has to be even:
+        // `sandwichConjugate` keeps only the even grades, so an odd grade blade
+        // has a zero sandwich and the checked form rejects it.
+        const accepted = [_]A{
+            A.one().add(bladeOf(A, 0b0011)),
+            bladeOf(A, 0b0110),
+        };
+        for (accepted) |candidate| {
+            const checked = candidate.inverseChecked() orelse return error.InverseRejected;
+            const unchecked = candidate.inverse();
+            for (unchecked.coefficients(), checked.coefficients()) |want, got| {
+                try expectSameBits(A.element, want, got);
+            }
+        }
+        // Adding the top blade leaves a residue above grade zero in the
+        // sandwich, which is the whole reason the checked form exists.
+        const residue = A.one().add(bladeOf(A, 0b0011)).add(bladeOf(A, A.pseudoscalar_mask));
+        try testing.expect(residue.inverseChecked() == null);
     }
 }
 

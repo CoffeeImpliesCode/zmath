@@ -644,7 +644,7 @@ pub fn Mat(
                         std.fmt.comptimePrint("{d} by {d}", .{ n_rows, n_columns }),
                 );
             }
-            return cofactorDet(Self, self);
+            return cofactorDet(Self, &self);
         }
     };
 }
@@ -653,36 +653,49 @@ pub fn Mat(
 ///
 /// Every kernel below indexes a pair its own loop bounds have already proved,
 /// so the check in `at` would be dead work repeated throughout a contraction.
-fn entryAt(comptime M: type, value: M, row: usize, column: usize) M.Element {
+/// The matrix arrives by pointer because these kernels are generic over an
+/// UNBOUNDED size: by value, every one of them would copy the whole matrix into
+/// its own frame, once per entry read, and a `Mat` is a comptime-bounded array
+/// the caller is not paying to have copied.
+fn entryAt(comptime M: type, value: *const M, row: usize, column: usize) M.Element {
     return value.data[column][row];
 }
 
 /// `value` with `dropped_row` and `dropped_column` removed, a
 /// `Mat(M.rows - 1, M.columns - 1, M.Element)`.
+///
+/// The copy is straight-line and indexed by comptime constants, which is what
+/// lets the scalar replacement pass keep a minor in registers instead of
+/// writing it out and reading it back. A pair of runtime counters stepping
+/// through the surviving rows and columns computes the same addresses but
+/// gives that pass nothing to fold.
 fn minorOf(
     comptime M: type,
-    value: M,
+    value: *const M,
     comptime dropped_row: usize,
     comptime dropped_column: usize,
 ) Mat(M.rows - 1, M.columns - 1, M.Element) {
+    if (comptime dropped_row >= M.rows or dropped_column >= M.columns) {
+        @compileError(
+            "zmath.matrix: a minor drops a row and a column of the matrix it is taken from",
+        );
+    }
     const Out = Mat(M.rows - 1, M.columns - 1, M.Element);
     var out: Out = undefined;
-    var target_row: usize = 0;
-    for (0..M.rows) |row| {
-        if (row == dropped_row) continue;
-        var target_column: usize = 0;
-        for (0..M.columns) |column| {
-            if (column == dropped_column) continue;
+    inline for (0..(M.rows - 1)) |target_row| {
+        inline for (0..(M.columns - 1)) |target_column| {
+            // Where a copy lands maps back to the parent by stepping over the
+            // dropped index, and both indices are comptime.
+            const row = target_row + (if (target_row >= dropped_row) 1 else 0);
+            const column = target_column + (if (target_column >= dropped_column) 1 else 0);
             out.data[target_column][target_row] = entryAt(M, value, row, column);
-            target_column += 1;
         }
-        target_row += 1;
     }
     return out;
 }
 
 /// The determinant of a 2 by 2, with the two products formed in this order.
-fn det2(comptime M: type, value: M) M.Element {
+fn det2(comptime M: type, value: *const M) M.Element {
     @setFloatMode(.strict);
     const S = M.Element;
     const leading = entryMul(S, entryAt(M, value, 0, 0), entryAt(M, value, 1, 1));
@@ -697,7 +710,7 @@ fn det2(comptime M: type, value: M) M.Element {
 /// sub-determinants already evaluated. Stopping here is what keeps the
 /// recursion in `cofactorDet` shallow: the size-4 and size-5 forms recurse only
 /// as far as this.
-fn det3(comptime M: type, value: M) M.Element {
+fn det3(comptime M: type, value: *const M) M.Element {
     @setFloatMode(.strict);
     const S = M.Element;
     const m0 = entrySub(
@@ -725,8 +738,10 @@ fn det3(comptime M: type, value: M) M.Element {
 /// The determinant of a square `M`, by cofactor expansion along the first row.
 ///
 /// Cofactors rather than Gaussian elimination, and the reason is in the module
-/// comment: elimination's result depends on a pivot order, this does not.
-fn cofactorDet(comptime M: type, value: M) M.Element {
+/// comment: elimination's result depends on a pivot order, this does not. The
+/// recursion is one function per size and the minors are values, so the number
+/// of instantiations grows with the SIZES rather than with the minors.
+fn cofactorDet(comptime M: type, value: *const M) M.Element {
     if (comptime M.rows != M.columns) {
         @compileError("zmath.matrix: a cofactor expansion needs a square matrix");
     }
@@ -738,11 +753,8 @@ fn cofactorDet(comptime M: type, value: M) M.Element {
     const Minor = Mat(M.rows - 1, M.columns - 1, S);
     var sum: S = undefined;
     inline for (0..M.rows) |column| {
-        const term = entryMul(
-            S,
-            entryAt(M, value, 0, column),
-            cofactorDet(Minor, minorOf(M, value, 0, column)),
-        );
+        const minor = minorOf(M, value, 0, column);
+        const term = entryMul(S, entryAt(M, value, 0, column), cofactorDet(Minor, &minor));
         // The cofactor sign alternates along the row, starting positive.
         const signed = if (column % 2 == 1) entryNeg(S, term) else term;
         sum = if (column == 0) signed else entryAdd(S, sum, signed);
@@ -798,6 +810,16 @@ fn pivotThresholdOf(comptime Scalar: type) Component(Scalar) {
 /// largest entry magnitude of the matrix, or the reduction left a non-finite
 /// entry. The finiteness check runs over every entry BEFORE any arithmetic,
 /// because a step on a non-finite entry cannot be undone by a check afterwards.
+///
+/// The reduction below writes only the columns a later step or the result can
+/// still read, and that is not a value-dependent claim. Column `j` of the left
+/// block is read by the pivot search of step `j` and by nothing else: step `k`
+/// reads column `k` for the pivot search and for the multiplier, and writes
+/// every column from `k + 1` onward. So after step `j` no cell of column `j` is
+/// read again, whatever the entries are, and the result loop reads only the
+/// right block. An update skipped for a settled column would have written a
+/// cell nothing reads, including a NaN an overflow would otherwise have left
+/// behind.
 fn gaussJordan(comptime M: type, value: M) ?M {
     if (comptime M.rows != M.columns or M.rows < 2) {
         @compileError("zmath.matrix: an inverse needs a square matrix of at least two rows");
@@ -811,7 +833,7 @@ fn gaussJordan(comptime M: type, value: M) ?M {
     var scale: C = 0;
     inline for (0..n) |row| {
         inline for (0..n) |column| {
-            const entry = entryAt(M, value, row, column);
+            const entry = entryAt(M, &value, row, column);
             if (!std.math.isFinite(entry)) return null;
             const magnitude = @abs(entry);
             if (magnitude > scale) scale = magnitude;
@@ -822,7 +844,7 @@ fn gaussJordan(comptime M: type, value: M) ?M {
     // The extent is comptime, so nothing is allocated.
     var work: [n][2 * n]C = undefined;
     inline for (0..n) |row| {
-        inline for (0..n) |column| work[row][column] = entryAt(M, value, row, column);
+        inline for (0..n) |column| work[row][column] = entryAt(M, &value, row, column);
         inline for (0..n) |column| work[row][n + column] = if (row == column) 1 else 0;
     }
 
@@ -840,20 +862,32 @@ fn gaussJordan(comptime M: type, value: M) ?M {
         }
         if (!(pivot_magnitude > threshold * scale)) return null;
         if (pivot_row != k) {
-            const swap = work[k];
-            work[k] = work[pivot_row];
-            work[pivot_row] = swap;
+            // The interchange moves the live part of the two rows. Columns
+            // before `k` are settled in EVERY row, so moving them changes
+            // nothing that is read again, and they are not read again.
+            inline for (k..2 * n) |j| {
+                const held = work[k][j];
+                work[k][j] = work[pivot_row][j];
+                work[pivot_row][j] = held;
+            }
         }
 
         const pivot = work[k][k];
-        inline for (0..2 * n) |j| work[k][j] = work[k][j] / pivot;
+        // Columns `0..k` of the left block stop here, for the reason the
+        // module comment on the function gives. Column `k` has just been read
+        // as `factor` by every row that will use it, and columns `0..k-1` were
+        // read by their own step and by nothing since, so normalizing them
+        // again would divide into cells that are never read.
+        inline for (k + 1..2 * n) |j| work[k][j] = work[k][j] / pivot;
         for (0..n) |row| {
             if (row == k) continue;
             const factor = work[row][k];
             if (factor == 0) continue;
             // Eliminating the rows above as well as below is what makes this
-            // Gauss-Jordan and leaves the identity in the left block.
-            inline for (0..2 * n) |j| {
+            // Gauss-Jordan and leaves the identity in the left block. The
+            // columns written here are the ones the later steps and the result
+            // read; the rest are settled.
+            inline for (k + 1..2 * n) |j| {
                 work[row][j] = entrySub(S, work[row][j], entryMul(S, factor, work[k][j]));
             }
         }
@@ -901,12 +935,12 @@ pub fn mul(
     var out: Out = undefined;
     inline for (0..n_out_columns) |column| {
         inline for (0..n) |row| {
-            var sum = entryMul(S, entryAt(L, left, row, 0), entryAt(R, right, 0, column));
+            var sum = entryMul(S, entryAt(L, &left, row, 0), entryAt(R, &right, 0, column));
             for (1..inner) |index| {
                 sum = entryAdd(
                     S,
                     sum,
-                    entryMul(S, entryAt(L, left, row, index), entryAt(R, right, index, column)),
+                    entryMul(S, entryAt(L, &left, row, index), entryAt(R, &right, index, column)),
                 );
             }
             out.data[column][row] = sum;

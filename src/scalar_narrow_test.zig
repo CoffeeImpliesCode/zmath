@@ -423,3 +423,90 @@ test "NaN conversion is stable across every narrowing operation" {
     try expectF(0xffc0_1234, narrow.f32fmaf64(signaling_f64, d(0x3ff0_0000_0000_0000), d(0)));
     try expectF(0xffc0_1234, narrow.f32sqrtf64(signaling_f64));
 }
+
+test "f16 division rounds every source midpoint with the 64-bit quotient" {
+    const one_f = f(0x3f80_0000);
+    const one_d = d(0x3ff0_0000_0000_0000);
+
+    // 1 + 2^-11 is the midpoint of 1 and 1 + 2^-10, and its quotient is even.
+    try expectH(0x3c00, narrow.f16divf32(f(0x3f80_1000), one_f));
+    try expectH(0x3c01, narrow.f16divf32(f(0x3f80_1001), one_f));
+    try expectH(0x3c00, narrow.f16divf32(f(0x3f80_0fff), one_f));
+
+    // 1 + 3 * 2^-11 is the next midpoint, and its quotient is odd.
+    try expectH(0x3c02, narrow.f16divf32(f(0x3f80_3000), one_f));
+    try expectH(0x3c01, narrow.f16divf32(f(0x3f80_2fff), one_f));
+    try expectH(0x3c02, narrow.f16divf32(f(0x3f80_3001), one_f));
+
+    try expectH(0x3c00, narrow.f16divf64(d(0x3ff0_0200_0000_0000), one_d));
+    try expectH(0x3c01, narrow.f16divf64(d(0x3ff0_0200_0000_0001), one_d));
+    try expectH(0x3c02, narrow.f16divf64(d(0x3ff0_0600_0000_0000), one_d));
+    try expectH(0x3c01, narrow.f16divf64(d(0x3ff0_05ff_ffff_ffff), one_d));
+
+    // An odd denominator can never carry a tie: the remainder of 1/(1 + 2^-23)
+    // is above the half it is compared against, and the exact half remainder
+    // below is the only value a tie could have come from.
+    try expectH(0x3c00, narrow.f16divf32(one_f, f(0x3f80_0001)));
+    try expectH(0x3c00, narrow.f16divf64(
+        d(0x3ff0_0200_0000_0001),
+        d(0x3ff0_0000_0000_0001),
+    ));
+}
+
+test "f16 division reaches subnormal zero, the normal boundary, and overflow" {
+    const one_d = d(0x3ff0_0000_0000_0000);
+    const two_to_minus_ten = d(0x3f50_0000_0000_0000);
+    const two_to_ten = d(0x4090_0000_0000_0000);
+    const two_to_fifteen = d(0x40e0_0000_0000_0000);
+
+    // 2^-20 is an exact 16-unit subnormal.
+    try expectH(0x0010, narrow.f16divf64(two_to_minus_ten, two_to_ten));
+    // 2^-25 is the exact midpoint of zero and the least subnormal, and the
+    // scaled division below carries it in the destination rounding only.
+    try expectH(0x0000, narrow.f16divf64(two_to_minus_ten, two_to_fifteen));
+    try expectH(0x0001, narrow.f16divf64(d(0x3f50_0000_0000_0001), two_to_fifteen));
+    try expectH(0x0000, narrow.f16divf64(d(0x3f4f_ffff_ffff_ffff), two_to_fifteen));
+    try expectH(0x8000, narrow.f16divf64(d(0xbf50_0000_0000_0000), two_to_fifteen));
+    try expectH(0x8001, narrow.f16divf64(d(0xbf50_0000_0000_0001), two_to_fifteen));
+
+    // 2^-14 is the least normal. Dividing by 16 * (1 + 2^-10) and by
+    // 16 * (1 + 2^-12) puts the exact quotient on both sides of its midpoint.
+    try expectH(0x03ff, narrow.f16divf64(two_to_minus_ten, d(0x4030_0400_0000_0000)));
+    try expectH(0x0400, narrow.f16divf64(two_to_minus_ten, d(0x4030_0100_0000_0000)));
+
+    // 65520 is the midpoint of the largest f16 and 2^16, so the exact tie
+    // overflows to infinity in both signs.
+    try expectH(0x7bff, narrow.f16divf64(d(0x40ef_fdff_ffff_ffff), one_d));
+    try expectH(0x7c00, narrow.f16divf64(d(0x40ef_fe00_0000_0000), one_d));
+    try expectH(0x7c00, narrow.f16divf64(d(0x40ef_fe00_0000_0001), one_d));
+    try expectH(0xfbff, narrow.f16divf64(d(0xc0ef_fdff_ffff_ffff), one_d));
+    try expectH(0xfc00, narrow.f16divf64(d(0xc0ef_fe00_0000_0000), one_d));
+}
+
+test "f32 destination division keeps the wide quotient at both format boundaries" {
+    const one_d = d(0x3ff0_0000_0000_0000);
+    const two_to_minus_120 = d(0x3870_0000_0000_0000);
+    const two_to_thirty = d(0x41d0_0000_0000_0000);
+
+    // 1 + 2^-24 is the midpoint of 1 and 1 + 2^-23, and 1 + 3 * 2^-24 is the
+    // midpoint above it, where the quotient parity decides the direction.
+    try expectF(0x3f80_0000, narrow.f32divf64(d(0x3ff0_0000_1000_0000), one_d));
+    try expectF(0x3f80_0001, narrow.f32divf64(d(0x3ff0_0000_1000_0001), one_d));
+    try expectF(0x3f80_0000, narrow.f32divf64(d(0x3ff0_0000_0fff_ffff), one_d));
+    try expectF(0x3f80_0002, narrow.f32divf64(d(0x3ff0_0000_3000_0000), one_d));
+    try expectF(0x3f80_0001, narrow.f32divf64(d(0x3ff0_0000_2fff_ffff), one_d));
+
+    // 2^-150 is the exact midpoint of zero and the least f32 subnormal.
+    try expectF(0x0000_0000, narrow.f32divf64(two_to_minus_120, two_to_thirty));
+    try expectF(0x0000_0001, narrow.f32divf64(d(0x3870_0000_0000_0001), two_to_thirty));
+    try expectF(0x0000_0000, narrow.f32divf64(d(0x386f_ffff_ffff_ffff), two_to_thirty));
+    try expectF(0x8000_0000, narrow.f32divf64(d(0xb870_0000_0000_0000), two_to_thirty));
+    // 2^-149 is the least f32 subnormal itself.
+    try expectF(0x0000_0001, narrow.f32divf64(two_to_minus_120, d(0x41c0_0000_0000_0000)));
+
+    // The overflow midpoint and its neighbours round in the f32 format.
+    try expectF(0x7f7f_ffff, narrow.f32divf64(d(0x47ef_ffff_efff_ffff), one_d));
+    try expectF(0x7f80_0000, narrow.f32divf64(d(0x47ef_ffff_f000_0000), one_d));
+    try expectF(0x7f80_0000, narrow.f32divf64(d(0x47ef_ffff_f000_0001), one_d));
+    try expectF(0xff80_0000, narrow.f32divf64(d(0xc7ef_ffff_f000_0000), one_d));
+}

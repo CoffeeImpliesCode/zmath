@@ -380,7 +380,25 @@ fn ratioTop(numerator: u128, denominator: u128) i32 {
 fn roundRatioAtScale(numerator: u128, denominator: u128, shift: i32) struct { value: u128, up: bool } {
     if (shift >= 0) {
         const shift_count: u32 = @intCast(shift);
-        std.debug.assert(bitLength(numerator) + shift_count <= 128);
+        const numerator_bits = bitLength(numerator);
+        std.debug.assert(numerator_bits + shift_count <= 128);
+        // One hardware 64-bit division replaces the 128-bit one when the
+        // scaled numerator and the denominator both fit in 64 bits. The
+        // nearest-even test compares against `divisor >> 1` instead of
+        // doubling the remainder, which is the same decision for odd and even
+        // divisors and cannot overflow the narrower width.
+        if (numerator_bits + shift_count <= 64 and bitLength(denominator) <= 64) {
+            const scaled: u64 = @intCast(numerator << @as(std.math.Log2Int(u128), @intCast(shift_count)));
+            const divisor: u64 = @intCast(denominator);
+            const quotient = scaled / divisor;
+            const remainder = scaled % divisor;
+            const half = divisor >> 1;
+            return .{
+                .value = quotient,
+                .up = remainder > half or
+                    (remainder == half and (divisor & 1) == 0 and (quotient & 1) != 0),
+            };
+        }
         const scaled = numerator << @as(std.math.Log2Int(u128), @intCast(shift_count));
         const quotient = scaled / denominator;
         const remainder = scaled % denominator;
@@ -389,8 +407,21 @@ fn roundRatioAtScale(numerator: u128, denominator: u128, shift: i32) struct { va
     }
 
     const shift_count: u32 = @abs(shift);
-    if (bitLength(denominator) + shift_count > 128) {
+    const denominator_bits = bitLength(denominator);
+    if (denominator_bits + shift_count > 128) {
         return .{ .value = 0, .up = false };
+    }
+    if (denominator_bits + shift_count <= 64 and bitLength(numerator) <= 64) {
+        const divisor: u64 = @intCast(denominator << @as(std.math.Log2Int(u128), @intCast(shift_count)));
+        const dividend: u64 = @intCast(numerator);
+        const quotient = dividend / divisor;
+        const remainder = dividend % divisor;
+        const half = divisor >> 1;
+        return .{
+            .value = quotient,
+            .up = remainder > half or
+                (remainder == half and (divisor & 1) == 0 and (quotient & 1) != 0),
+        };
     }
     const scaled_denominator = denominator << @as(std.math.Log2Int(u128), @intCast(shift_count));
     const quotient = numerator / scaled_denominator;

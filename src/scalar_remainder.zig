@@ -102,6 +102,30 @@ fn divideShifted(numerator: u64, denominator: u64, shift: u32) Division {
     const chunk_max: u32 = @clz(denominator);
     stdAssert(chunk_max >= 11);
 
+    // A power-of-two divisor has no significand bits below its width, so the
+    // chunk loop can only reproduce a shift and a mask: the remainder is the
+    // numerator truncated to the surviving width, and the quotient is that
+    // numerator shifted by the same amount.
+    if (denominator & (denominator - 1) == 0) {
+        const width: u32 = bitLength(denominator) - 1;
+        if (shift >= width) {
+            // The quotient is the numerator shifted left by `shift - width`,
+            // so its low three bits come from the numerator's low three.
+            if (shift - width >= 3) return .{ .remainder = 0, .quotient_low = 0 };
+            const kept: u8 = @intCast(numerator & 7);
+            return .{
+                .remainder = 0,
+                .quotient_low = (kept << @as(u3, @intCast(shift - width))) & 7,
+            };
+        }
+        const kept: u32 = width - shift;
+        const mask = (@as(u64, 1) << @as(u6, @intCast(kept))) - 1;
+        return .{
+            .remainder = (numerator & mask) << @as(u6, @intCast(shift)),
+            .quotient_low = @intCast((numerator >> @as(u6, @intCast(kept))) & 7),
+        };
+    }
+
     var remainder = numerator % denominator;
     var quotient_low: u8 = @intCast((numerator / denominator) & 7);
     var remaining_shift = shift;

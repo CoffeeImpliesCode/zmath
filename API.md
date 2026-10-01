@@ -113,10 +113,31 @@ The six `Vec*` value types are re-exported from `zmath.vector` as well, so the m
 both layers. The table above is the `@Vector` surface only; `src/vector_value.zig` is not a
 lane-parallel module and its operations carry no per-lane bit-identity argument.
 
-96 of the 97 top-level `pub fn` operations in `zmath` accept a `@Vector` and
-route to this layer. The one that does not is `nan`, because its type
-argument is a `comptime` type and it therefore has no lane to map over.
-The vector spelling of a NaN is `@splat` at the call site.
+The two counts are disjoint and are taken the same way. 417 is the number of
+`pub fn` declarations across the six `@Vector` modules in the table above. 158 is
+the number of `pub fn` declarations the six `Vec*` structs publish in
+`src/vector_value.zig`, counting their instance methods, their constructors, and
+their static factories. The two numbers share a module path and nothing else, and
+neither is a subset of the other.
+
+The root of `zmath` publishes 103 runtime callables: 97 `pub fn` declarations and
+6 `pub const` function aliases, which are `fmaximum_mag`, `fminimum_mag`,
+`fmaximum_num`, `fminimum_num`, `fmaximum_mag_num`, and `fminimum_mag_num`.
+96 of the 103 accept a `@Vector` and route to this layer, which is 90 of the 97
+`pub fn` declarations plus all 6 aliases. The seven that do not are:
+
+- `nan`, whose type argument is a `comptime` type and therefore has no lane to
+  map over. The vector spelling of a NaN is `@splat` at the call site.
+- `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, and `fsqrt`, whose root signatures take
+  concrete `f64` arguments and return `f32`. A concrete `f64` parameter cannot
+  accept a `@Vector`, so those six are scalar-only at the root. Their vector
+  forms exist and belong to this layer, as `zmath.vector.narrow.faddv`, `fsubv`,
+  `fmulv`, `fdivv`, `ffmav`, and `fsqrtv`, which take a `@Vector(N, f64)` and
+  return `@Vector(N, f32)`.
+
+A fixed `f64` parameter by itself does not make a root operation scalar-only.
+`nextToward(value, toward: f64)` still takes a `@Vector` value and broadcasts its
+`f64` comparator, and it is one of the 96.
 
 ### Naming
 
@@ -1022,6 +1043,23 @@ finite nonzero one, and validates that the normalized result lands in the unit b
 the constructor that maintains the unit norm. Raw `Quatf` supports algebraic operations and does
 not expose a total rotation operation.
 
+`length` on `Vec2f` through `Vec4d` and on `Quatf` and `Quatd` is an ordered fold
+through the accepted `hypot` kernel over the components rather than a square root
+of a sum of squares, so it avoids the spurious overflow and the flush to zero that
+squaring a component can cause. The first component enters the fold as the exact
+value `hypot(+0, x)` returns for it: the magnitude of `x`, or, when `x` is a NaN,
+that NaN quieted with its sign and payload preserved. Every later component goes
+through the same kernel in the same order. Nesting the kernel is not a
+single-rounded multicomponent norm. It is the accepted kernel applied again, never
+a re-derived polynomial, and it carries no acceptance of its own here.
+
+`fromAxisAngle` measures its axis once. It rejects a non-finite axis, rejects a
+zero or non-finite length, and divides the three components by that length. It
+does not normalize the quotient and measure it a second time: a largest component
+divided by the accepted finite, nonzero length cannot round to zero, so the
+quotient is not the zero vector and a second norm check decides nothing the length
+has not already decided. The accepted and rejected calls are the same calls.
+
 `raw` is a public field, not a private one. Zig 0.16 cannot make a struct field private, and
 `UnitQuatf` is a plain struct with no opaque handle, so `UnitQuatf{ .raw = q }` compiles for any
 consumer and can store any quaternion at all. The unit norm is therefore an invariant the
@@ -1088,6 +1126,25 @@ through `inverseMat4d`, and `mulMat4fVec4f` with `mulMat4dVec4d`. The singularit
 `inverse` is published as `inverse_pivot_threshold_f` and `inverse_pivot_threshold_d`, derived as
 the unit roundoff of the format times the element-growth bound of the reduction, so a caller can
 see and change it rather than discover an implicit epsilon.
+
+`inverse` writes only the cells a later step or the result can still read. The
+reduction holds `[ value | identity ]` in one row-major work array of a comptime
+extent, so nothing is allocated. Step `k` reads column `k` of the left block for
+the pivot search and for the multiplier, and writes every column from `k + 1` onward.
+Column `j` of the left block is therefore read by the pivot search of step `j` and
+by nothing else: after step `j` no cell of column `j` is read again whatever the
+entries are, and the result loop reads only the right block. The normalization and
+the elimination skip the settled left-block columns, and a row interchange moves
+only the live columns, because the columns before `k` are settled in every row.
+This is not a value-dependent claim. An update skipped for a settled column would
+have written a cell that nothing reads, including a NaN that an overflow would
+otherwise have left behind. Every live operation keeps its position in the
+sequence, the reduction stays in strict float mode, and `null` still means exactly
+the three things it means above: the pre-scan found a non-finite entry, the pivot
+magnitude failed the threshold test against `inverse_pivot_threshold_f` or
+`inverse_pivot_threshold_d` times the largest entry magnitude, or the reduction
+left a non-finite entry in the right block. The threshold, the pivot order, and
+the returned value are not changed by the skipped cells.
 
 `zmath.matrix.mul` is declared with `anytype` parameters so that both operand shapes are checked
 while the output width is inferred. Zig has no function overloading, so a separate literal
@@ -1203,6 +1260,31 @@ concrete type built from one private comptime generic, so no public signature ca
 a type parameter. Storage is `[2^n]T` and is published per type as `storage_bytes`: 32 bytes for
 `Cl3f` up to 512 for `Cga4d`. Those are stack value types, not allocations.
 
+`dot` is `scalarProduct(a, b.reverse())`, and `scalarProduct` reads the diagonal
+of the generated product table rather than all `coefficient_count` squared entries
+of it. A blade pair lands on the scalar coefficient only when it multiplies with
+itself, so every other pair lands above grade `0` and is discarded by the scalar
+form. The surviving terms are the same terms, in the same ascending mask order,
+with the same `+0` seed, and with the same `coeff * a * b` operand order that
+`geometricProduct` uses when it accumulates into its scalar slot, so the value is
+what `a.geometricProduct(b).c[0]` is. Both skips of the full product are kept. A
+zero left coefficient contributes nothing, and a zero metric entry contributes
+nothing, which is the degenerate-metric rule: the `Pga` basis vector `e0` has a
+zero entry on the diagonal, so a `Pga` dot product still ignores it exactly as the
+full product does. `dot` stays symmetric and `norm` stays `dot(self, self)`.
+
+`inverseChecked` reuses the product it has already formed. It computes the sandwich
+conjugate, forms `conjugate_part.geometricProduct(self)` once, scans that product
+for a nonzero coefficient above grade `0`, and then reads its grade-0 part as the
+sandwich scalar instead of building a second product to read the same scalar from.
+The residue scan has to read the whole product anyway, so the grade-0 part is
+already in hand. `conjugate_part.scale(1 / sandwich)` is then the same expression
+`inverse` builds from its own second product, and the refusals are unchanged: a
+non-finite coefficient in `self`, a nonzero coefficient above grade `0` in the
+product, and a zero or non-finite sandwich scalar each return `null`. The
+precondition `inverse` documents is untouched, and `inverseChecked` remains the
+test for it.
+
 ## Tests and benchmarks
 
 `zmath` has no MPFR, GMP, FLINT, Arb, BLIS, Eigen, or C++ runtime dependency.
@@ -1211,6 +1293,22 @@ It is the acceptance authority and is colocated as `../zmath-testing`.
 Run the following commands there, not in this repository.
 The current publication has 347 descriptors and 72,035,642 records.
 See [PLAN.md](PLAN.md) for measured evidence and remaining scope.
+
+That authority covers the scalar manifest. Evidence gathered for the implemented
+consumer surfaces is a separate thing and carries none of it. The optimization
+round that reworked those surfaces is gated by paired reference comparison over
+bounded named inputs rather than by a publication, and its gate is bounded
+globally at 4096 evaluations per canonical f32 operation counted across every lane,
+consumer, repetition, and reference together, not once per policy and not once per
+fixture. Bounded consumer evidence is not a publication under
+[Typed scalar corpus manifest](#typed-scalar-corpus-manifest): it changes no
+descriptor row, status, oracle, ULP bound, or stored record, it is not a campaign
+the corpus loader accepts, and it establishes neither corpus coverage nor
+whole-domain proof, whatever such a comparison reports. At its strongest it says
+that a reworked path reproduced the reference it was compared against over the
+inputs it was compared on, and it says nothing about the rest of an
+operation-format domain. The bound is what makes the round checkable without a
+publication, and it relaxes no threshold stated elsewhere in this document.
 
 The scalar tools use only target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe` for manifest-qualified evidence.
 These build steps install the typed tools:

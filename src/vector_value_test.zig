@@ -560,6 +560,152 @@ test "length ignores the sign of every component" {
     try std.testing.expectEqual(@as(u64, 0), bits(f64, Vec2d.init(-0.0, -0.0).length()));
 }
 
+test "the first component enters the length fold as its exact magnitude" {
+    // A vector whose other components are zero has the magnitude of its first
+    // component, bit for bit: the fold cannot round it and the sign is gone.
+    // That is what pins a subnormal, a normal, an overflow-scale value, and
+    // both signs of each of them.
+    const magnitudes_f = [_]u32{
+        0x0000_0001, 0x007f_ffff, 0x0080_0000, 0x3f80_0000, 0x7f7f_ffff, 0x7f80_0000,
+        0x8000_0001, 0x807f_ffff, 0x8080_0000, 0xbf80_0000, 0xff7f_ffff, 0xff80_0000,
+    };
+    for (magnitudes_f) |magnitude| {
+        const x: f32 = @bitCast(magnitude);
+        const cleared: u32 = magnitude & 0x7fff_ffff;
+        try std.testing.expectEqual(cleared, bits(f32, Vec2f.init(x, 0.0).length()));
+        try std.testing.expectEqual(cleared, bits(f32, Vec4f.init(x, 0.0, 0.0, 0.0).length()));
+    }
+    const magnitudes_d = [_]u64{
+        0x0000_0000_0000_0001, 0x000f_ffff_ffff_ffff, 0x0010_0000_0000_0000,
+        0x3ff0_0000_0000_0000, 0x7fef_ffff_ffff_ffff, 0x7ff0_0000_0000_0000,
+        0x8000_0000_0000_0001, 0x800f_ffff_ffff_ffff, 0x8010_0000_0000_0000,
+        0xbff0_0000_0000_0000, 0xffef_ffff_ffff_ffff, 0xfff0_0000_0000_0000,
+    };
+    for (magnitudes_d) |magnitude| {
+        const x: f64 = @bitCast(magnitude);
+        const cleared: u64 = magnitude & 0x7fff_ffff_ffff_ffff;
+        try std.testing.expectEqual(cleared, bits(f64, Vec2d.init(x, 0.0).length()));
+        try std.testing.expectEqual(cleared, bits(f64, Vec3d.init(x, 0.0, 0.0).length()));
+    }
+}
+
+test "length quiets a signaling NaN and keeps its sign and payload" {
+    // A signaling NaN in the first component comes back with its quiet bit set
+    // and its sign and payload intact, so a caller reading the bits of a
+    // non-finite norm sees the operand it passed in rather than a canonical
+    // NaN. A signaling NaN must not survive into the result.
+    const signaling32: f32 = @bitCast(@as(u32, 0x7f80_0001));
+    try std.testing.expectEqual(
+        @as(u32, 0x7fc0_0001),
+        bits(f32, Vec3f.init(signaling32, 1.0, 1.0).length()),
+    );
+    const negative32: f32 = @bitCast(@as(u32, 0xff80_0001));
+    try std.testing.expectEqual(
+        @as(u32, 0xffc0_0001),
+        bits(f32, Vec2f.init(negative32, 1.0).length()),
+    );
+    const signaling: f64 = @bitCast(@as(u64, 0x7ff0_0000_0000_0001));
+    try std.testing.expectEqual(
+        @as(u64, 0x7ff8_0000_0000_0001),
+        bits(f64, Vec4d.init(signaling, 1.0, 1.0, 1.0).length()),
+    );
+    const negative: f64 = @bitCast(@as(u64, 0xfff0_0000_0000_0001));
+    try std.testing.expectEqual(
+        @as(u64, 0xfff8_0000_0000_0001),
+        bits(f64, Vec2d.init(negative, 1.0).length()),
+    );
+    // A quiet NaN keeps its own sign, which the magnitude rule above cannot
+    // express: a NaN is not `|x|`.
+    const quiet: f64 = @bitCast(@as(u64, 0xfff8_0000_0000_0000));
+    try std.testing.expectEqual(
+        @as(u64, 0xfff8_0000_0000_0000),
+        bits(f64, Vec2d.init(quiet, 0.0).length()),
+    );
+}
+
+test "length follows the kernel's precedence between an infinity and a NaN" {
+    // The accepted `hypot` kernel lets a signaling NaN beat an infinity but
+    // loses to one, and a quiet NaN loses to an infinity in either position.
+    // The length is that kernel applied repeatedly, so which rule applies
+    // depends on the order of the components.
+    const signaling32: f32 = @bitCast(@as(u32, 0x7f80_0001));
+    const quiet32: f32 = @bitCast(@as(u32, 0x7fc0_0000));
+    // A signaling NaN in the first position is already quiet when the infinity
+    // arrives, and a quiet NaN loses to an infinity.
+    try std.testing.expectEqual(
+        @as(u32, 0x7f80_0000),
+        bits(f32, Vec2f.init(signaling32, std.math.inf(f32)).length()),
+    );
+    // An infinity first and a signaling NaN second: the later signaling NaN
+    // wins, and it arrives quieted.
+    try std.testing.expectEqual(
+        @as(u32, 0x7fc0_0001),
+        bits(f32, Vec2f.init(std.math.inf(f32), signaling32).length()),
+    );
+    // An infinity first and a quiet NaN second: the infinity wins.
+    try std.testing.expectEqual(
+        @as(u32, 0x7f80_0000),
+        bits(f32, Vec2f.init(std.math.inf(f32), quiet32).length()),
+    );
+    const signaling: f64 = @bitCast(@as(u64, 0x7ff0_0000_0000_0001));
+    const quiet: f64 = @bitCast(@as(u64, 0x7ff8_0000_0000_0000));
+    try std.testing.expectEqual(
+        @as(u64, 0x7ff0_0000_0000_0000),
+        bits(f64, Vec2d.init(signaling, std.math.inf(f64)).length()),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x7ff8_0000_0000_0001),
+        bits(f64, Vec2d.init(std.math.inf(f64), signaling).length()),
+    );
+    try std.testing.expectEqual(
+        @as(u64, 0x7ff0_0000_0000_0000),
+        bits(f64, Vec2d.init(std.math.inf(f64), quiet).length()),
+    );
+    // Three components fold twice, so a NaN in the first position is already
+    // the accumulator and the infinity only has to survive one more step.
+    try std.testing.expectEqual(
+        @as(u64, 0x7ff0_0000_0000_0000),
+        bits(f64, Vec3d.init(signaling, std.math.inf(f64), 1.0).length()),
+    );
+}
+
+test "a vector of signed zeros has a positive zero length" {
+    try std.testing.expectEqual(@as(u32, 0), bits(f32, Vec2f.init(-0.0, 0.0).length()));
+    try std.testing.expectEqual(@as(u32, 0), bits(f32, Vec3f.init(-0.0, -0.0, -0.0).length()));
+    try std.testing.expectEqual(@as(u64, 0), bits(f64, Vec4d.init(-0.0, -0.0, -0.0, -0.0).length()));
+    // A signed zero in the first position does not decide the sign of a norm
+    // that the other components make positive.
+    try std.testing.expectEqual(@as(u32, 0x3f80_0000), bits(f32, Vec3f.init(-0.0, 1.0, 0.0).length()));
+    try std.testing.expectEqual(@as(u64, 0x3ff0_0000_0000_0000), bits(f64, Vec4d.init(-0.0, -0.0, 1.0, -0.0).length()));
+}
+
+test "distance inherits the quieting of the first component" {
+    // The distance is the length of the rounded difference, and the difference
+    // propagates the NaN with its sign cleared, so both directions of the
+    // distance answer the same quieted NaN.
+    const signaling: f64 = @bitCast(@as(u64, 0x7ff0_0000_0000_0001));
+    const quieted: u64 = 0x7ff8_0000_0000_0001;
+    try std.testing.expectEqual(
+        quieted,
+        bits(f64, Vec2d.init(signaling, 1.0).distance(Vec2d.zero())),
+    );
+    try std.testing.expectEqual(
+        quieted,
+        bits(f64, Vec2d.zero().distance(Vec2d.init(signaling, 1.0))),
+    );
+    const signaling32: f32 = @bitCast(@as(u32, 0x7f80_0001));
+    try std.testing.expectEqual(
+        @as(u32, 0x7fc0_0001),
+        bits(f32, Vec3f.init(signaling32, 1.0, 1.0).distance(Vec3f.zero())),
+    );
+    // The normalizer divides by the length, so a quieted first component is
+    // the divisor and the result is not finite.
+    const unit = Vec2f.init(signaling32, 0.0).normalize();
+    try std.testing.expect(!unit.isFinite());
+    try std.testing.expect(std.math.isNan(unit.x));
+    try std.testing.expect(std.math.isNan(unit.y));
+}
+
 test "normalize returns a unit vector" {
     try expectUnit(Vec2d, Vec2d.init(3, 4));
     try expectUnit(Vec3d, Vec3d.init(1, 2, 3));

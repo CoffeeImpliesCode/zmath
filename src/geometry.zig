@@ -416,7 +416,12 @@ const Big = struct {
         limbs[word + 1] = @truncate(placed >> 64);
         return .{
             .negative = (bits >> 63) != 0,
-            .used = topUsed(&limbs),
+            // `placed` is not zero, so at least one of the two limbs just
+            // written is nonzero, and nothing above them was touched: the
+            // count is the index of the upper one plus one. The upper limb
+            // is nonzero exactly when the shifted significand crosses the
+            // 64-bit boundary.
+            .used = @intCast(word + 1 + @intFromBool(limbs[word + 1] != 0)),
             .limbs = limbs,
         };
     }
@@ -445,11 +450,24 @@ const Big = struct {
     /// Schoolbook, truncated at the array. The bounds in the module comment
     /// prove the product fits, so the truncation is a bound check and not a
     /// loss.
+    ///
+    /// A row whose LEFT limb is zero is a no-op, and skipping it is what makes
+    /// an ordinary coordinate cheap to multiply: `fromFloat` writes its pair at
+    /// limb `(exponent_field - 1) / 64` for a normal value and at limb zero for
+    /// a subnormal, so in both cases every limb below the written pair is zero
+    /// and only the top one or two limbs carry anything. The proof that
+    /// the skipped row changed nothing is that `carry` enters the row at zero,
+    /// so each inner total is `0 * b.limbs[j] + limbs[i + j] + 0`, which
+    /// writes back what it read and leaves the carry at zero, and the closing
+    /// add is then `limbs[i + row] + 0`. Every write in the row is the value it
+    /// already held. The RIGHT operand gets no such treatment: there a zero
+    /// limb still has to absorb the running carry, which is not zero.
     fn mul(a: Big, b: Big) Big {
         if (a.used == 0 or b.used == 0) return zero_value;
         var limbs = [_]u64{0} ** exact_limbs;
         var i: usize = 0;
         while (i < a.used and i < exact_limbs) : (i += 1) {
+            if (a.limbs[i] == 0) continue;
             const row = @min(b.used, exact_limbs - i);
             var carry: u128 = 0;
             var j: usize = 0;
@@ -466,7 +484,12 @@ const Big = struct {
         }
         return .{
             .negative = a.negative != b.negative,
-            .used = topUsed(&limbs),
+            // The row `i` writes only `i + j` for `j < row` and then `i + row`,
+            // and `i + row` is at most `min(b.used + i, exact_limbs)`, so
+            // nothing above `a.used + b.used` was touched. The sum is widened
+            // before it is added, because two full-width operands overflow a
+            // byte.
+            .used = topUsed(&limbs, usedBound(@as(usize, a.used) + @as(usize, b.used))),
             .limbs = limbs,
         };
     }
@@ -492,19 +515,37 @@ const Big = struct {
         }
         return .{
             .negative = a.negative,
-            .used = topUsed(&limbs),
+            // The source limb `index` lands at `index + words` and at
+            // `index + words + 1`, and the loop stops as soon as the first of
+            // those leaves the array, so nothing above `a.used + words + 1` was
+            // touched.
+            .used = topUsed(&limbs, usedBound(@as(usize, a.used) + words + 1)),
             .limbs = limbs,
         };
     }
 };
 
-fn topUsed(limbs: *const [exact_limbs]u64) u8 {
-    var index: usize = exact_limbs;
+/// The number of limbs in use, found by scanning DOWN from `limit`.
+///
+/// Every producer below writes only inside the bound it passes, and the array
+/// is zero-initialized, so a scan that starts at the bound finds exactly the
+/// index a scan of the whole array would. The bound is what makes the cost
+/// track the WIDTH OF THE DATA rather than the width of the storage: a
+/// coordinate converted from a stored double occupies at most a third of the
+/// array, and a two-by-two determinant pays nothing like a full pass per
+/// operation.
+fn topUsed(limbs: *const [exact_limbs]u64, limit: u8) u8 {
+    var index: usize = limit;
     while (index > 0) {
         index -= 1;
         if (limbs[index] != 0) return @intCast(index + 1);
     }
     return 0;
+}
+
+/// The number of limbs a producer can have written, clamped to the storage.
+fn usedBound(limit: usize) u8 {
+    return @intCast(@min(limit, exact_limbs));
 }
 
 fn magnitudeCompare(a: Big, b: Big) std.math.Order {
@@ -532,7 +573,9 @@ fn magnitudeSum(a: Big, b: Big, negative: bool) Big {
         carry = @intCast(total >> 64);
     }
     if (carry != 0 and width < exact_limbs) limbs[width] = carry;
-    return .{ .negative = negative, .used = topUsed(&limbs), .limbs = limbs };
+    // The loop writes `0..width` and the carry adds at most the one limb above
+    // them.
+    return .{ .negative = negative, .used = topUsed(&limbs, usedBound(width + 1)), .limbs = limbs };
 }
 
 /// `a - b` in magnitude. The caller has already ordered the operands, so the
@@ -555,18 +598,20 @@ fn magnitudeDifference(a: Big, b: Big, negative: bool) Big {
         limbs[index] = @truncate(total);
         borrow = @intCast((total >> 64) & 1);
     }
-    return .{ .negative = negative, .used = topUsed(&limbs), .limbs = limbs };
+    // The loop writes `0..a.used` and nothing else, and a difference of
+    // magnitudes can only shrink the high limbs.
+    return .{ .negative = negative, .used = topUsed(&limbs, a.used), .limbs = limbs };
 }
 
 /// `[dim]Big` of the exact values of a row of stored coordinates, built ONCE
 /// and then shared.
 ///
-/// `fromFloat` writes and then scans all 132 limbs, so converting the same
-/// coordinate twice costs a whole array twice over. Every predicate below
-/// therefore takes its inputs as cached anchors and forms every factor and
-/// every difference from them, which is what bounds the work: a question that
-/// reads `k` stored coordinates converts `k` of them, exactly once, however
-/// many products and differences it goes on to form.
+/// `fromFloat` zero-fills a whole array and writes two limbs of it, so
+/// converting the same coordinate twice costs a whole array twice over. Every
+/// predicate below therefore takes its inputs as cached anchors and forms
+/// every factor and every difference from them, which is what bounds the work:
+/// a question that reads `k` stored coordinates converts `k` of them, exactly
+/// once, however many products and differences it goes on to form.
 ///
 /// A stored coordinate and an exact difference of two of them carry the SAME
 /// `2^1074` scale, so one can stand in for the other wherever a predicate
@@ -601,11 +646,11 @@ fn exactDeltas(comptime dim: usize, from: [dim]Big, to: [dim]Big) [dim]Big {
 /// Both tangency combinations of one pair of radii, over ONE conversion of
 /// each radius.
 ///
-/// `fromFloat` writes and then scans all 132 limbs, so converting the same
-/// radius a second time costs a whole array again over. Both combinations are
-/// exact values of their own, because a rounded sum or a rounded difference is
-/// the whole difference between two balls that cross and two that touch, and
-/// both come off the same pair of anchors.
+/// `fromFloat` zero-fills a whole array and writes two limbs of it, so
+/// converting the same radius a second time costs a whole array again over.
+/// Both combinations are exact values of their own, because a rounded sum or a
+/// rounded difference is the whole difference between two balls that cross and
+/// two that touch, and both come off the same pair of anchors.
 fn exactRadiusPair(comptime T: type, a: T, b: T) ExactRadiusPair {
     const first = Big.fromFloat(widen(T, a));
     const second = Big.fromFloat(widen(T, b));
@@ -675,18 +720,42 @@ fn exactOrient3(comptime T: type, a: [3]T, b: [3]T, c: [3]T, d: [3]T) Sign {
     return total.sign();
 }
 
+/// The four points as the sixteen exact values the determinant reads: one
+/// conversion each, and every minor the expansion asks about reads these
+/// cells.
+///
+/// `exactMinor3Columns` already builds this shape for the four-dimensional
+/// coplanarity gate, and the degree-four determinant gets it for the same
+/// reason: `fromFloat` was a conversion and a tail scan apiece, so reading a
+/// cell out of the stored matrix re-converted the same coordinate once per
+/// minor per column.
+fn exactCells4(comptime T: type, rows: [4][4]T) [4][4]Big {
+    var out: [4][4]Big = undefined;
+    inline for (0..4) |row| {
+        out[row] = exactRow(4, T, rows[row]);
+    }
+    return out;
+}
+
 /// The exact three-by-three minor of a four-by-four matrix: the determinant
 /// of the three selected rows against the three selected columns, expanded
-/// along the third column into three terms of two products each.
-fn exactMinor3(rows: [4][4]f64, r0: usize, r1: usize, r2: usize, c0: usize, c1: usize, c2: usize) Big {
-    var total = cell(rows, r0, c2).mul(cell(rows, r1, c0).mul(cell(rows, r2, c1)).sub(cell(rows, r1, c1).mul(cell(rows, r2, c0))));
-    total = total.sub(cell(rows, r1, c2).mul(cell(rows, r0, c0).mul(cell(rows, r2, c1)).sub(cell(rows, r0, c1).mul(cell(rows, r2, c0)))));
-    total = total.add(cell(rows, r2, c2).mul(cell(rows, r0, c0).mul(cell(rows, r1, c1)).sub(cell(rows, r0, c1).mul(cell(rows, r1, c0)))));
+/// along the third column into three terms of two products each. The cells
+/// are read through a pointer so one cell never copies the whole matrix.
+fn exactMinor3(cells: *const [4][4]Big, r0: usize, r1: usize, r2: usize, c0: usize, c1: usize, c2: usize) Big {
+    var total = cell4(cells, r0, c2).mul(
+        cell4(cells, r1, c0).mul(cell4(cells, r2, c1)).sub(cell4(cells, r1, c1).mul(cell4(cells, r2, c0))),
+    );
+    total = total.sub(cell4(cells, r1, c2).mul(
+        cell4(cells, r0, c0).mul(cell4(cells, r2, c1)).sub(cell4(cells, r0, c1).mul(cell4(cells, r2, c0))),
+    ));
+    total = total.add(cell4(cells, r2, c2).mul(
+        cell4(cells, r0, c0).mul(cell4(cells, r1, c1)).sub(cell4(cells, r0, c1).mul(cell4(cells, r1, c0))),
+    ));
     return total;
 }
 
-fn cell(rows: [4][4]f64, row: usize, column: usize) Big {
-    return Big.fromFloat(rows[row][column]);
+fn cell4(cells: *const [4][4]Big, row: usize, column: usize) Big {
+    return cells[row][column];
 }
 
 /// The exact sign of the four-by-four determinant whose rows are the four
@@ -694,16 +763,13 @@ fn cell(rows: [4][4]f64, row: usize, column: usize) Big {
 /// cofactor signs alternate and each minor skips the column its own
 /// coefficient multiplies.
 fn exactOrient4(comptime T: type, a: [4]T, b: [4]T, c: [4]T, d: [4]T) Sign {
-    const rows: [4][4]f64 = .{ widenRow(T, a), widenRow(T, b), widenRow(T, c), widenRow(T, d) };
-    var total = exactMinor3(rows, 1, 2, 3, 1, 2, 3).mul(Big.fromFloat(rows[0][0]));
-    total = total.sub(exactMinor3(rows, 1, 2, 3, 0, 2, 3).mul(Big.fromFloat(rows[0][1])));
-    total = total.add(exactMinor3(rows, 1, 2, 3, 0, 1, 3).mul(Big.fromFloat(rows[0][2])));
-    total = total.sub(exactMinor3(rows, 1, 2, 3, 0, 1, 2).mul(Big.fromFloat(rows[0][3])));
+    const rows = [4][4]T{ a, b, c, d };
+    const cells = exactCells4(T, rows);
+    var total = exactMinor3(&cells, 1, 2, 3, 1, 2, 3).mul(cell4(&cells, 0, 0));
+    total = total.sub(exactMinor3(&cells, 1, 2, 3, 0, 2, 3).mul(cell4(&cells, 0, 1)));
+    total = total.add(exactMinor3(&cells, 1, 2, 3, 0, 1, 3).mul(cell4(&cells, 0, 2)));
+    total = total.sub(exactMinor3(&cells, 1, 2, 3, 0, 1, 2).mul(cell4(&cells, 0, 3)));
     return total.sign();
-}
-
-fn widenRow(comptime T: type, a: [4]T) [4]f64 {
-    return .{ widen(T, a[0]), widen(T, a[1]), widen(T, a[2]), widen(T, a[3]) };
 }
 
 /// The plain evaluation of the same four-by-four determinant, with the same

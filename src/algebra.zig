@@ -365,8 +365,25 @@ fn Multivector(
         /// The grade-0 part of the geometric product. This is the sandwich
         /// scalar of the even grades, and it is not `dot`, whose second argument
         /// is reversed.
+        ///
+        /// A blade pair lands on the scalar only when it multiplies with itself,
+        /// so this is the diagonal of the product table summed in ascending
+        /// mask order, with the same `+0` seed, the same zero left skip, the
+        /// same zero scale skip, and the same operand order as the full
+        /// product. Every other pair lands above grade `0` and is dropped, so
+        /// this computes the same value as `a.geometricProduct(b).c[scalar_mask]`
+        /// without the `coefficient_count` squared terms.
         fn scalarProduct(a: Self, b: Self) T {
-            return a.geometricProduct(b).c[scalar_mask];
+            const table = &product_table;
+            var sum: T = 0;
+            for (0..coefficient_count) |mask| {
+                const value = a.c[mask];
+                if (value == 0) continue;
+                const entry = table[mask][mask];
+                if (entry.coeff == 0) continue;
+                sum += @as(T, @floatFromInt(entry.coeff)) * value * b.c[mask];
+            }
+            return sum;
         }
 
         /// The versor conjugate, which is the Clifford conjugate restricted to
@@ -586,7 +603,7 @@ fn Multivector(
         /// The scalar form, the grade-0 part of `A * B(reverse)`. It is
         /// symmetric, and on the vector grade it is the ordinary dot product.
         pub fn dot(a: Self, b: Self) T {
-            return a.geometricProduct(b.reverse()).c[scalar_mask];
+            return scalarProduct(a, b.reverse());
         }
 
         // ------------------------------------------------------------------
@@ -665,14 +682,18 @@ fn Multivector(
         /// the sandwich has a nonzero coefficient above grade 0.
         pub fn inverseChecked(self: Self) ?Self {
             if (!self.isFinite()) return null;
-            const product = self.sandwichConjugate().geometricProduct(self);
+            const conjugate_part = self.sandwichConjugate();
+            const product = conjugate_part.geometricProduct(self);
             for (0..coefficient_count) |mask| {
                 if (mask == scalar_mask) continue;
                 if (product.c[mask] != 0) return null;
             }
+            // The residue scan reads the whole product, and its grade-0 part is
+            // the sandwich scalar, so the scale is the one `inverse` reads from
+            // that same product instead of building a second one.
             const sandwich = product.c[scalar_mask];
             if (sandwich == 0 or !IsFinite(T, sandwich)) return null;
-            return self.inverse();
+            return conjugate_part.scale(1 / sandwich);
         }
 
         /// The squared norm, the grade-0 part of `A * A(reverse)`. It is
