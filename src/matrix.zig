@@ -273,7 +273,7 @@ fn isFiniteEntry(comptime Scalar: type, value: Scalar) bool {
 // ---------------------------------------------------------------------------
 // Vectors
 //
-// `mulVec` accepts a named `Vec*` value when one matches the row count and the
+// A matrix uses a named `Vec*` value when one matches the lane count and the
 // entry type, and a plain array otherwise. Always taking a plain array would
 // give a caller holding a `Vec3f` a second undocumented spelling of the same
 // three numbers at the call site; inventing `Vec1f` and `Vec5f` would
@@ -283,7 +283,7 @@ fn isFiniteEntry(comptime Scalar: type, value: Scalar) bool {
 /// The component names of the `Vec*` types, in declaration order.
 const lane_names = [4][]const u8{ "x", "y", "z", "w" };
 
-/// The vector a `Mat(rows, Scalar)` applies itself to.
+/// The input or output vector representation for the given matrix extent.
 fn VecOf(comptime n_rows: usize, comptime Scalar: type) type {
     return switch (Scalar) {
         f32 => switch (n_rows) {
@@ -408,6 +408,7 @@ pub fn Mat(
     // rather than deep inside the first unrolled loop that uses a component.
     const component = Component(Scalar);
     const lane = VecOf(n_rows, Scalar);
+    const input_lane = VecOf(n_columns, Scalar);
 
     return struct {
         const Self = @This();
@@ -424,9 +425,8 @@ pub fn Mat(
         /// The number of columns. `data` indexes it first, `at` and `set`
         /// second.
         pub const columns: usize = n_columns;
-        /// The vector type `mulVec` takes and returns: `Vec3f` for a three-row
-        /// `f32` matrix, and `[rows]Element` where no named vector type
-        /// matches.
+        /// The vector type `mulVec` returns: `Vec3f` for a three-row `f32`
+        /// matrix, and `[rows]Element` where no named vector type matches.
         pub const vector_type = lane;
 
         /// The entries, COLUMN-MAJOR: `data[column][row]`.
@@ -594,17 +594,17 @@ pub fn Mat(
             return out;
         }
 
-        /// Applies the matrix to a COLUMN vector of `vector_type`, which is
-        /// `rows` long.
+        /// Applies the matrix to a COLUMN vector with `columns` components,
+        /// returning a `rows`-component vector of `vector_type`.
         ///
         /// Each row of the result sums its products in increasing contraction
         /// index, starting from the index-zero product, and strictly: no
         /// reassociation and no fused multiply-add. See the module comment for
         /// what that costs at a negative zero.
-        pub fn mulVec(self: Self, v: vector_type) vector_type {
+        pub fn mulVec(self: Self, v: input_lane) vector_type {
             @setFloatMode(.strict);
-            var lanes: [n_rows]Scalar = undefined;
-            inline for (0..n_rows) |index| lanes[index] = laneAt(vector_type, v, index);
+            var lanes: [n_columns]Scalar = undefined;
+            inline for (0..n_columns) |index| lanes[index] = laneAt(input_lane, v, index);
             var out: vector_type = undefined;
             inline for (0..n_rows) |row| {
                 var sum = entryMul(Scalar, self.data[0][row], lanes[0]);

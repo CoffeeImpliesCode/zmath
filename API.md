@@ -1100,6 +1100,35 @@ pub const Mat5d = Mat(5, 5, f64);
 
 Vectors are columns. `M * v` applies matrix `M` to vector `v`. Composition is right-to-left. `(A * B) * v` applies `B` first and `A` second.
 
+`Mat.mulVec` applies the matrix to a column vector: it takes exactly `columns`
+lanes and returns exactly `rows`. The input is a named vector when a named vector of
+that lane count and entry type exists, so `Vec2f`, `Vec3f`, or `Vec4f` for a real
+`f32` matrix and `Vec2d`, `Vec3d`, or `Vec4d` for a real `f64` matrix. Every other
+real column count, and every `Complexf` or `Complexd` column count, takes the plain
+array `[columns]Scalar`. The result is `Mat.vector_type`, which stays row-sized: a
+three-row `f32` matrix returns `Vec3f`, a five-row one returns `[5]f32`, and a
+complex matrix returns `[rows]Complexf` or `[rows]Complexd`. A square `Mat` is
+unchanged by that split, so `Mat3f.mulVec` still takes and returns `Vec3f` and
+`Mat4d.mulVec` still takes and returns `Vec4d`, and `vector_type` is still the
+right-hand side type `solveLu` and `solveCholesky` accept.
+
+```zig
+const rect = Mat(2, 4, f32).init(.{
+    .{ 1, 3, 5, 7 },
+    .{ 2, 4, 6, 8 },
+});
+const applied: zmath.vector.Vec2f =
+    rect.mulVec(zmath.vector.Vec4f.init(1, 1, 1, 1)); // x = 16, y = 20
+```
+
+A rectangular matrix no longer takes a row-sized argument. Handing `Mat(5, 4, f32)`
+or `Mat(2, 3, f32)` the five-lane or two-lane vector the old signature accepted is
+rejected by type checking at compile time rather than by a checked-build panic, and
+there is no compatibility overload for that spelling. The arithmetic does not move
+with the shape: each row still seeds from its column-zero product and adds the
+remaining columns in increasing order, strictly, with no reassociation and no fused
+multiply-add.
+
 ```zig
 pub fn mul(
     comptime output_columns: usize,

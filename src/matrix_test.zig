@@ -25,9 +25,12 @@ const vector = @import("vector.zig");
 const complex = @import("complex.zig");
 
 const Complexf = complex.Complexf;
+const Complexd = complex.Complexd;
 const Vec2f = vector.Vec2f;
 const Vec3f = vector.Vec3f;
 const Vec4f = vector.Vec4f;
+const Vec2d = vector.Vec2d;
+const Vec3d = vector.Vec3d;
 const Vec4d = vector.Vec4d;
 const Mat = matrix.Mat;
 const Mat2f = matrix.Mat2f;
@@ -51,6 +54,14 @@ fn recip(comptime n: f64) f64 {
 
 /// A `Complexf` from its two components.
 fn cf(re: f32, im: f32) Complexf {
+    return .{ .re = re, .im = im };
+}
+
+/// A `Complexf` or a `Complexd` from its two components.
+///
+/// The component type follows `C`, so one written fixture serves both formats
+/// and the type loop below can hand the same numbers to either.
+fn cz(comptime C: type, re: @FieldType(C, "re"), im: @FieldType(C, "re")) C {
     return .{ .re = re, .im = im };
 }
 
@@ -543,10 +554,13 @@ test "mulVec matches a hand-computed 3x3 product" {
     try testing.expectEqual(@as(f32, 10 + 6 + 0), weighted.z);
 }
 
-test "mulVec uses a plain array where no named vector type matches" {
-    // Five rows, so `vector_type` is `[5]f32` and the lane plumbing takes the
-    // array branch. Every row is a constant, so the result is four times that
-    // constant.
+test "mulVec returns a plain array where no named vector type matches the row count" {
+    // Five rows, so the RESULT is `[5]f32` and the lane plumbing takes the
+    // array branch. Four columns, so the vector it is handed is a `Vec4f`:
+    // the input length and the output length come from different counts, and
+    // the named type for a four-lane f32 vector is the same whatever the
+    // matrix does with it. Every row of the literal is a constant, so the
+    // result is four times that constant.
     const m = Mat(5, 4, f32).init(.{
         .{ 1, 1, 1, 1 },
         .{ 2, 2, 2, 2 },
@@ -554,10 +568,443 @@ test "mulVec uses a plain array where no named vector type matches" {
         .{ 4, 4, 4, 4 },
         .{ 5, 5, 5, 5 },
     });
-    const result = m.mulVec([5]f32{ 1, 1, 1, 1, 0 });
+    const result = m.mulVec(Vec4f.init(1, 1, 1, 1));
     for (0..5) |row| {
         try testing.expectEqual(@as(f32, @floatFromInt(row + 1)) * 4, result[row]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Rectangular application
+//
+// A contraction runs over the COLUMNS, so the vector `mulVec` takes is as long
+// as the column count and the result it returns is as long as the row count.
+// Every instantiation below has a row count and a column count that differ,
+// so the two types it exchanges are decided by two different numbers: a
+// `columns`-long argument names one matrix, and the `rows`-long vector it
+// hands back names another, and neither can stand in for the other.
+// ---------------------------------------------------------------------------
+
+test "a wide matrix contracts a three-component vector into two" {
+    //     [ 1 2 3 ]   [  2 ]   [ 1*2 + 2*(-3) + 3*5 ]   [ 11 ]
+    //     [ 4 5 6 ] * [ -3 ] = [ 4*2 + 5*(-3) + 6*5 ] = [ 23 ]
+    //                  [  5 ]
+    // Every product is an integer below a hundred, so both sums are exact and
+    // the comparison is a bit comparison.
+    const m = Mat(2, 3, f32).init(.{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
+    const result = m.mulVec(Vec3f.init(2, -3, 5));
+    try testing.expectEqual(@as(f32, 11), result.x);
+    try testing.expectEqual(@as(f32, 23), result.y);
+
+    // The lane order is already pinned by those two sums: read in reverse, the
+    // same three entries give (5, 17) rather than (11, 23), and the binary64
+    // pair below moves to (2, 11).
+
+    // The same shape in binary64, with a cancellation in the first row and a
+    // zero entry in the second:
+    //     [ 3 -1  4 ]   [  2 ]   [ 3*2 + (-1)*3 + 4*(-1) ]   [ -1 ]
+    //     [ 0  5 -2 ] * [  3 ] = [ 0*2 +  5*3 + (-2)*(-1) ] = [ 17 ]
+    //                  [ -1 ]
+    const d = Mat(2, 3, f64).init(.{ .{ 3, -1, 4 }, .{ 0, 5, -2 } });
+    const wide_d = d.mulVec(Vec3d.init(2, 3, -1));
+    try testing.expectEqual(@as(f64, -1), wide_d.x);
+    try testing.expectEqual(@as(f64, 17), wide_d.y);
+}
+
+test "a tall matrix contracts a two-component vector into three" {
+    //     [ 1 2 ]   [ 1 ]   [ 1*1 + 2*2 ]   [  5 ]
+    //     [ 3 4 ] * [ 2 ] = [ 3*1 + 4*2 ] = [ 11 ]
+    //     [ 5 6 ]                 [ 5*1 + 6*2 ] = [ 17 ]
+    // The two lanes are not interchangeable here either: (2, 1) would give
+    // (4, 10, 16) instead.
+    const m = Mat(3, 2, f32).init(.{ .{ 1, 2 }, .{ 3, 4 }, .{ 5, 6 } });
+    const tall = m.mulVec(Vec2f.init(1, 2));
+    try testing.expectEqual(@as(f32, 5), tall.x);
+    try testing.expectEqual(@as(f32, 11), tall.y);
+    try testing.expectEqual(@as(f32, 17), tall.z);
+
+    // The binary64 fixture cancels exactly in its first row:
+    //     [  2 -3 ]   [ 3 ]   [ 2*3 + (-3)*2 ]   [  0 ]
+    //     [ -1  4 ] * [ 2 ] = [ -1*3 + 4*2 ]   = [  5 ]
+    //     [  0  6 ]                     [ 12 ]
+    const d = Mat(3, 2, f64).init(.{ .{ 2, -3 }, .{ -1, 4 }, .{ 0, 6 } });
+    const tall_d = d.mulVec(Vec2d.init(3, 2));
+    try testing.expectEqual(@as(f64, 0), tall_d.x);
+    try testing.expectEqual(@as(f64, 5), tall_d.y);
+    try testing.expectEqual(@as(f64, 12), tall_d.z);
+    // Flipping the sign of the second lane changes every row that has an
+    // entry there, and it is the only way to tell a two-lane contraction from
+    // a one-lane one on a matrix whose rows are not all equal.
+    const negated_d = d.mulVec(Vec2d.init(3, -2));
+    try testing.expectEqual(@as(f64, 12), negated_d.x);
+    try testing.expectEqual(@as(f64, -11), negated_d.y);
+    try testing.expectEqual(@as(f64, -12), negated_d.z);
+}
+
+test "a one-row matrix takes a vector as long as its columns" {
+    // 2*5 + (-3)*1 + 4*(-1) = 10 - 3 - 4 = 3, and the result is a one-element
+    // array because no named vector type has a single component.
+    const three_columns = Mat(1, 3, f32).init(.{
+        .{ 2, -3, 4 },
+    });
+    const three = three_columns.mulVec(Vec3f.init(5, 1, -1));
+    try testing.expectEqual(@as(f32, 3), three[0]);
+
+    // Five columns take a five-element array, since no named vector type has
+    // five components either, and the fifth lane is not free to drop out:
+    // reading the row with (1, 1, 1, 1, 0) would give 10 rather than 15.
+    const five_columns = Mat(1, 5, f32).init(.{
+        .{ 1, 2, 3, 4, 5 },
+    });
+    const all_ones = five_columns.mulVec([5]f32{ 1, 1, 1, 1, 1 });
+    try testing.expectEqual(@as(f32, 15), all_ones[0]);
+
+    // A two-column row in binary64, whose result is one component wide too:
+    // (-6)*2 + 9*3 = -12 + 27 = 15.
+    const two_columns = Mat(1, 2, f64).init(.{
+        .{ -6, 9 },
+    });
+    const pair = two_columns.mulVec(Vec2d.init(2, 3));
+    try testing.expectEqual(@as(f64, 15), pair[0]);
+}
+
+test "a one-column matrix takes a single-lane array and returns a named vector" {
+    // One column is one product, so the vector it is handed is `[1]f32` while
+    // the result is the three-component `Vec3f`. Neither is an array by
+    // accident: the input is as long as the column count and the result as
+    // long as the row count, and this shape is the only one where those two
+    // decisions disagree.
+    const m = Mat(3, 1, f32).init(.{ .{1}, .{2}, .{3} });
+    const scaled = m.mulVec([1]f32{4});
+    try testing.expectEqual(@as(f32, 4), scaled.x);
+    try testing.expectEqual(@as(f32, 8), scaled.y);
+    try testing.expectEqual(@as(f32, 12), scaled.z);
+
+    // Four rows and one column in binary64, where the lane multiplies each
+    // entry unchanged: 2*3, (-1)*3, 0*3, 5*3.
+    const d = Mat(4, 1, f64).init(.{ .{2}, .{-1}, .{0}, .{5} });
+    const scaled_d = d.mulVec([1]f64{3});
+    try testing.expectEqual(@as(f64, 6), scaled_d.x);
+    try testing.expectEqual(@as(f64, -3), scaled_d.y);
+    try testing.expectEqual(@as(f64, 0), scaled_d.z);
+    try testing.expectEqual(@as(f64, 15), scaled_d.w);
+
+    // Five rows and one column is the other end of the same switch: both the
+    // vector it takes and the vector it returns are plain arrays. The 5 by 4
+    // case above is the mirror image of it, a named input with an array
+    // result, so the two together cover both directions of the switch.
+    const ramp = Mat(5, 1, f32).init(.{ .{2}, .{1}, .{0}, .{-1}, .{-2} });
+    const ramped = ramp.mulVec([1]f32{3});
+    try testing.expectEqual(@as(f32, 6), ramped[0]);
+    try testing.expectEqual(@as(f32, 3), ramped[1]);
+    try testing.expectEqual(@as(f32, 0), ramped[2]);
+    try testing.expectEqual(@as(f32, -3), ramped[3]);
+    try testing.expectEqual(@as(f32, -6), ramped[4]);
+}
+
+test "a rectangular composition applies the right factor first" {
+    // `A * B` contracts over the middle index, so the right factor has as many
+    // rows as the left factor has columns: a 3 by 2 after a 2 by 3. That
+    // chaining is what lets the result of one `mulVec` be the argument of the
+    // next, and it is the same rule the product follows.
+    const a = Mat(2, 3, f32).init(.{ .{ 1, 2, 3 }, .{ 4, 5, 6 } });
+    const b = Mat(3, 2, f32).init(.{ .{ 1, 0 }, .{ 0, 1 }, .{ 1, 1 } });
+    const v = Vec2f.init(2, 3);
+
+    //     B * v = [ 1*2 + 0*3 ]   [ 2 ]
+    //            [ 0*2 + 1*3 ] = [ 3 ]
+    //            [ 1*2 + 1*3 ]   [ 5 ]
+    const inner = b.mulVec(v);
+    try testing.expectEqual(@as(f32, 2), inner.x);
+    try testing.expectEqual(@as(f32, 3), inner.y);
+    try testing.expectEqual(@as(f32, 5), inner.z);
+
+    //     A * B = [ 1+0+3  0+2+3 ]   [  4  5 ]
+    //             [ 4+0+6  0+5+6 ] = [ 10 11 ]
+    // and A * (B * v) = [ 1*2 + 2*3 + 3*5 ]   [  2 + 6 + 15 ]   [ 23 ]
+    //                  [ 4*2 + 5*3 + 6*5 ] = [  8 + 15 + 30 ] = [ 53 ]
+    // Every partial sum on either route is an integer below a hundred, so the
+    // two answers are bit equal and the entries are pinned to hand values.
+    const ab = matrix.mul(2, a, b);
+    try testing.expectEqual(@as(f32, 4), ab.at(0, 0));
+    try testing.expectEqual(@as(f32, 5), ab.at(0, 1));
+    try testing.expectEqual(@as(f32, 10), ab.at(1, 0));
+    try testing.expectEqual(@as(f32, 11), ab.at(1, 1));
+    const chained = a.mulVec(inner);
+    const product = ab.mulVec(v);
+    try testing.expectEqual(@as(f32, 23), chained.x);
+    try testing.expectEqual(@as(f32, 53), chained.y);
+    try testing.expectEqual(@as(f32, 23), product.x);
+    try testing.expectEqual(@as(f32, 53), product.y);
+
+    // The same shapes in binary64:
+    //     A = [ 2 -1  0 ]   B = [  3  0 ]   v = [ 2 ]
+    //         [ 1  1  1 ]       [  0 -2 ]       [ 1 ]
+    //         [ ...      ]       [  1  1 ]
+    //     B * v = [ 6, -2, 3 ] and A * that = [ 12 + 2 + 0, 6 - 2 + 3 ]
+    const ad = Mat(2, 3, f64).init(.{ .{ 2, -1, 0 }, .{ 1, 1, 1 } });
+    const bd = Mat(3, 2, f64).init(.{ .{ 3, 0 }, .{ 0, -2 }, .{ 1, 1 } });
+    const vd = Vec2d.init(2, 1);
+    const inner_d = bd.mulVec(vd);
+    try testing.expectEqual(@as(f64, 6), inner_d.x);
+    try testing.expectEqual(@as(f64, -2), inner_d.y);
+    try testing.expectEqual(@as(f64, 3), inner_d.z);
+    const chained_d = ad.mulVec(inner_d);
+    const product_d = matrix.mul(2, ad, bd).mulVec(vd);
+    try testing.expectEqual(@as(f64, 14), chained_d.x);
+    try testing.expectEqual(@as(f64, 7), chained_d.y);
+    try testing.expectEqual(@as(f64, 14), product_d.x);
+    try testing.expectEqual(@as(f64, 7), product_d.y);
+}
+
+test "a complex rectangle contracts over an array" {
+    // No `Vec*` type is complex, so both sides of a complex application are
+    // plain arrays: the input holds one element per COLUMN and the result one
+    // per ROW, and the two are independent decisions. Both directions are
+    // checked below, in both formats.
+    //
+    // Every product below is the naive four-multiply form on integers of
+    // magnitude at most five, so both components of both sums are exact and
+    // the same numbers serve binary32 and binary64.
+    inline for (.{ Complexf, Complexd }) |C| {
+        const R = @FieldType(C, "re");
+        // WIDE: three columns in, two rows out.
+        //     [ 1+i  2i  2-i ]   [ 1-i ]
+        //     [ -1   1+i   i ] * [ 2   ]
+        //                        [  i ]
+        // row 0: (1+i)(1-i) + (2i)(2) + (2-i)(i) = 2 + 4i + (1+2i) = 3 + 6i
+        // row 1: (-1)(1-i) + (1+i)(2) + (i)(i) = (-1+i) + (2+2i) - 1 = 3i
+        // The lanes are not interchangeable: (i, 2, 1-i) would give (0, 2i).
+        const a = Mat(2, 3, C).init(.{
+            .{ cz(C, 1, 1), cz(C, 0, 2), cz(C, 2, -1) },
+            .{ cz(C, -1, 0), cz(C, 1, 1), cz(C, 0, 1) },
+        });
+        const wide = a.mulVec([3]C{ cz(C, 1, -1), cz(C, 2, 0), cz(C, 0, 1) });
+        try testing.expectEqual(@as(R, 3), wide[0].re);
+        try testing.expectEqual(@as(R, 6), wide[0].im);
+        try testing.expectEqual(@as(R, 0), wide[1].re);
+        try testing.expectEqual(@as(R, 3), wide[1].im);
+
+        // TALL: two columns in, three rows out.
+        //     [ 1+2i   i  ]   [ 2+i ]
+        //     [ -1+i   2  ] * [-1+2i]
+        //     [ -2i  1+i ]
+        // row 0: (1+2i)(2+i) + (i)(-1+2i) = 5i + (-2-i) = -2 + 4i
+        // row 1: (-1+i)(2+i) + (2)(-1+2i) = (-3+i) + (-2+4i) = -5 + 5i
+        // row 2: (-2i)(2+i) + (1+i)(-1+2i) = (2-4i) + (-3+i) = -1 - 3i
+        // Here the reverse lanes give (-6, 2i) in row 0, so a transposed read
+        // cannot pass both shapes.
+        const d = Mat(3, 2, C).init(.{
+            .{ cz(C, 1, 2), cz(C, 0, 1) },
+            .{ cz(C, -1, 1), cz(C, 2, 0) },
+            .{ cz(C, 0, -2), cz(C, 1, 1) },
+        });
+        const tall = d.mulVec([2]C{ cz(C, 2, 1), cz(C, -1, 2) });
+        try testing.expectEqual(@as(R, -2), tall[0].re);
+        try testing.expectEqual(@as(R, 4), tall[0].im);
+        try testing.expectEqual(@as(R, -5), tall[1].re);
+        try testing.expectEqual(@as(R, 5), tall[1].im);
+        try testing.expectEqual(@as(R, -1), tall[2].re);
+        try testing.expectEqual(@as(R, -3), tall[2].im);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Accumulation order in a rectangle
+//
+// The order a contraction sums in is only observable where a rounding or a
+// sign separates one order from another, so every fixture below is built
+// around a case where a different order, a fused multiply-add, or a leading
+// zero would give a different answer. The shapes are rectangular, so the two
+// lane counts are checked at the same time.
+// ---------------------------------------------------------------------------
+
+test "a rectangular contraction keeps its column order through a cancellation" {
+    // The three products of row 0 are 1, 2^30, and -2^30. The spacing of
+    // binary32 at 2^30 is 128, so 1 + 2^30 rounds back to 2^30 and the last
+    // term cancels it exactly: the answer is +0. Summing the same three
+    // products in DECREASING column order would give -2^30 + 2^30 + 1 = 1, so
+    // the zero is what fixes the order rather than the arithmetic being right
+    // in general.
+    const two_30: f32 = 0x1p+30;
+    const m = Mat(2, 3, f32).init(.{
+        .{ 1, two_30, -two_30 },
+        .{ -two_30, two_30, 1 },
+    });
+    const result = m.mulVec(Vec3f.init(1, 1, 1));
+    // `x + (-x)` is +0 for finite non-zero x under round-to-nearest, so the
+    // sign of the zero is pinned as well as its value.
+    try testing.expectEqual(@as(u32, 0x0000_0000), @as(u32, @bitCast(result.x)));
+    // Row 1 carries the same three products in the other order and the small
+    // term SURVIVES there: -2^30 + 2^30 = +0 and +0 + 1 = 1. A sum that
+    // swallowed small terms whatever their position would report 0 for this
+    // row too, and the two rows are one permutation apart.
+    try testing.expectEqual(@as(f32, 1), result.y);
+
+    // binary64 has the same shape one exponent up: 2^53 is the first power of
+    // two whose successor is two away, so 1 + 2^53 is a tie and rounds to the
+    // even neighbour 2^53.
+    const two_53: f64 = 0x1p+53;
+    const d = Mat(2, 3, f64).init(.{
+        .{ 1, two_53, -two_53 },
+        .{ -two_53, two_53, 1 },
+    });
+    const result_d = d.mulVec(Vec3d.init(1, 1, 1));
+    try testing.expectEqual(@as(u64, 0x0000_0000_0000_0000), @as(u64, @bitCast(result_d.x)));
+    try testing.expectEqual(@as(f64, 1), result_d.y);
+}
+
+test "a rectangular contraction does not fuse its multiply and add" {
+    // The row [-1, 1 + 2^-23] against the vector [1, 1 - 2^-23]. Column 0
+    // seeds the accumulator with the exact -1, and column 1's product is
+    // (1 + 2^-23)(1 - 2^-23) = 1 - 2^-46 in exact arithmetic. binary32
+    // cannot hold that: the neighbours of 1 are 1 itself and 1 - 2^-24, and
+    // 1 - 2^-46 sits a factor of 2^22 nearer 1 than the lower one does, so
+    // the product rounds to 1 and the sum is -1 + 1 = +0.
+    //
+    // A fused multiply-add keeps the 2^-46 the multiply discards, so it
+    // returns the exactly representable -2^-46. The zero is therefore a
+    // value the fused form cannot produce, which is what makes this a
+    // discriminator rather than a restatement of the arithmetic.
+    //
+    // Both operand sets live in mutable storage that is handed to
+    // `doNotOptimizeAway`, so the fixture is evaluated by the runtime rather
+    // than folded from literals before the call.
+    var row = [_]f32{ -1.0, 1.0 + 0x1p-23 };
+    var lane = [2]f32{ 1.0, 1.0 - 0x1p-23 };
+    std.mem.doNotOptimizeAway(&row);
+    std.mem.doNotOptimizeAway(&lane);
+    const m = Mat(1, 2, f32).init(.{row});
+    const strict = m.mulVec(Vec2f.init(lane[0], lane[1]));
+    // The seed is -1 and the rounded product is 1, and `x + (-x)` is +0 for
+    // finite non-zero x under round-to-nearest, so the zero's sign is pinned
+    // along with its value.
+    try testing.expectEqual(@as(u32, 0x0000_0000), @as(u32, @bitCast(strict[0])));
+
+    // The same shape one format up. 2^-52 is the spacing above 1 in
+    // binary64, the exact product is 1 - 2^-104, and the fused form would
+    // return the equally representable -2^-104.
+    var row_d = [_]f64{ -1.0, 1.0 + 0x1p-52 };
+    var lane_d = [2]f64{ 1.0, 1.0 - 0x1p-52 };
+    std.mem.doNotOptimizeAway(&row_d);
+    std.mem.doNotOptimizeAway(&lane_d);
+    const d = Mat(1, 2, f64).init(.{row_d});
+    const strict_d = d.mulVec(Vec2d.init(lane_d[0], lane_d[1]));
+    try testing.expectEqual(@as(u64, 0x0000_0000_0000_0000), @as(u64, @bitCast(strict_d[0])));
+}
+
+test "a single-column rectangle keeps the sign of its seed" {
+    // One column is one product and no addition at all, so the seed IS the
+    // answer and a negative zero survives. An implementation that began from
+    // an explicit zero would return +0 for rows 0 and 2 instead, because
+    // +0 + -0 is +0.
+    const m = Mat(3, 1, f32).init(.{ .{-0.0}, .{0.0}, .{-0.0} });
+    const seeded = m.mulVec([1]f32{0.0});
+    try testing.expectEqual(@as(u32, 0x8000_0000), @as(u32, @bitCast(seeded.x)));
+    try testing.expectEqual(@as(u32, 0x0000_0000), @as(u32, @bitCast(seeded.y)));
+    try testing.expectEqual(@as(u32, 0x8000_0000), @as(u32, @bitCast(seeded.z)));
+
+    // The same entries in the FIRST column of a two-column rectangle are
+    // washed out: the second column contributes 0*0 = +0, and -0 + +0 is
+    // +0. That is the boundary of the rule above, and it is why the column
+    // count has to be visible in the result instead of assumed.
+    const two_columns = Mat(3, 2, f32).init(.{
+        .{ -0.0, 0.0 },
+        .{ 0.0, 0.0 },
+        .{ -0.0, 0.0 },
+    });
+    const washed = two_columns.mulVec(Vec2f.init(0.0, 0.0));
+    try testing.expectEqual(@as(u32, 0x0000_0000), @as(u32, @bitCast(washed.x)));
+    try testing.expectEqual(@as(u32, 0x0000_0000), @as(u32, @bitCast(washed.y)));
+    try testing.expectEqual(@as(u32, 0x0000_0000), @as(u32, @bitCast(washed.z)));
+
+    // The sign of a zero product follows the LANE, not the entry. With the
+    // second lane negative both products of this row are -0 and -0 + -0 is
+    // -0; with it positive the sum is -0 + +0, which is +0.
+    const seeded_by_lane = Mat(1, 2, f32).init(.{
+        .{ -1.0, 0.0 },
+    });
+    const both_negative = seeded_by_lane.mulVec(Vec2f.init(0.0, -1.0));
+    try testing.expectEqual(@as(u32, 0x8000_0000), @as(u32, @bitCast(both_negative[0])));
+    const second_positive = seeded_by_lane.mulVec(Vec2f.init(0.0, 1.0));
+    try testing.expectEqual(@as(u32, 0x0000_0000), @as(u32, @bitCast(second_positive[0])));
+}
+
+test "a rectangle reports the first NaN of its row, quieted and intact" {
+    // Two NaNs meet in row 0, and they are deliberately unlike each other: a
+    // SIGNALING 0x7f80_0001 in column 0 and the quiet, negative, differently
+    // signed payload 0xffc0_0002 in column 1. Both lanes are one, so column 0
+    // is the seed and column 1 is the added term.
+    //
+    // The seed is quieted by the MULTIPLY, not by the addition: `entryMul`
+    // carries the column's own operand through and sets the quiet bit there,
+    // which is why the signaling 0x7f80_0001 comes back as 0x7fc0_0001. The
+    // addition then decides between two NaNs, and it reports the one already
+    // in the accumulator. So the answer is 0x7fc0_0001, positive, with the
+    // first payload. Had the later column won the row would read
+    // 0xffc0_0002, which is a different sign AND a different payload, so this
+    // is a real ordering check rather than a NaN check that passes either way.
+    const signaling: f32 = @bitCast(@as(u32, 0x7f80_0001));
+    const negative_other: f32 = @bitCast(@as(u32, 0xffc0_0002));
+    const negative_canonical: f32 = @bitCast(@as(u32, 0xffc0_0000));
+    var m = Mat(3, 2, f32).fill(0);
+    m.set(0, 0, signaling);
+    m.set(0, 1, negative_other);
+    m.set(1, 0, negative_canonical);
+    const result = m.mulVec(Vec2f.init(1, 1));
+    try testing.expectEqual(@as(u32, 0x7fc0_0001), @as(u32, @bitCast(result.x)));
+    // The negative canonical NaN is the SEED of row 1, and it is quiet
+    // already, so it crosses both the multiply and the add with its sign
+    // untouched. A kernel that substituted the positive canonical encoding
+    // would report 0x7fc00000 here.
+    try testing.expectEqual(@as(u32, 0xffc0_0000), @as(u32, @bitCast(result.y)));
+    // Row 2 reads the same two columns and meets no NaN at all, so the
+    // propagation is per row and not a whole-result effect.
+    try testing.expectEqual(@as(f32, 0), result.z);
+
+    // The same precedence in binary64, where the two payloads differ in sign
+    // the other way round: a negative signaling 0xfff0_0000_0000_0001 first
+    // and a positive quiet 0x7ff8_0000_0000_00a5 after it. The reported value
+    // is the first, so the sign and the payload both come from column 0.
+    const signaling_d: f64 = @bitCast(@as(u64, 0xfff0_0000_0000_0001));
+    const positive_other_d: f64 = @bitCast(@as(u64, 0x7ff8_0000_0000_00a5));
+    var m_d = Mat(3, 2, f64).fill(0);
+    m_d.set(0, 0, signaling_d);
+    m_d.set(0, 1, positive_other_d);
+    m_d.set(1, 0, nan_d);
+    const rows = m_d.mulVec(Vec2d.init(1, 1));
+    try testing.expectEqual(@as(u64, 0xfff8_0000_0000_0001), @as(u64, @bitCast(rows.x)));
+    try testing.expectEqual(@as(u64, 0x7ff8_0000_0000_0000), @as(u64, @bitCast(rows.y)));
+    try testing.expectEqual(@as(f64, 0), rows.z);
+}
+
+test "an invalid rectangular step gives the positive canonical NaN" {
+    // +inf and -inf are the only non-NaN operands that reach an invalid
+    // operation here: the seed is +inf*1 and the added term is -inf*1. The
+    // substitution to the POSITIVE canonical quiet NaN is the part a host SSE
+    // unit does not do on its own, and it happens in the ADD rather than in
+    // the multiply, so the order of the columns is what puts it there.
+    const positive_infinity: f32 = @bitCast(@as(u32, 0x7f80_0000));
+    const wide = Mat(1, 2, f32).init(.{
+        .{ positive_infinity, -positive_infinity },
+    });
+    const result = wide.mulVec(Vec2f.init(1, 1));
+    try testing.expect(std.math.isNan(result[0]));
+    try testing.expectEqual(@as(u32, 0x7fc0_0000), @as(u32, @bitCast(result[0])));
+
+    // The same two terms on a three-row rectangle in binary64. Row 1 is
+    // ordinary arithmetic between the same columns, and row 2 reaches the
+    // same invalid operation with the two signs the other way round, so a
+    // result copied from row 0 could not pass both.
+    const tall = Mat(3, 2, f64).init(.{
+        .{ inf_d, -inf_d },
+        .{ 1, 0 },
+        .{ -inf_d, inf_d },
+    });
+    const rows = tall.mulVec(Vec2d.init(1, 1));
+    try testing.expectEqual(@as(u64, 0x7ff8_0000_0000_0000), @as(u64, @bitCast(rows.x)));
+    try testing.expectEqual(@as(f64, 1), rows.y);
+    try testing.expectEqual(@as(u64, 0x7ff8_0000_0000_0000), @as(u64, @bitCast(rows.z)));
 }
 
 // ---------------------------------------------------------------------------
@@ -1584,30 +2031,37 @@ comptime {
         }
     }
 
+    // `vector_type` is the type `mulVec` RETURNS, and the row count alone
+    // decides it. The vector it takes is as long as the COLUMN count, so for
+    // the square sizes here both directions meet in the same type and one
+    // check covers them; a rectangle separates them, and the two checks
+    // below are on the two rectangular shapes.
+    //
     // `Mat4f` and `Mat4d` are the homogeneous 3D sizes and `Mat5f` and
     // `Mat5d` the homogeneous 4D ones. The arithmetic cannot see the
     // difference, so the only thing a caller can rely on is the shape, and the
     // reason those two sizes exist is recorded on the aliases themselves.
     if (Mat4f.vector_type != Vec4f or Mat4d.vector_type != Vec4d) {
-        @compileError("a 4 by 4 matrix must apply itself to a four-component vector");
+        @compileError("a 4 by 4 matrix must return a four-component vector");
     }
     if (Mat3f.vector_type != Vec3f) {
-        @compileError("a 3 by 3 f32 matrix must apply itself to a Vec3f");
+        @compileError("a 3 by 3 f32 matrix must return a Vec3f");
     }
     if (Mat2f.vector_type != Vec2f) {
-        @compileError("a 2 by 2 f32 matrix must apply itself to a Vec2f");
+        @compileError("a 2 by 2 f32 matrix must return a Vec2f");
     }
     if (Mat5f.vector_type != [5]f32) {
-        @compileError("a 5 by 5 f32 matrix must apply itself to a five-element array");
+        @compileError("a 5 by 5 f32 matrix must return a five-element array");
     }
-    // The row count alone decides the vector type; the column count has nothing
-    // to do with it, so a two-row matrix of any width takes a `Vec2f`.
+    // A two-row matrix of ANY width returns a `Vec2f`, and this one is handed
+    // a `Vec3f` to do it with: the result follows the row count alone while
+    // the input follows the column count.
     if (Mat(2, 3, f32).vector_type != Vec2f) {
-        @compileError("a two-row f32 matrix must apply itself to a Vec2f");
+        @compileError("a two-row f32 matrix must return a Vec2f");
     }
     // A row count matching no named vector type falls back to a plain array,
-    // which is where a 5 by 3 matrix lands.
+    // which is where a 5 by 3 matrix lands. It is still applied to a `Vec3f`.
     if (Mat(5, 3, f32).vector_type != [5]f32) {
-        @compileError("an unmatched row count must use a plain array");
+        @compileError("an unmatched row count must return a plain array");
     }
 }
