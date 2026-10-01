@@ -22,7 +22,7 @@ while no `Vec*` name does.
 
 Public real formats are `f16`, `f32`, and `f64` for the current IEEE and scalar primitives. Public type and function names use lower-case `h`, `f`, and `d` suffixes. `q`, `f128`, and bfloat16 are outside this contract and have no public API.
 
-The API uses one structural generic, `Mat`. Vectors, quaternions, geometry, factorizations, and geometric algebras use named concrete types.
+The API uses one structural generic, `Mat`. Complex values, vectors, quaternions, geometry, factorizations, and geometric algebras use named concrete types.
 
 ## Planned module paths
 
@@ -751,7 +751,9 @@ A result that leaves the format saturates at its boundary: infinity when the mod
 A result that rounds to zero keeps the sign of the input, so the underflow of a negative value returns `-0`.
 
 `roundIntegral` returns `value` rounded to an integer in the named mode, with the same tie, direction, and sign rules.
-A value of magnitude one or more is already integral and is returned bit-identical, while a value below one rounds to a signed zero or to plus or minus one, and the mode decides which.
+An integral value is returned bit-identical.
+A finite fractional value is rounded in the named mode, including values with magnitude greater than one.
+A result of zero retains the input sign.
 
 Both families use gradual underflow.
 A subnormal input is normalized before it is scaled, a subnormal result is never flushed to zero, and a zero and an infinity pass through at any exponent.
@@ -799,8 +801,8 @@ Target status or source availability cannot substitute for this evidence.
 
 Before a manifest-gated scalar pair becomes accepted, the repository updates a versioned contract at `spec/core-math-<date>.md`.
 
-The schema-3 manifest is `zmath-testing/test/corpus/manifest.toml`.
-It contains exactly 315 sorted typed function rows for `f16`, `f32`, and `f64`.
+The schema-5 manifest is `zmath-testing/test/corpus/manifest.toml`.
+It contains exactly 347 sorted typed function rows for `f16`, `f32`, and `f64`.
 It pins the CORE-MATH revision, 512-bit MPFR/Arb settings for evaluator paths that use them, `nearest_even`, and the special-value policy.
 The checked-in manifest is the only acceptance authority.
 A successful candidate campaign does not change a row's manifest status.
@@ -812,41 +814,84 @@ Dedicated encoded names, including narrowing operations, remain unchanged.
 
 The provenance vocabulary is exactly `["zmath", "core_math"]`.
 Each row uses `["zmath"]`, `["core_math"]`, or `["zmath", "core_math"]`.
-Scalar results use `float:<format>`, `integer:<type>`, or `bool`.
+Scalar results use `float:<format>`, `integer:<type>`, `bool`, or `classification`.
 Structure results use `struct:<kind>:<format>`.
 Status-container descriptors include:
 
 - `struct:atan2:<format>` for `Atan2Result(T) { value: T, resolved: bool }`.
 - `struct:power:<format>` for `PowerResult(T) { value: T, ok: bool }`.
 - `struct:integer:<format>` for `IntegerResult { value: i64, ok: bool }`.
+- `struct:quaternion:<format>` for four quaternion components in `x`, `y`, `z`, `w` order.
+- `struct:algebra:<format>` for eight Cl(3) coefficients in basis-mask order.
+- `struct:complex:<format>` for the two components of `Complexf` or `Complexd`, `re` then `im`.
+- `struct:luSolve:<format>` for three stored channels, `x0`, `x1`, and `ok`.
 
-These descriptors record the public return shape.
-They do not grant implementation, corpus evidence, or manifest acceptance.
+These descriptors name the layout a stored record uses.
+Most of them also carry the public return shape.
+Two of them name no public type of their own.
+`zmath.complex` has no generic `Complex(T)`: its only public types are the concrete
+`Complexf` and `Complexd`, each with `re` and `im`, so `struct:complex` mirrors
+those two fields and promises no third type.
+`zmath.linalg` publishes no `LuSolve2Result(T)`: `lu` returns `?LuMat2f` through
+`?LuMat4d` and `solveLu` returns an optional vector, `?Vec2f` through `?Vec4d`.
+`struct:luSolve` is the adapter that turns that optional vector into stored
+fields. A refused factorization or solve publishes the canonical `+0`, `+0`, and
+`false`, because a `null` has no record encoding, and an accepted solve whose
+exact solution leaves the format may publish an infinite component with
+`ok=true`.
+No descriptor grants implementation, corpus evidence, or manifest acceptance.
+
+Ten rows cover selected non-scalar operations: five operations, each with one `f`
+and one `d` row. `complexAdd` and `complexMul` take four same-format floats `a.re`,
+`a.im`, `b.re`, `b.im`; `matrixDet2` takes four row-major `a00`, `a01`, `a10`,
+`a11`; `luSolve2` takes `a00`, `a01`, `a10`, `a11`, `b0`, `b1`; and
+`geometryOrient2` takes six coordinates `ax`, `ay`, `bx`, `by`, `cx`, `cy` plus a
+policy tag of exactly `adaptive_exact` or `fast`, and returns `integer:i32`
+carrying `-1`, `0`, or `+1` rather than a sign-enum ordinal. All ten use
+`oracle = "algebraic"`, `status = "correct"`, and `max_ulp = 0`.
+The independent exact-rational reference follows the arithmetic each public graph
+performs, so the ten rows do not share one rounding rule: `complexAdd` rounds each
+exact component sum once, `complexMul` rounds each product and each component sum,
+`matrixDet2` rounds two products and the final subtraction, `luSolve2` computes the
+exact rational Cramer solution and rounds once per component, and `geometryOrient2`
+uses the exact determinant of the stored coordinates under `adaptive_exact` and the
+target-rounded graph under `fast`.
+These rows hold 324 stored records over bounded named cases, and they are the
+approved selected coverage rather than a claim about the remaining operations of
+those modules.
 
 The status values are `correct`, `bounded`, and `unsupported`.
 An `unsupported` row uses `oracle = "none"` and `max_ulp = 0`.
 An accepted row uses the evaluator class assigned by the authoritative C operation table.
 A `correct` row uses `max_ulp = 0`.
 A `bounded` row uses an approved non-negative `max_ulp` value.
-Schema 3 accepts `none`, `exact_bits`, `algebraic`, and `mpfr_arb`.
+Schema 5 accepts `none`, `exact_bits`, `algebraic`, `mpfr_arb`, and `definitional`.
 
 Status and oracle snapshots are not part of numerical descriptor identity.
 This permits review of candidate artifacts before a manifest promotion.
 The loader still checks that each snapshot has a valid status-oracle relation.
 It hashes the profile, numerical descriptors, special policy, ULP bound, and authoritative C signature.
 
-The current checked-in manifest accepts all 315 descriptors as `correct` with `max_ulp = 0`, backed by full publication and replay of 63,160,084 records and benchmarks for every descriptor.
+The current manifest accepts all 347 descriptors as `correct` with `max_ulp = 0`.
+Full publication and replay verified 72,035,642 records on the scalar lane and on the scalar-backed vector lane.
+The scalar benchmark measured all 347 descriptors of this publication at three
+repetitions each, and the retained `benchmark.txt` records one row per
+descriptor. Those are timings: a benchmark result is never acceptance and never
+whole-domain proof.
 Do not infer acceptance from source exports, evaluator availability, or a filtered campaign.
 
 #### Oracle evidence classes
 
-The authoritative C operation table selects one evaluator for each of the 315 descriptors.
-The table assigns 150 descriptors to `exact_bits`, 126 to `mpfr_arb`, and 39 to `algebraic`.
+The authoritative C operation table selects one evaluator for each of the 347 descriptors.
+It assigns 150 descriptors to `exact_bits`, 126 to `mpfr_arb`, 49 to `algebraic`, and 22 to `definitional`.
 Operation spelling and manifest status do not select an evaluator.
 
 - `exact_bits` uses direct IEEE bit and integer models. It preserves bit-sensitive NaN and status behavior without numerical approximation.
 - `algebraic` uses exact GMP rational arithmetic for finite dyadic operations. Irrational algebraic roots use 512-bit MPFR candidates and 512-bit Arb enclosures.
 - `mpfr_arb` uses a 512-bit MPFR candidate and a 512-bit Arb proof, with operation-specific certified reductions where required.
+- `definitional` checks IEEE representations or published algebraic conventions without an MPFR/Arb enclosure.
+  Its 22 rows cover the four public helpers in three formats and five algebra/quaternion operations in two formats.
+  These rows do not establish general non-scalar numerical accuracy.
 
 Exact-bit and algebraic boundary checks use exact integer or rational arithmetic.
 The MPFR/Arb oracle uses fixed 1,024-bit MPFR boundary containers where their capacity is sufficient for exact binary values.
@@ -876,17 +921,17 @@ For negative noninteger `lgamma` inputs, the Arb proof uses the reflection formu
 
 The generator uses oracle ABI v2.
 Every request declares the operation bytes, arity, typed input fields, result layout, structure kind, and typed result fields.
-The generator compares the zmath runtime result with independent evaluator evidence before it writes a record.
+The generator compares the zmath result with the declared evaluator before it writes a record.
 
 Published records use the length-framed binary `ZCDR` codec version 1.
 A record stores operation, ordered provenance, typed arguments, result descriptor, typed result fields, and `max_ulp`.
 Floating fields store the exact format, bits, and IEEE class.
 Other fields store their integer width, Boolean value, tag bytes, or rounding enumeration.
 
-A full publication covers all 315 descriptors.
+A full publication covers all 347 descriptors.
 A filtered publication covers the exact `--operation` and `--format` selection.
 Metadata records the campaign class, seed, cardinality, selection rule, profile, and artifact digest.
-The 61 exhaustive unary H campaigns each enumerate all 65,536 input bit patterns.
+The 62 exhaustive unary H campaigns each enumerate all 65,536 input bit patterns.
 Only those campaigns claim exhaustive coverage of their one-argument binary16 domain.
 Selected Cartesian, explicit special-tuple, selected unary, bounded-integer, and exact-status campaigns cover only their declared tuples.
 
@@ -903,6 +948,7 @@ The accepted corpus profile is target `x86_64-linux-gnu.2.38`, CPU `haswell`, an
 No other target, CPU, or optimization mode is manifest-qualified.
 Corpus evidence applies only to stored tuples unless an exhaustive campaign or separate proof covers the whole operation-format domain.
 Benchmark output measures performance only and does not change manifest acceptance.
+
 ## Complex API
 
 `zmath.complex` owns the canonical `Complexf` and `Complexd` types.
@@ -912,7 +958,7 @@ pub const Complexf = struct { re: f32, im: f32 };
 pub const Complexd = struct { re: f64, im: f64 };
 ```
 
-The complete C99/C23 complex surface is required for both types. The planned module functions use an explicit type suffix:
+The complete C99/C23 complex surface is implemented for both types. The module functions use an explicit type suffix:
 
 ```zig
 pub fn realf(value: Complexf) f32;
@@ -929,7 +975,8 @@ pub fn argf(value: Complexf) f32;
 pub fn argd(value: Complexd) f64;
 ```
 
-For both suffixes, the manifest enumerates `add`, `sub`, `mul`, `div`, `exp`, `log`, `log10`, `pow`, `sqrt`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, and `atanh`.
+Both suffixes implement `add`, `sub`, `mul`, `div`, `exp`, `log`, `log10`, `pow`, `sqrt`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `sinh`, `cosh`, `tanh`, `asinh`, `acosh`, and `atanh`.
+The manifest names only `complexAdd` and `complexMul`, so the other nineteen pairs are implemented without oracle evidence.
 
 Each entry defines its Zig name, inputs, result, branch cut, principal range, signed-zero result, NaN result, infinity result, pole result, overflow result, and underflow result.
 
@@ -956,19 +1003,23 @@ pub const UnitQuatd = struct { raw: Quatd };
 
 `UnitQuatf.rotate(v)` applies `q * (v, 0) * conjugate(q)`. `a.then(b)` means apply `a` first, then `b`, and equals `b * a`.
 
-`UnitQuatf.init(raw)` returns `?UnitQuatf`. It rejects zero, non-finite, and non-unit values after
-normalization. Raw `Quatf` supports algebraic operations and does not expose a total rotation
-operation.
+`UnitQuatf.init(raw)` returns `?UnitQuatf`. It rejects a zero or non-finite input, normalizes a
+finite nonzero one, and validates that the normalized result lands in the unit band, so `init` is
+the constructor that maintains the unit norm. Raw `Quatf` supports algebraic operations and does
+not expose a total rotation operation.
 
-The contract also states that `raw` is private to `zmath.quaternion`, and Zig 0.16 cannot make a
-struct field private: a field a function of this module can write is a field any consumer can
-write. What the language offers instead is the constructor, so `init` is the only documented and
-only validating way to build a `UnitQuatf`, `fromAxisAngle` is the second and routes through
-`init`, and the field is the read path back to the algebra. A value written with the struct literal
-can be any quaternion at all, and every `rotate` result from such a value is meaningless rather than
-merely inaccurate, because the rotation it performs scales by the norm squared. There is therefore
-no `raw()` accessor method: Zig puts fields and declarations in one namespace per struct, so a
-field named `raw` and a method named `raw` cannot both exist.
+`raw` is a public field, not a private one. Zig 0.16 cannot make a struct field private, and
+`UnitQuatf` is a plain struct with no opaque handle, so `UnitQuatf{ .raw = q }` compiles for any
+consumer and can store any quaternion at all. The unit norm is therefore an invariant the
+constructors maintain and the consumer preserves, not one the language or the type enforces:
+`init` is the only validating constructor, `fromAxisAngle` is the second way in and routes through
+`init`, and `raw` is the read path back to the algebra. A consumer must not assign arbitrary values
+to `raw` and must not bypass validation to obtain a `UnitQuatf`. `rotate` and the composition
+methods rely on that unit-norm precondition, so a forged non-unit value has no rotation guarantee:
+the rotation it performs scales by the norm squared, and every `rotate` result from it is
+meaningless rather than merely inaccurate. There is no `raw()` accessor method: Zig puts fields and
+declarations in one namespace per struct, so a field named `raw` and a method named `raw` cannot
+both exist.
 
 ## Matrices
 
@@ -1040,7 +1091,13 @@ pub const LuMat4f = struct { lu: Mat4f, permutation: [4]u8, parity: i1 };
 pub const CholeskyMat4f = struct { lower: Mat4f };
 ```
 
-Each factorization type has a same-size `solve`, `reconstruct`, and `determinant` operation. A factorization returns `null` for a singular, non-positive-definite, or non-finite input, as applicable.
+The factorization types are plain value structs with no methods. Their operations are module
+functions: `lu` and `cholesky` produce a factorization, `solveLu` and `solveCholesky` return
+`?Vec2f` through `?Vec4d`, `solveLuMultiple` and `solveCholeskyMultiple` carry a right-hand side
+matrix, and `reconstructLu`, `determinantLu`, `reconstructCholesky`, and `determinantCholesky`
+read a factorization back. `lu` and `cholesky` return `null` for a singular, non-positive-definite,
+or non-finite input, as applicable, and a solve returns `null` for a zero or non-finite stored
+pivot.
 
 The implementation extends this to every named size in both precisions: `LuMat2f` through
 `LuMat4d` and `CholeskyMat2f` through `CholeskyMat4d`, twelve factorization types rather than the
@@ -1082,15 +1139,20 @@ reserved for identical segments, balls, and boxes.
 `adaptive_exact` is exact integer arithmetic, not an error-bounded approximation with a fast path.
 Every finite `f64` is `m * 2^e` with `|m| < 2^53` and `-1074 <= e <= 971`, so scaling by `2^1074`
 reaches an exact integer; the predicate is then evaluated with schoolbook multiplication in a
-fixed `[132]u64` limb array, and the sign of that integer is the sign of the real value. An `f32`
-widens to `f64` exactly, so one representation covers both precisions. There is no epsilon, no
-value-dependent limb count, and no fallback to the `fast` answer.
+fixed `[132]u64` limb magnitude plus a separate sign, 8,448 bits on the stack, and the sign of
+that integer is the sign of the real value. An `f32` widens to `f64` exactly, so one
+representation covers both precisions. There is no epsilon, no value-dependent limb count, and
+no fallback to the `fast` answer.
+Coordinate subtraction happens after integer conversion, so rounding or overflow in the corresponding
+floating difference cannot change the exact sign. Mixed-degree ball and ray comparisons align their
+power-of-two scales before comparison. The fixed scratch bound covers these rescaled predicates.
 
 One limit is stated rather than hidden. In 3D and 4D the affine intersections decide coplanarity
-with the exact predicate on the ORIGINAL coordinates, then project into a plane and run the exact
-2D predicate on the PROJECTED coordinates. The coplanarity gate, which is the decision a plain
-evaluation gets wrong, is exact on the inputs as given. Intersection PARAMETERS are `f32`/`f64`
-and their range tests are ordinary comparisons.
+with the exact predicate on the ORIGINAL coordinates: in 3D that gate is the exact orientation
+determinant, and in 4D it is an exact rank test on three difference vectors. They then project
+into a plane and run the exact 2D predicate on the PROJECTED coordinates. The coplanarity gate,
+which is the decision a plain evaluation gets wrong, is exact on the inputs as given.
+Intersection PARAMETERS are `f32`/`f64` and their range tests are ordinary comparisons.
 
 ## Concrete geometric algebras
 
@@ -1130,12 +1192,11 @@ a type parameter. Storage is `[2^n]T` and is published per type as `storage_byte
 ## Tests and benchmarks
 
 `zmath` has no MPFR, GMP, FLINT, Arb, BLIS, Eigen, or C++ runtime dependency.
-The sibling `zmath-testing` project owns integration tests, oracle generation, typed corpus replay,
-and benchmarks, and is the only acceptance authority for this library. It is a separate
-repository, colocated as `../zmath-testing`; the commands below are run from there, not from this
-repository. It is not currently present on the machine this document was last verified on, so the
-acceptance evidence recorded in this repository is historical rather than re-verified. See
-[PLAN.md](PLAN.md) for the restore procedure.
+The sibling `zmath-testing` project owns integration tests, oracle generation, typed corpus replay, and benchmarks.
+It is the acceptance authority and is colocated as `../zmath-testing`.
+Run the following commands there, not in this repository.
+The current publication has 347 descriptors and 72,035,642 records.
+See [PLAN.md](PLAN.md) for measured evidence and remaining scope.
 
 The scalar tools use only target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe` for manifest-qualified evidence.
 These build steps install the typed tools:
@@ -1156,17 +1217,22 @@ zig-out/bin/zmath-scalar-matrix
 zig-out/bin/zmath-public-helpers
 ```
 
-`zmath-public-helpers` measures the public evaluators that no corpus descriptor
-covers: `classify`, `ulpDistance`, and the binary16 `scaleB` and `roundIntegral`
-entry points in all four rounding modes. It takes no corpus root and no
+`zmath-public-helpers` measures `classify`, `ulpDistance`, and the binary16
+`scaleB` and `roundIntegral` entry points in all four rounding modes.
+The manifest now covers these helpers under `definitional` rows.
+The helper benchmark takes no corpus root and no
 operation filter, and accepts only `--repetitions=1..100`. The typed benchmark
-accepts `--repetitions=1..1024` and `--with-zig`, which times same-input Zig
-intrinsic references beside zmath.
+accepts `--repetitions=1..100` and `--with-zig`, which times same-input Zig
+intrinsic references beside zmath. 1024 is the typed benchmark's internal
+sample-loop cap, not a command-line range.
 
 The corpus producer, corpus replay, and scalar-matrix executables accept an
 optional first positional corpus root. The default root is `test/corpus`.
 These three executables also accept `--operation=<manifest-op>` and
 `--format=h|f|d`. The filters can be used independently or together.
+Each filtered command uses its own `generated/probes/<op>-<fmt>` publication.
+An omitted filter uses `all` in that path.
+Generate that probe before filtered replay or measurement.
 
 The standard full-publication commands are:
 

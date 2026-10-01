@@ -30,9 +30,8 @@ Two colocated repositories:
 | Public root types and module aliases | 25 |
 | Operations accepting `@Vector` | 96 (`nan` does not) |
 | Public `@Vector` entry points | 417 across six modules |
-| Non-scalar module source | 9597 lines across seven files |
-| Source files under `src/` | 208 |
-| Local tests | 814 |
+| Source files under `src/` | 209 |
+| Local tests | 856 |
 
 The vector layer is portable Zig `@Vector`, lowered by the compiler per target.
 There is no SIMD dispatch, no hand-written per-ISA kernel, no runtime CPU
@@ -87,7 +86,7 @@ Last recorded results, all green:
 
 | Check | Result |
 | --- | --- |
-| Runtime tests | 814/814 |
+| Runtime tests | 856/856 |
 | Runtime gate | passed |
 | House gate invocation | `direnv exec . gate`, or `direnv exec . zig-gate` |
 
@@ -117,17 +116,24 @@ now, measured here.
 
 | Check | Source of truth | Current value |
 | --- | --- | --- |
-| Manifest descriptors | `test/corpus/manifest.toml` | 337 at `schema_version = 5` |
+| Manifest descriptors | `test/corpus/manifest.toml` | 347 at `schema_version = 5` |
 | Publication digest | `generated/COMPLETE` | enforced by `corpus_set.load` |
-| Corpus records | the regenerated publication | 72,035,318 |
-| Record bytes | the regenerated publication | 5,164,903,241 |
-| `replay-corpus` | the regenerated publication | exit 0, 337 descriptors |
+| Corpus records | the regenerated publication | 72,035,642 |
+| Record bytes | the regenerated publication | 5,164,943,119 |
+| `replay-corpus`, a `zmath-testing` step | the regenerated publication | exit 0, every one of the 347 descriptors, on the scalar lane and on the scalar-backed `--vector` lane |
 
-The publication is regenerated and republished at 337 descriptors, and
-`replay-corpus` in this repository now exits 0 with `descriptors=337
-records=72035318`. Immediately before that commit the committed publication
-was 315 rows against a 337-row manifest, so a fresh checkout could not verify
-its own corpus at all: the loader rejected it with `error.IncompleteSelection`.
+The publication is regenerated and republished at 347 descriptors, and the
+sibling `replay-corpus` step verifies every descriptor and every record on the
+scalar lane and on the scalar-backed vector lane. That step belongs to
+`zmath-testing`, not to this repository: the `zmath` build graph has only `run`,
+`test`, and `docs`.
+
+Two earlier repairs are historical and stay in the record. The publication that
+predates the 337-descriptor manifest carried 315 rows against it, so a fresh
+checkout could not verify its own corpus at all: the loader rejected that
+snapshot with `error.IncompleteSelection`. A `metadata.txt`, `replay.txt`, or
+`benchmark.txt` describing a 315- or 337-descriptor snapshot is a receipt of
+that older publication and is not evidence about the ten rows added afterwards.
 
 The digest authority is `generated/COMPLETE`, which records the
 `metadata_sha256` against which `corpus_set.load` recomputes the SHA-256 of
@@ -136,9 +142,14 @@ no verification file beside it. A hand-maintained counter file has no
 producer, so every field in it is a number nobody can reproduce and every field
 goes stale silently.
 
-Full regeneration costs about 21 minutes for 5.2 GB, and the replay that
-follows takes about 2.5 minutes, both measured on this host at 337
-descriptors. They are costs, not coverage claims.
+That generation step reused 337 verified artifacts and produced only the 324 new
+bounded records, and the staging run took 137.84 s on this host. That is the cost
+of a bounded increment, not of a whole-domain regeneration, so it predicts
+nothing about an exhaustive binary16 or binary32 campaign.
+Replaying the whole 5,164,943,119-byte publication at 347 descriptors took
+142.42 s on the scalar lane and 165.17 s on the scalar-backed vector lane. Both
+are costs, not coverage claims. The scalar benchmark measured all 347
+descriptors of that same publication at three repetitions each in 94.96 s.
 
 A digest recomputed from a DIFFERENT run still will not match, and that is not
 a defect. Each metadata row embeds its `artifact=` path, which is that run's
@@ -153,9 +164,9 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
 
 ## Known limits, stated so they are not mistaken for gaps
 
-1. No whole-domain proof for any `f32` or `f64` descriptor, and none for
-   multi-argument or integer-domain binary16. This is a property of the evidence
-   design, not a pending task.
+1. No whole-domain proof for any `f32` or `f64` descriptor, or for
+   multi-argument or integer-domain binary16.
+   The current campaigns prove agreement only on their stored inputs.
 2. Correct rounding of finite power, root, and pi-scaled results is a target
    requirement that is explicitly not claimed as satisfied.
 3. The public helpers `classify`, `ulpDistance`, `scaleB`, and `roundIntegral` are now covered by
@@ -164,12 +175,23 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
    no oracle computes them, so a row for one is a contract lock and not independent numerical
    evidence. The separation is enforced rather than conventional — the exact-bits entry point
    refuses a definitional category, and a `metadata.txt` row prints `evaluator=definitional`.
-4. `scaleB` and `roundIntegral` exist only for `f16`, and `API.md` declares no
-   signature for either family — it names them only in the `zmath-public-helpers`
-   benchmark description. The `f` and `d` forms are an open contract question,
-   not a known gap.
-5. The non-scalar modules have no independent oracle. Their accuracy rests on
-   algebraic identities and on IEEE behaviour, not on the corpus.
+4. `scaleB` and `roundIntegral` support `f16`, `f32`, and `f64`.
+   Their four rounding modes are typed input values, not separate manifest rows.
+5. The non-scalar tranche has ten `definitional` rows for Cl(3) involutions
+   and quaternion multiplication, with 176 stored records. Those are convention
+   checks, and they are not relabelled as numerical evidence.
+   Ten further numerical rows are five selected operations, each with one `f32`
+   and one `f64` row: `complex.addf`/`addd`, `complex.mulf`/`muld`,
+   `matrix.determinantMat2f`/`d`, `linalg.lu` plus `solveLu` on a 2x2 system,
+   and the 2D orientation predicate under both policies, checked against an
+   independent exact-rational reference. Those ten rows hold 324 stored records
+   over bounded named cases.
+   The rounding rule is the one each public graph performs, so it is not one
+   rule for all ten: `complexMul`, `matrixDet2`, and the `fast` predicate round
+   per primitive step, while `luSolve2` rounds its exact rational Cramer
+   solution once per component.
+   Other operations of those four modules stay outside the manifest, which bounds
+   the tranche to its approved selection rather than leaving work open.
 6. There is no verification file in the sibling, and there is deliberately no committed JSON of
    run counters. A counter with no producer is a number nobody can reproduce. `generated/COMPLETE`
    plus `generated/metadata.txt` are the digest authority; every descriptor, record, and byte
@@ -177,38 +199,66 @@ build cannot be, so a flint and MPFR are built for the host into a local prefix.
 7. Operations returning a struct return a lane-ordered array, not a `@Vector`.
    See above.
 
-## What remains
+## Latest seven-step acceptance
 
-### Resolved in this cycle
+The latest request refers to the seven next steps listed after the cluster cost estimate.
+The earlier P8/P9 checklist completed a first tranche, not every item in that request.
 
-1. **Whole-domain evidence for `f32` and `f64`.** Closed as infeasible rather than left open. The
-   harness sustains roughly 62,000 records per second, which produced the publication in 17
-   minutes. Exhaustive binary32 unary is 4,294,967,296 inputs per operation, about 19 hours each and
-   roughly 48 days for the ~60 of them; exhaustive binary64 is about 1.8e19 inputs, roughly 9,000
-   years each. The arithmetic is recorded in the scalar contract so it is not re-proposed.
-   `correct` keeps meaning exact agreement on the stored tuples.
+1. **Published-tool gate.** Implemented.
+   Both gate entry points build `published-tools` under the qualified profile before the house gate.
+   This closes the stale-producer build gap.
+2. **Harness advisories.** Cleared.
+   The direct whole-tree zbc census reports zero findings.
+3. **Harness template leftovers.** Removed.
+   The demonstration now calls the mathematics API.
+4. **Exhaustive binary32.** Not executed.
+   Descriptor sharding and explicit raw-input ranges are both implemented, and
+   `--f32-range=LOW:HIGH` is exercised on four small intervals for `abs` and
+   narrowing `f16sqrtf32`, `[0,8)`, `[2147483644,2147483652)`,
+   `[2139095036,2139095044)`, and `[4294967288,4294967296)`: two shards each,
+   then assembly, receipts, and scalar replay, 32 generated inputs per
+   operation.
+   A missing flag never scans a domain; an assembled interval claims exhaustive
+   coverage only when a proved tiling of `[0,2^32)` exists, and every smaller
+   interval stays partial. The 63 eligible descriptors, which are those with one
+   `float:f` input and arity one whatever the result format, would need
+   270,582,939,648 records and 15,595,026,251,776 bytes, or 14.18359375 TiB, and
+   copied assembly with retained workers needs 28.3671875 TiB, so no local run
+   can hold it.
+   Execution still needs explicit user permission, an exact domain, an
+   operation selection, an interval partition, and approved cluster CPUs,
+   allocation, and scratch. Any further smoke or reference check stays inside the
+   approved 4,096-input budget per selected operation.
+5. **Six-module oracle coverage.** Complete under the approved scope, by user
+   decision.
+   The first tranche covered four Cl(3) involutions and quaternion
+   multiplication in `f32` and `f64`, as ten `definitional` rows over 176 stored
+   convention cases.
+   Complex, matrix, linalg, and geometry now carry ten numerical rows in total:
+   five selected operations, each with one `f32` and one `f64` row, over 324
+   stored bounded records, verified against an independent exact-rational
+   reference.
+   The user accepted that selected coverage as sufficient, so this step is
+   complete at the approved selection and is not pending work on the remaining
+   operations of those four modules; those stay outside the manifest as a stated
+   scope limit. The ten `definitional` rows remain convention checks, not proof
+   for either complete non-scalar algebra module.
+6. **Contract decisions.** The `f` and `d` forms of `scaleB` and `roundIntegral` are implemented and documented.
+   The `UnitQuat*.raw` privacy clause is resolved by explicit user approval: the clause is amended
+   rather than enforced.
+   `raw` is public, `init` normalizes and validates, `fromAxisAngle` routes through `init`, and the
+   consumer must preserve the unit-norm invariant.
+   Zig has no private struct fields, and a field `raw` cannot coexist with a method `raw()`, so the
+   API and the source state the caller-maintained precondition instead of claiming the type prevents
+   a non-unit construction.
+   `rotate` and composition take that precondition, so a forged non-unit value has no rotation
+   guarantee.
+7. **Housekeeping.** The old benchmark scratch decision and the retirement of `verification.json` are recorded.
+   `COMPLETE` and `metadata.txt` remain the publication digest authority.
+   The half-table generator pins the current metadata and the unchanged `asin` and `tanh` record digests.
 
-2. **Manifest rows for the uncovered public helpers.** Done. The manifest is 337 descriptors at
-   `schema_version = 5`, and the publication is regenerated and replayed to match: 72,035,318
-   records in 5,164,903,241 bytes, `replay-corpus` exit 0. The four public helpers account for 12
-   rows, three formats each, under the `definitional` evaluator class precisely because no oracle
-   computes them; ten more `definitional` rows cover the eight-operand algebra and quaternion struct
-   operations, for 22 in the class. See known limit 3 for what that class does and does not claim.
-
-3. **The `f` and `d` forms of `scaleB` and `roundIntegral`.** Done, and the decision recorded: they
-   are implemented, and the four `RoundMode` values are reached as a field value the way `fromfp`
-   does rather than as separate rows. See known limit 4 for why the contract previously named no
-   signature for either family.
-
-5. **The house gate did not build the corpus producer.** Fixed. `zig build` covers format, build,
-   test, AST check and the linters, but the producer was only built by `zig build
-   oracle-generator`, so a green gate did not mean the corpus could be produced. A schema change
-   that missed the producer passed the gate and then failed silently at generation, producing the
-   old 315-row publication from a new 323-row manifest. A `published-tools` step now depends on
-   every published tool and every tool-owning test step, and the gate runs it under the qualified
-   profile before `zig-gate`.
-
-### Still open
-
-4. **The `UnitQuat*.raw` privacy clause** cannot be met as written, because Zig has no private
-   struct fields and a field `raw` and a method `raw()` cannot both exist. Recorded in `API.md`;
+The current publication has 347 descriptors, 72,035,642 records, and 5,164,943,119 record bytes.
+Its successful replay resolves the selected-coverage and range-engineering steps. It does not
+resolve the deferred exhaustive binary32 campaign, which needs explicit user approval.
+The scalar benchmark measured all 347 descriptors and its receipt is retained,
+but a timing is not coverage.

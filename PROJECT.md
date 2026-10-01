@@ -18,10 +18,10 @@ All nine module paths named by the [API contract](API.md) exist and are exported
 | `zmath.geometry` | `src/geometry.zig` | 2D/3D/4D point, vector, line, ray, segment, flat, ball, AABB families for `f` and `d`, 59 types |
 | `zmath.algebra` | `src/algebra.zig` | `Cl3`, `Cl4`, `Pga3`, `Pga4`, `Cga3`, `Cga4` in `f` and `d`, with a published normalization table |
 
-- Implementation and tests are flat under `src/`: `src/root.zig`, `src/ieee.zig`, `src/scalar*.zig`, `src/vector*.zig`, the six non-scalar modules, `src/*_test.zig`, and C kernels in `src/coremath_*.[ch]`. 208 `.zig` files.
+- Implementation and tests are flat under `src/`: `src/root.zig`, `src/ieee.zig`, `src/scalar*.zig`, `src/vector*.zig`, the six non-scalar modules, `src/*_test.zig`, and C kernels in `src/coremath_*.[ch]`. 209 `.zig` files.
 - The root exports 97 top-level `pub fn` operations and 25 public types and module aliases.
 - Each `@Vector` lane applies the identical accepted scalar kernel, so a vector result is bit-for-bit equal to the accepted scalar result for that lane and the `max_ulp = 0` contract is preserved. Zig forbids a struct as a `@Vector` element type, so the thirteen result-struct operations and the `pown`, `compoundn`, and `rootn` power family return a lane-ordered `[N]Result` array rather than a `@Vector`; that is a language limitation, and the array shape buys no throughput over a scalar loop.
-- `zmath.vector` carries two unrelated layers that share the module path: the portable `@Vector` elementwise surface, and the named-component `Vec2f` through `Vec4d` value types from `src/vector_value.zig`. Every `@Vector` entry point ends in `v` and no `Vec*` name does, so the call sites are unambiguous.
+- `zmath.vector` carries two unrelated layers that share the module path: the portable `@Vector` elementwise surface, and the named-component `Vec2f` through `Vec4d` value types from `src/vector_value.zig`. The elementwise operations use `v` or `vLanes` suffixes; no `Vec*` type name does.
 - `Mat` is the one public structural generic. Every other public type in the library is concretely named, with private comptime generics behind it so the `f` and `d` forms cannot drift.
 - `zmath.geometry` takes an explicit `PredicatePolicy`. The `adaptive_exact` path evaluates the predicate in exact integer arithmetic on a fixed `[132]u64` limb array, with no epsilon and no fallback to the `fast` answer.
 - The runtime has no external oracle or math-library dependency. The vector layer uses portable Zig `@Vector` and is lowered by the compiler per target; it has no hand-written per-ISA kernels, no runtime dispatch, and no SSE2 fallback.
@@ -30,7 +30,14 @@ All nine module paths named by the [API contract](API.md) exist and are exported
 
 ## Not covered by evidence
 
-The non-scalar modules are numerically unproven against any independent oracle. `zmath.matrix`, `zmath.linalg`, `zmath.geometry`, and `zmath.algebra` are exact-arithmetic-shaped operations whose accuracy rests on their own unit tests, not on the corpus. Only the IEEE and scalar surfaces inherit the `max_ulp = 0` contract from the corpus.
+The non-scalar modules have no general accuracy proof against an independent oracle.
+The corpus has ten `definitional` rows for four Cl(3) involutions and quaternion multiplication in `f32` and `f64`.
+These rows check 176 stored convention cases and do not establish either complete module's numerical accuracy.
+Ten further numerical rows are five selected operations, each with one `f32` and one `f64` row: `complex` addition and multiplication, `matrix.determinantMat2`, `linalg.lu` with `solveLu` on a 2x2 system, and the 2D orientation predicate under both policies.
+Those ten rows check 324 stored bounded cases against an independent exact-rational reference.
+Each row follows the rounding of the graph it checks, so the rule is per primitive step for `complexMul`, `matrixDet2`, and the `fast` predicate, and one round per component for the exact rational `luSolve2` solution.
+This is the selected sample the user accepted: the other operations of complex, matrix, linalg, and geometry stay outside the manifest as a scope limit.
+Their unit tests do not substitute for oracle evidence.
 
 ## Numerical evidence
 

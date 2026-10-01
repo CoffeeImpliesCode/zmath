@@ -15,7 +15,7 @@ Zig 0.16.0 IEEE and scalar math for `f16`, `f32`, and `f64`, plus a portable `@V
 ## Numerical contracts
 
 - Handle IEEE-754 NaNs, signed zero, infinities, and subnormals according to [API.md](API.md) and the [scalar contract](spec/core-math-2026-08-22.md).
-- Use the [schema-3 corpus manifest](../zmath-testing/test/corpus/manifest.toml) for acceptance status. An export or a sampled corpus does not prove whole-domain accuracy.
+- Use the [schema-5 corpus manifest](../zmath-testing/test/corpus/manifest.toml) for acceptance status. An export or a sampled corpus does not prove whole-domain accuracy.
 - Every `@Vector` lane runs the identical accepted scalar kernel, so a vector result is bit-for-bit the scalar result for that lane; never re-derive a polynomial for the vector path. Zig forbids a struct as a `@Vector` element type, so the thirteen result-struct operations and `pown`, `compoundn`, and `rootn` return a lane-ordered `[N]Result` array instead of a `@Vector`. That is a language limitation, not a placeholder, and the array shape buys no throughput over a scalar loop.
 - `build.zig` requires `+fma` for x86/x86_64 C kernels and supports little-endian aarch64. The vector layer adds no dispatch; the compiler lowers `@Vector` for the selected target. There is no baseline SSE2 fallback and no hand-written SIMD kernel selection.
 - Do not allocate dynamically in evaluation loops. Keep scratch storage statically bounded or caller-supplied.
