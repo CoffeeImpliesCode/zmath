@@ -874,10 +874,9 @@ It hashes the profile, numerical descriptors, special policy, ULP bound, and aut
 
 The current manifest accepts all 347 descriptors as `correct` with `max_ulp = 0`.
 Full publication and replay verified 72,035,642 records on the scalar lane and on the scalar-backed vector lane.
-The scalar benchmark measured all 347 descriptors of this publication at three
-repetitions each, and the retained `benchmark.txt` records one row per
-descriptor. Those are timings: a benchmark result is never acceptance and never
-whole-domain proof.
+The scalar benchmark receipt covers all 347 descriptors of this publication.
+It retains only repetition zero for each descriptor.
+A benchmark result is a timing record, not acceptance or whole-domain proof.
 Do not infer acceptance from source exports, evaluator availability, or a filtered campaign.
 
 #### Oracle evidence classes

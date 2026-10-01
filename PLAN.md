@@ -150,6 +150,9 @@ Replaying the whole 5,164,943,119-byte publication at 347 descriptors took
 142.42 s on the scalar lane and 165.17 s on the scalar-backed vector lane. Both
 are costs, not coverage claims. The scalar benchmark measured all 347
 descriptors of that same publication at three repetitions each in 94.96 s.
+The retained receipt contains only repetition zero for each descriptor.
+That benchmark exceeded the approved binary32 smoke evaluation limit.
+The execution-limit correction is recorded in step 4 below.
 
 A digest recomputed from a DIFFERENT run still will not match, and that is not
 a defect. Each metadata row embeds its `artifact=` path, which is that run's
@@ -227,8 +230,19 @@ The earlier P8/P9 checklist completed a first tranche, not every item in that re
    can hold it.
    Execution still needs explicit user permission, an exact domain, an
    operation selection, an interval partition, and approved cluster CPUs,
-   allocation, and scratch. Any further smoke or reference check stays inside the
-   approved 4,096-input budget per selected operation.
+   allocation, and scratch.
+   The approved smoke limit was 4,096 input evaluations per selected operation,
+   including repetitions and reference checks.
+   The later full-publication benchmark exceeded that limit.
+   Its retained receipt reports 65,536 timed calls each for binary32 `abs`
+   and narrowing `f16sqrtf32` in repetition zero alone.
+   The retained first repetition exceeds 4,096 timed calls for 113 of 116
+   descriptors with a binary32 input, including all 63 eligible unary descriptors.
+   These timed-call counts exclude sample validation and warmup.
+   The benchmark receipt remains unchanged as evidence of what ran.
+   The earlier completion report did not disclose this execution-limit violation.
+   The original smoke evaluation budget is exhausted.
+   Further numerical evaluation of binary32 inputs needs explicit user approval.
 5. **Six-module oracle coverage.** Complete under the approved scope, by user
    decision.
    The first tranche covered four Cl(3) involutions and quaternion
