@@ -1,9 +1,10 @@
 // C23 integer-power, restricted-power, compound-power, and integer-root families.
 //
-// Exceptional results are assembled from target-format bits.  Finite pown,
-// rootn, and compoundn values in the accepted degree range are delegated to
-// scalar_power_exact: it retains the input dyadics as fixed-limb integers,
-// compares exact candidate powers, and rounds only once to the destination.
+// Exceptional results are assembled from target-format bits.  General finite
+// pown, rootn, and compoundn values in the accepted degree range are delegated
+// to scalar_power_exact, which retains input dyadics as fixed-limb integers
+// and rounds only once.  Binary64 single-operation identities use strict IEEE
+// arithmetic directly.
 
 const common = @import("scalar_c23_common.zig");
 const c23 = @import("scalar_c23_types.zig");
@@ -118,6 +119,8 @@ fn pownCore(
     }
     // IEEE multiplication rounds the exact product once in the destination format.
     if (exponent == 2) return success(Format, base * base);
+    // IEEE division rounds the exact reciprocal once.
+    if (Format == common.D and exponent == -1) return success(Format, 1.0 / base);
 
     const magnitude_result = exact.pownFinite(Format, absoluteValue(Format, base), exponent);
     return success(
@@ -185,6 +188,11 @@ fn rootnCore(
 
     if (exponent == 1) return success(Format, value);
     if ((value_bits & ~signBits(Format)) == oneBits(Format)) return success(Format, value);
+    if (Format == common.D) {
+        // Each identity rounds once; degree -2 still needs exact comparisons.
+        if (exponent == -1) return success(Format, 1.0 / value);
+        if (exponent == 2) return success(Format, @sqrt(value));
+    }
     const magnitude_result = exact.rootFinite(Format, absoluteValue(Format, value), exponent);
     return success(Format, copySign(Format, magnitude_result, value_bits));
 }
@@ -219,6 +227,9 @@ fn compoundnCore(
         if (exponent > 0) return success(Format, signedInfinity(Format, false));
         return success(Format, signedZero(Format, false));
     }
+
+    // IEEE addition rounds the exact degree-one compound result once.
+    if (Format == common.D and exponent == 1) return success(Format, 1.0 + value);
 
     // Let t=2^(-p-8) and |x|<=t. For |n|<=64, both signs and
     // both exponent directions obey |(1+x)^n-1| <= (1-t)^-64-1.

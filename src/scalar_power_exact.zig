@@ -70,6 +70,68 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 return self.limbs[0];
             }
 
+            /// Reads limb `index`, treating limbs outside the initialized
+            /// prefix as zero.  Inactive limbs are never read.
+            fn limbAt(self: *const Big, index: usize) u64 {
+                if (index >= self.len) return 0;
+                return self.limbs[index];
+            }
+
+            /// Returns bit `index` as 0 or 1, with bits above the value as zero.
+            fn bitAt(self: *const Big, index: usize) u64 {
+                const bit_in_limb: u6 = @intCast(index & 63);
+                return (limbAt(self, index / 64) >> bit_in_limb) & 1;
+            }
+
+            /// Mask of the `count` low bits.  A full-limb `count` needs its own
+            /// case, because shifting by the limb width is not a valid shift.
+            fn lowBitMask(count: usize) u64 {
+                std.debug.assert(count >= 1);
+                if (count == 64) return std.math.maxInt(u64);
+                const shift: u6 = @intCast(count);
+                return (@as(u64, 1) << shift) - 1;
+            }
+
+            /// Returns the `count` bits of the value that start at bit `start`,
+            /// with the bit at `start` as the least significant result bit.  The
+            /// window is at most 64 bits wide, so it spans at most two limbs of
+            /// the active prefix.
+            fn extractBits(self: *const Big, start: usize, count: usize) u64 {
+                std.debug.assert(count >= 1);
+                std.debug.assert(count <= 64);
+                const limb_index = start / 64;
+                const bit_offset = start & 63;
+                // The limb holding `start` supplies the low result bits, and the
+                // following limb, when the window reaches it, the high ones.
+                const head_bits: usize = @min(count, 64 - bit_offset);
+                const tail_bits = count - head_bits;
+                const head = limbAt(self, limb_index);
+                var result = head >> @as(u6, @intCast(bit_offset)) & lowBitMask(head_bits);
+                if (tail_bits != 0) {
+                    // `head_bits` is then between 1 and 63, so the shift stays
+                    // inside one limb and the masks drop the rest of each limb.
+                    const tail = limbAt(self, limb_index + 1);
+                    result |= (tail & lowBitMask(tail_bits)) << @as(u6, @intCast(head_bits));
+                }
+                return result;
+            }
+
+            /// Reports whether any bit below `limit` is set.  Only the
+            /// initialized prefix is read, and a prefix that lies entirely below
+            /// `limit` answers without a scan.
+            fn anyBitBelow(self: *const Big, limit: usize) bool {
+                if (limit == 0) return false;
+                const whole_limbs = limit / 64;
+                if (whole_limbs >= self.len) return !self.isZero();
+                var index: usize = 0;
+                while (index < whole_limbs) : (index += 1) {
+                    if (self.limbs[index] != 0) return true;
+                }
+                const partial_bits = limit & 63;
+                if (partial_bits == 0) return false;
+                return (self.limbs[whole_limbs] & lowBitMask(partial_bits)) != 0;
+            }
+
             fn compare(left: *const Big, right: *const Big) i8 {
                 if (left.len < right.len) return -1;
                 if (left.len > right.len) return 1;
@@ -140,6 +202,28 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                     destination.limbs[destination.len] = carry;
                     destination.len += 1;
                 }
+            }
+
+            /// Returns limb `index` of `self * 2^shift` without materializing the
+            /// shift.  A sub-limb shift adds exactly one high carry limb, so
+            /// index `len` still reads it; every other out-of-prefix index is
+            /// zero and is never read from storage.
+            fn shiftedLimb(self: *const Big, shift: usize, index: usize) u64 {
+                const whole_limbs = shift / 64;
+                if (index < whole_limbs) return 0;
+                const source_index = index - whole_limbs;
+                const bit_shift = shift & 63;
+                if (bit_shift == 0) {
+                    return limbAt(self, source_index);
+                }
+                if (source_index > self.len) return 0;
+                // The carry out of the limb below reaches limb `source_index`,
+                // which is why both neighbours take part in the comparison.
+                const low_limb = limbAt(self, source_index);
+                const high_limb = if (source_index == 0) 0 else self.limbs[source_index - 1];
+                const shift_amount: u6 = @intCast(bit_shift);
+                const reverse_shift: u6 = @intCast(64 - bit_shift);
+                return (low_limb << shift_amount) | (high_limb >> reverse_shift);
             }
 
             fn add(left: *const Big, right: *const Big, destination: *Big) void {
@@ -415,6 +499,9 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             if (left_top < right_top) return -1;
             if (left_top > right_top) return 1;
 
+            if (left_shift != right_shift and storage_limbs == limb_count) {
+                return compareVirtualShift(left, left_shift, right, right_shift);
+            }
             if (left_shift > right_shift) {
                 // SAFETY: `Big.shifted` initializes the active limbs before comparison.
                 var shifted_left: Big = undefined;
@@ -428,6 +515,38 @@ fn Arithmetic(comptime storage_limbs: usize) type {
                 return Big.compare(left, &shifted_right);
             }
             return Big.compare(left, right);
+        }
+
+        /// Compares `left * 2^left_shift` with `right * 2^right_shift` from the
+        /// most significant limb down.  Dividing both sides by the same
+        /// `2^common_shift` leaves their order unchanged and leaves one side
+        /// unshifted, so the aligned pair is compared limb by limb straight
+        /// from the source prefix instead of through a shifted temporary.
+        fn compareVirtualShift(
+            left: *const Big,
+            left_shift: i64,
+            right: *const Big,
+            right_shift: i64,
+        ) i8 {
+            const common_shift = if (left_shift < right_shift) left_shift else right_shift;
+            const left_extra: usize = @intCast(left_shift - common_shift);
+            const right_extra: usize = @intCast(right_shift - common_shift);
+            const left_limbs = left.len + left_extra / 64 + @intFromBool(left_extra & 63 != 0);
+            const right_limbs = right.len + right_extra / 64 + @intFromBool(right_extra & 63 != 0);
+            // Each side carries the shift the materialized path would have
+            // applied to one side only, so the same storage bound still holds.
+            std.debug.assert(left_limbs <= storage_limbs);
+            std.debug.assert(right_limbs <= storage_limbs);
+
+            var index = @max(left_limbs, right_limbs);
+            while (index != 0) {
+                index -= 1;
+                const left_limb = left.shiftedLimb(left_extra, index);
+                const right_limb = right.shiftedLimb(right_extra, index);
+                if (left_limb < right_limb) return -1;
+                if (left_limb > right_limb) return 1;
+            }
+            return 0;
         }
 
         const Rational = struct {
@@ -460,11 +579,21 @@ fn Arithmetic(comptime storage_limbs: usize) type {
         }
 
         fn roundScaledQuotient(rational: *const Rational, scale: i64) u64 {
+            const total_shift = rational.shift + scale;
+            // A unit denominator leaves the scaled value an exact integer or an
+            // exact power-of-two fraction, so the discarded bits are the whole
+            // rounding decision and no quotient search is needed.
+            if (storage_limbs == limb_count and
+                rational.denominator.len == 1 and
+                rational.denominator.limbs[0] == 1)
+            {
+                return roundDyadicShifted(&rational.numerator, total_shift);
+            }
+
             // SAFETY: Both shift branches initialize the active numerator limbs.
             var numerator: Big = undefined;
             // SAFETY: Both shift branches initialize the active denominator limbs.
             var denominator: Big = undefined;
-            const total_shift = rational.shift + scale;
             if (total_shift >= 0) {
                 Big.shifted(&rational.numerator, @intCast(total_shift), &numerator);
                 Big.copy(&rational.denominator, &denominator);
@@ -501,6 +630,52 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             }
             std.debug.assert(quotient.bitLength() <= 64);
             return quotient.lowU64();
+        }
+
+        /// Rounds `numerator * 2^total_shift` once, exactly as the quotient and
+        /// remainder search does, but from bit positions alone.  The result must
+        /// fit in 64 bits, the same bound the division path asserts for its
+        /// quotient.
+        fn roundDyadicShifted(numerator: *const Big, total_shift: i64) u64 {
+            std.debug.assert(!numerator.isZero());
+            const numerator_bits = numerator.bitLength();
+            if (total_shift >= 0) {
+                // The scaled value is an exact integer, so rounding is the
+                // identity.  The fit bound below keeps every numerator bit below
+                // the first limb, so one left shift carries the whole value.
+                std.debug.assert(total_shift <= 63);
+                const shift: u6 = @intCast(total_shift);
+                std.debug.assert(numerator_bits + @as(usize, shift) <= 64);
+                return numerator.lowU64() << shift;
+            }
+
+            // `total_shift < 0` here, so its magnitude is the power of two that
+            // divides the scaled value.  `@abs` takes that magnitude without the
+            // `-x` overflow at `minInt(i64)`, and it stays inside `capacity_bits`,
+            // the same bound the division path's denominator shift obeys.
+            const drop_bits: usize = @intCast(@abs(total_shift));
+            std.debug.assert(drop_bits <= storage_bits);
+            const guard_bit = drop_bits - 1;
+            if (drop_bits >= numerator_bits) {
+                // Every quotient bit is zero.  The guard bit is then the top bit
+                // of the numerator, and an exact half rounds to that even zero.
+                if (numerator.bitAt(guard_bit) == 0) return 0;
+                return if (numerator.anyBitBelow(guard_bit)) 1 else 0;
+            }
+
+            const quotient_bits = numerator_bits - drop_bits;
+            std.debug.assert(quotient_bits <= 64);
+            var quotient = numerator.extractBits(drop_bits, quotient_bits);
+            // RN-even proof: the discarded part sits below, at, or above halfway
+            // according to the guard bit and the sticky bits below it.  At
+            // equality, increment only an odd quotient.
+            if (numerator.bitAt(guard_bit) != 0) {
+                if (numerator.anyBitBelow(guard_bit) or (quotient & 1) != 0) {
+                    std.debug.assert(quotient != std.math.maxInt(u64));
+                    quotient += 1;
+                }
+            }
+            return quotient;
         }
 
         fn roundRational(comptime Format: type, rational: *const Rational, negative: bool) Format.Float {
@@ -991,4 +1166,463 @@ test "shifted exact integer initializes gaps and carry limbs" {
     Big.one(&actual);
     Big.shifted(&zero, 65, &actual);
     try std.testing.expect(actual.isZero());
+}
+
+test "binary64 exact arithmetic dyadic rounding matches the exact quotient search" {
+    const Exact = Arithmetic(limb_count);
+    const Big = Exact.Big;
+    // A numerator is `low` OR every `2^bit_index` named in `high`; an index may
+    // name any bit position, and the low word already covers 0 through 63.  The
+    // rational is exactly `numerator * 2^shift`, so no row may be the zero
+    // numerator.
+    const Cases = struct {
+        low: u64,
+        high: []const usize,
+        shift: i64,
+    };
+
+    // Both shapes below carry the same real value through the two rounding
+    // paths: a unit denominator takes the bit-position path and a real divisor
+    // takes the quotient and remainder search.  The rows walk the word
+    // boundaries, the exact halves, the sticky bits far below the guard, and
+    // the drops that run past the top of the numerator.  The reference divisor
+    // is materialized here, so the longest drop below stays inside the public
+    // exact bound instead of the full storage width.  This table only shows
+    // that the two paths agree; the exact results are pinned by the two tables
+    // that follow.
+    const cases = [_]Cases{
+        .{ .low = 1, .high = &.{}, .shift = 0 },
+        .{ .low = 1, .high = &.{}, .shift = 63 },
+        .{ .low = 1, .high = &.{}, .shift = -1 },
+        .{ .low = 1, .high = &.{}, .shift = -68_800 },
+        .{ .low = 0, .high = &.{190}, .shift = -190 },
+        .{ .low = 3, .high = &.{}, .shift = -1 },
+        .{ .low = 3, .high = &.{}, .shift = -3 },
+        .{ .low = 0, .high = &.{64}, .shift = -64 },
+        .{ .low = 0, .high = &.{64}, .shift = -65 },
+        .{ .low = 1, .high = &.{64}, .shift = -65 },
+        .{ .low = 6, .high = &.{65}, .shift = -2 },
+        .{ .low = 1, .high = &.{ 66, 126 }, .shift = -63 },
+        .{ .low = 1, .high = &.{ 65, 128 }, .shift = -65 },
+        .{ .low = 1, .high = &.{ 126, 127, 190 }, .shift = -127 },
+        .{ .low = 1, .high = &.{700}, .shift = -701 },
+        .{ .low = 1, .high = &.{1073}, .shift = -1075 },
+    };
+
+    // The reference rational divides by a power of two instead.  It names the
+    // same real value, but its denominator is not one, so it can only be
+    // rounded by the general quotient and remainder search.
+    const denominator_bits: i64 = 5;
+    for (cases) |case| {
+        var numerator: Big = undefined;
+        Big.fromU64(case.low, &numerator);
+        for (case.high) |bit| numerator.setBit(bit);
+
+        var exact: Exact.Rational = undefined;
+        Big.copy(&numerator, &exact.numerator);
+        Big.one(&exact.denominator);
+        exact.shift = case.shift;
+
+        var divided: Exact.Rational = undefined;
+        Big.copy(&numerator, &divided.numerator);
+        Big.zero(&divided.denominator);
+        divided.denominator.setBit(@intCast(denominator_bits));
+        // Adding `denominator_bits` to the shift cancels the power of two held
+        // in the denominator, so both rationals name the same real value.
+        divided.shift = case.shift + denominator_bits;
+
+        try std.testing.expectEqual(
+            Exact.roundScaledQuotient(&divided, 0),
+            Exact.roundScaledQuotient(&exact, 0),
+        );
+    }
+}
+
+test "binary64 exact arithmetic dyadic rounding resolves guard and sticky bits" {
+    const Exact = Arithmetic(limb_count);
+    const Big = Exact.Big;
+    // A numerator is `low` OR every `2^bit_index` named in `high`; an index may
+    // name any bit position, and the low word already covers 0 through 63.
+    const Cases = struct {
+        low: u64,
+        high: []const usize,
+        shift: i64,
+        expected: u64,
+    };
+
+    // Every expectation is the nearest even integer to `numerator * 2^shift`,
+    // stated beside the exact value it rounds.  The groups are the exact left
+    // shifts that never round; a zero quotient below, exactly at, and above
+    // halfway; exact halves on even and on odd quotients; quotients below,
+    // exactly at, and above halfway; quotients whose 64-bit window crosses the
+    // 63/64, 64/65, 127/128, 128/129 and 191/192 word boundaries; and drops
+    // that run past the top of the numerator up to the storage bound.  A clear
+    // guard bit rounds down whatever the sticky bits say.  A set guard bit
+    // rounds up when any sticky bit is set, and at an exact half, where no
+    // sticky bit is set, it rounds up only for an odd quotient.
+    const cases = [_]Cases{
+        // Exact left shifts, the identity path: 2^63, 3 * 2^62 = 0xc000..., and
+        // the widest value that still fits, 2^63 + 1.
+        .{ .low = 1, .high = &.{}, .shift = 63, .expected = 0x8000_0000_0000_0000 },
+        .{ .low = 3, .high = &.{}, .shift = 62, .expected = 0xc000_0000_0000_0000 },
+        .{ .low = 0x8000_0000_0000_0001, .high = &.{}, .shift = 0, .expected = 0x8000_0000_0000_0001 },
+        // A zero quotient: 1/2 is an exact half that stays on the even zero,
+        // 3/8 is below halfway, and 3/4 is above halfway.
+        .{ .low = 1, .high = &.{}, .shift = -1, .expected = 0 },
+        .{ .low = 3, .high = &.{}, .shift = -3, .expected = 0 },
+        .{ .low = 3, .high = &.{}, .shift = -2, .expected = 1 },
+        // 1 + 2^-64 drops a whole word: the guard bit is clear, so the sticky
+        // bit far below it still rounds down to 1.
+        .{ .low = 1, .high = &.{64}, .shift = -64, .expected = 1 },
+        // 1/2 with a 64-bit numerator is an exact half on a zero quotient, and
+        // the same value with a single low bit set is above halfway.
+        .{ .low = 0, .high = &.{64}, .shift = -65, .expected = 0 },
+        .{ .low = 1, .high = &.{64}, .shift = -65, .expected = 1 },
+        // Exact halves: 5/2 and 9/2 keep the even 2 and 4, while 3/2 moves off
+        // the odd 1 to 2.
+        .{ .low = 5, .high = &.{}, .shift = -1, .expected = 2 },
+        .{ .low = 9, .high = &.{}, .shift = -1, .expected = 4 },
+        .{ .low = 3, .high = &.{}, .shift = -1, .expected = 2 },
+        // Above halfway: 7/4 leaves the odd 1 for 2 and 11/4 leaves the even
+        // 2 for 3.
+        .{ .low = 7, .high = &.{}, .shift = -2, .expected = 2 },
+        .{ .low = 11, .high = &.{}, .shift = -2, .expected = 3 },
+        // A quotient window that crosses the 63/64 boundary: 2^63 + 1/2 keeps
+        // the even 2^63, and 2^63 + 3/2 moves to 2^63 + 2.
+        .{ .low = 1, .high = &.{64}, .shift = -1, .expected = 0x8000_0000_0000_0000 },
+        .{ .low = 3, .high = &.{64}, .shift = -1, .expected = 0x8000_0000_0000_0002 },
+        // The same crossing one bit further on: 2^63 + 3/2 is an exact half on
+        // an odd quotient, and 2^63 + 7/4 is above it by a sticky bit.
+        .{ .low = 6, .high = &.{65}, .shift = -2, .expected = 0x8000_0000_0000_0002 },
+        .{ .low = 7, .high = &.{65}, .shift = -2, .expected = 0x8000_0000_0000_0002 },
+        // And one bit further again: 2^63 + 5/2 is an exact half that keeps
+        // the even quotient, while 2^63 + 7/2 moves to 2^63 + 4.
+        .{ .low = 20, .high = &.{66}, .shift = -3, .expected = 0x8000_0000_0000_0002 },
+        .{ .low = 28, .high = &.{66}, .shift = -3, .expected = 0x8000_0000_0000_0004 },
+        // The window crosses limb 0 into limb 1: 2^63 is exact, and 2^63 + 1/2
+        // + 2^-63 is above halfway by a sticky bit 62 positions below the
+        // guard.
+        .{ .low = 0, .high = &.{126}, .shift = -63, .expected = 0x8000_0000_0000_0000 },
+        .{ .low = 1, .high = &.{ 62, 126 }, .shift = -63, .expected = 0x8000_0000_0000_0001 },
+        // A window that starts exactly on the 127/128 boundary stays exact.
+        .{ .low = 0, .high = &.{127}, .shift = -64, .expected = 0x8000_0000_0000_0000 },
+        // A window that crosses limb 1 into limb 2: 2^63 + 1 + 2^-65 keeps the
+        // quotient because the guard bit is clear even though a sticky bit is
+        // set, and 2^62 + 3/2 + 2^-66 is above halfway by a sticky bit 65
+        // positions below the guard.
+        .{ .low = 1, .high = &.{ 65, 128 }, .shift = -65, .expected = 0x8000_0000_0000_0001 },
+        .{ .low = 1, .high = &.{ 65, 66, 128 }, .shift = -66, .expected = 0x4000_0000_0000_0002 },
+        // The same crossing across three limbs: 2^63 + 1 + 1/2 is an exact half
+        // on an odd quotient.
+        .{ .low = 0, .high = &.{ 126, 127, 190 }, .shift = -127, .expected = 0x8000_0000_0000_0002 },
+        // Drops past the top of the numerator: 1/2 stays on the even zero,
+        // 1/2 + 2^-701 is above halfway, and both shapes again at the far end
+        // of the storage.  The last row drops by exactly the storage width,
+        // which the helper accepts because it never materializes a divisor.
+        .{ .low = 0, .high = &.{700}, .shift = -701, .expected = 0 },
+        .{ .low = 1, .high = &.{700}, .shift = -701, .expected = 1 },
+        .{ .low = 0, .high = &.{131_000}, .shift = -131_001, .expected = 0 },
+        .{ .low = 1, .high = &.{131_000}, .shift = -131_001, .expected = 1 },
+        .{ .low = 1, .high = &.{}, .shift = -131_072, .expected = 0 },
+    };
+
+    for (cases) |case| {
+        var numerator: Big = undefined;
+        Big.fromU64(case.low, &numerator);
+        for (case.high) |bit| numerator.setBit(bit);
+        try std.testing.expectEqual(case.expected, Exact.roundDyadicShifted(&numerator, case.shift));
+    }
+}
+
+test "binary64 exact arithmetic dyadic rounding settles binary64 boundary results" {
+    const Exact = Arithmetic(limb_count);
+    const Big = Exact.Big;
+    // A numerator is `low` OR every `2^bit_index` named in `high`; an index may
+    // name any bit position, and the low word already covers 0 through 63.  The
+    // rational is exactly `numerator * 2^shift`.
+    const Cases = struct {
+        low: u64,
+        high: []const usize,
+        shift: i64,
+        expected: u64,
+    };
+
+    // The ladder is the real binary64 one, in units of the smallest subnormal:
+    // a quarter and a half underflow to zero, one is the smallest subnormal,
+    // the exact halves 3/2, 5/2 and 7/2 of it round to the even 2, 2 and 4, the
+    // largest subnormal is exact, its halfway neighbour reaches the smallest
+    // normal, and the smallest normal is exact.  The normal rows are 1 - 2^-53,
+    // 1, the halfway value 1 + 3 * 2^-53 that rounds up on the even side, the
+    // exactly representable 1 + 3 * 2^-52, and the halfway value 2 - 2^-53
+    // that carries into 2.  The top rows are the largest finite value, the
+    // halfway value below it that rounds down on the even side, the halfway
+    // value above it that carries into the infinity, the largest finite value
+    // plus two more units, and exactly 2^1024.
+    const cases = [_]Cases{
+        .{ .low = 1, .high = &.{}, .shift = -1076, .expected = 0x0000_0000_0000_0000 },
+        .{ .low = 1, .high = &.{}, .shift = -1075, .expected = 0x0000_0000_0000_0000 },
+        .{ .low = 1, .high = &.{}, .shift = -1074, .expected = 0x0000_0000_0000_0001 },
+        .{ .low = 3, .high = &.{}, .shift = -1075, .expected = 0x0000_0000_0000_0002 },
+        .{ .low = 5, .high = &.{}, .shift = -1075, .expected = 0x0000_0000_0000_0002 },
+        .{ .low = 7, .high = &.{}, .shift = -1075, .expected = 0x0000_0000_0000_0004 },
+        .{ .low = 0x000f_ffff_ffff_ffff, .high = &.{}, .shift = -1074, .expected = 0x000f_ffff_ffff_ffff },
+        .{ .low = 0x001f_ffff_ffff_ffff, .high = &.{}, .shift = -1075, .expected = 0x0010_0000_0000_0000 },
+        .{ .low = 0x0010_0000_0000_0000, .high = &.{}, .shift = -1074, .expected = 0x0010_0000_0000_0000 },
+        .{ .low = 0x1f_ffff_ffff_ffff, .high = &.{}, .shift = -53, .expected = 0x3fef_ffff_ffff_ffff },
+        .{ .low = 0, .high = &.{53}, .shift = -53, .expected = 0x3ff0_0000_0000_0000 },
+        .{ .low = 3, .high = &.{53}, .shift = -53, .expected = 0x3ff0_0000_0000_0002 },
+        .{ .low = 6, .high = &.{53}, .shift = -53, .expected = 0x3ff0_0000_0000_0003 },
+        .{ .low = 0x3f_ffff_ffff_ffff, .high = &.{}, .shift = -53, .expected = 0x4000_0000_0000_0000 },
+        .{ .low = 0x1f_ffff_ffff_ffff, .high = &.{}, .shift = 971, .expected = 0x7fef_ffff_ffff_ffff },
+        .{ .low = 0x3f_ffff_ffff_fffd, .high = &.{}, .shift = 970, .expected = 0x7fef_ffff_ffff_fffe },
+        .{ .low = 0x3f_ffff_ffff_ffff, .high = &.{}, .shift = 970, .expected = 0x7ff0_0000_0000_0000 },
+        .{ .low = 0x20_0000_0000_0001, .high = &.{}, .shift = 971, .expected = 0x7ff0_0000_0000_0000 },
+        .{ .low = 1, .high = &.{}, .shift = 1024, .expected = 0x7ff0_0000_0000_0000 },
+    };
+
+    for (cases) |case| {
+        var numerator: Big = undefined;
+        Big.fromU64(case.low, &numerator);
+        for (case.high) |bit| numerator.setBit(bit);
+
+        var rational: Exact.Rational = undefined;
+        Big.copy(&numerator, &rational.numerator);
+        Big.one(&rational.denominator);
+        rational.shift = case.shift;
+        const rounded: f64 = Exact.roundRational(common.D, &rational, false);
+        try std.testing.expectEqual(case.expected, @as(u64, @bitCast(rounded)));
+    }
+}
+
+test "binary64 exact arithmetic compareScaled orders shifted integer pairs" {
+    const Exact = Arithmetic(limb_count);
+    const Big = Exact.Big;
+    // A value is `low` OR every `2^bit_index` named in `high`; an index may
+    // name any bit position, and the low word already covers 0 through 63.
+    const Cases = struct {
+        left_low: u64,
+        left_high: []const usize,
+        left_shift: i64,
+        right_low: u64,
+        right_high: []const usize,
+        right_shift: i64,
+        expected: i8,
+    };
+
+    // Every row is decided here by the two exact integers it names.  The rows
+    // that reach the same leading bit on both sides fall through to the
+    // aligned comparison, across one limb, two limbs, three limbs, a common
+    // shift below zero, and a shift beyond the active prefix; the two rows that
+    // do not are decided by the leading bit alone.
+    const cases = [_]Cases{
+        // 2^100 + 1 against 2^100 at the same leading bit, then the same left
+        // side against 2^100 + 2^50.
+        .{
+            .left_low = 1,
+            .left_high = &.{100},
+            .left_shift = 0,
+            .right_low = 1,
+            .right_high = &.{},
+            .right_shift = 100,
+            .expected = 1,
+        },
+        .{
+            .left_low = 1,
+            .left_high = &.{100},
+            .left_shift = 0,
+            .right_low = 1,
+            .right_high = &.{50},
+            .right_shift = 50,
+            .expected = -1,
+        },
+        // 2^64 + 1 against 2^64, and 2^63 + 2 against 2^63, both one limb apart.
+        .{
+            .left_low = 1,
+            .left_high = &.{64},
+            .left_shift = 0,
+            .right_low = 1,
+            .right_high = &.{},
+            .right_shift = 64,
+            .expected = 1,
+        },
+        .{
+            .left_low = 1,
+            .left_high = &.{62},
+            .left_shift = 1,
+            .right_low = 1,
+            .right_high = &.{},
+            .right_shift = 63,
+            .expected = 1,
+        },
+        .{
+            .left_low = 3,
+            .left_high = &.{},
+            .left_shift = 62,
+            .right_low = 1,
+            .right_high = &.{},
+            .right_shift = 63,
+            .expected = 1,
+        },
+        // 2^70 against 2^70 with a whole limb of extra shift, once at a small
+        // shift and once far beyond the active prefix.
+        .{
+            .left_low = 0,
+            .left_high = &.{70},
+            .left_shift = 0,
+            .right_low = 0,
+            .right_high = &.{6},
+            .right_shift = 64,
+            .expected = 0,
+        },
+        .{
+            .left_low = 0,
+            .left_high = &.{70},
+            .left_shift = 130_930,
+            .right_low = 0,
+            .right_high = &.{6},
+            .right_shift = 130_994,
+            .expected = 0,
+        },
+        // Pairs that need two and three limbs: exactly equal, one bit apart,
+        // equal at a limb boundary, and a narrow gap near the top of a
+        // three-limb value.
+        .{
+            .left_low = 0,
+            .left_high = &.{ 63, 127 },
+            .left_shift = 0,
+            .right_low = 1,
+            .right_high = &.{64},
+            .right_shift = 63,
+            .expected = 0,
+        },
+        .{
+            .left_low = 0,
+            .left_high = &.{ 64, 127 },
+            .left_shift = 0,
+            .right_low = 1,
+            .right_high = &.{64},
+            .right_shift = 63,
+            .expected = 1,
+        },
+        .{
+            .left_low = 0,
+            .left_high = &.{127},
+            .left_shift = 0,
+            .right_low = 0,
+            .right_high = &.{64},
+            .right_shift = 63,
+            .expected = 0,
+        },
+        .{
+            .left_low = 1,
+            .left_high = &.{65},
+            .left_shift = 0,
+            .right_low = 0xffff_ffff_ffff_ffff,
+            .right_high = &.{ 64, 65, 66 },
+            .right_shift = -1,
+            .expected = -1,
+        },
+        .{
+            .left_low = 4,
+            .left_high = &.{66},
+            .left_shift = 0,
+            .right_low = 1,
+            .right_high = &.{65},
+            .right_shift = 1,
+            .expected = 1,
+        },
+        // A common shift below zero: 1 + 2^-100 against 1, stated in both
+        // directions because the aligned comparison is not symmetric.
+        .{
+            .left_low = 1,
+            .left_high = &.{100},
+            .left_shift = -100,
+            .right_low = 0,
+            .right_high = &.{104},
+            .right_shift = -104,
+            .expected = 1,
+        },
+        .{
+            .left_low = 0,
+            .left_high = &.{104},
+            .left_shift = -104,
+            .right_low = 1,
+            .right_high = &.{100},
+            .right_shift = -100,
+            .expected = -1,
+        },
+        // Beyond the active prefix at the same leading bit, stated in both
+        // directions: 2^131000 against 3 * 2^130999.
+        .{
+            .left_low = 1,
+            .left_high = &.{},
+            .left_shift = 131_000,
+            .right_low = 3,
+            .right_high = &.{},
+            .right_shift = 130_999,
+            .expected = -1,
+        },
+        .{
+            .left_low = 3,
+            .left_high = &.{},
+            .left_shift = 130_999,
+            .right_low = 1,
+            .right_high = &.{},
+            .right_shift = 131_000,
+            .expected = 1,
+        },
+        // The leading bit alone decides these two, one bit of length apart.
+        .{
+            .left_low = 1,
+            .left_high = &.{},
+            .left_shift = 131_000,
+            .right_low = 1,
+            .right_high = &.{},
+            .right_shift = 130_999,
+            .expected = 1,
+        },
+        .{
+            .left_low = 3,
+            .left_high = &.{},
+            .left_shift = 62,
+            .right_low = 1,
+            .right_high = &.{},
+            .right_shift = 62,
+            .expected = 1,
+        },
+    };
+
+    for (cases) |case| {
+        var left: Big = undefined;
+        Big.fromU64(case.left_low, &left);
+        for (case.left_high) |bit| left.setBit(bit);
+        var right: Big = undefined;
+        Big.fromU64(case.right_low, &right);
+        for (case.right_high) |bit| right.setBit(bit);
+
+        // Both sides are moved onto their common shift, which cancels, and then
+        // compared as the exact integers they name.
+        const common_shift = @min(case.left_shift, case.right_shift);
+        const left_extra: usize = @intCast(case.left_shift - common_shift);
+        const right_extra: usize = @intCast(case.right_shift - common_shift);
+        // SAFETY: each shift initializes its own active limbs before comparison.
+        var shifted_left: Big = undefined;
+        var shifted_right: Big = undefined;
+        Big.shifted(&left, left_extra, &shifted_left);
+        Big.shifted(&right, right_extra, &shifted_right);
+        const relation = Exact.compareScaled(&left, case.left_shift, &right, case.right_shift);
+        try std.testing.expectEqual(Big.compare(&shifted_left, &shifted_right), relation);
+        try std.testing.expectEqual(case.expected, relation);
+    }
+
+    // The zero value is a valid operand for the comparison, unlike the
+    // rounding helper that requires a nonzero numerator.
+    var zero: Big = undefined;
+    Big.zero(&zero);
+    var one: Big = undefined;
+    Big.one(&one);
+    try std.testing.expectEqual(@as(i8, 0), Exact.compareScaled(&zero, 0, &zero, 7));
+    try std.testing.expectEqual(@as(i8, 0), Exact.compareScaled(&zero, -3, &zero, -3));
+    try std.testing.expectEqual(@as(i8, -1), Exact.compareScaled(&zero, 3, &one, -5));
+    try std.testing.expectEqual(@as(i8, 1), Exact.compareScaled(&one, -5, &zero, 3));
 }

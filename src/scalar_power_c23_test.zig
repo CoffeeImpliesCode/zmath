@@ -397,3 +397,231 @@ test "binary64 power families preserve minimum subnormal boundaries at degree li
     try expectRootD(0x0000_0000_0000_0002, -64, 0x40fb_33a2_b84f_15fb);
     try expectRootD(0x0000_0000_0000_0002, 64, 0x3ee2_d285_a6e4_030b);
 }
+
+test "binary64 power fast paths reciprocal degree minus one rounds near one" {
+    // 1/(1+2^-52) is above the double 1-2^-52 and below the midpoint
+    // above it, while 1/(1-2^-53) is above the midpoint above one,
+    // so neither case resolves a tie.
+    try expectPownD(0x3ff0_0000_0000_0001, -1, 0x3fef_ffff_ffff_fffe);
+    try expectPownD(0x3fef_ffff_ffff_ffff, -1, 0x3ff0_0000_0000_0001);
+    try expectPownD(0xbfef_ffff_ffff_ffff, -1, 0xbff0_0000_0000_0001);
+    try expectPownD(0xbff0_0000_0000_0000, -1, 0xbff0_0000_0000_0000);
+
+    try expectRootD(0x3ff0_0000_0000_0001, -1, 0x3fef_ffff_ffff_fffe);
+    try expectRootD(0x3fef_ffff_ffff_ffff, -1, 0x3ff0_0000_0000_0001);
+    try expectRootD(0xbfef_ffff_ffff_ffff, -1, 0xbff0_0000_0000_0001);
+}
+
+test "binary64 power fast paths reciprocal degree minus one keeps range edges" {
+    // The reciprocal of the smallest subnormal is 2^1074 and overflows
+    // to infinity in both signs.  The largest subnormal reciprocal is
+    // above 2^1022 + 2^970 but below the midpoint above it, and the
+    // minimum normal reciprocal is the exact power 2^1022.
+    try expectPownD(0x0000_0000_0000_0001, -1, 0x7ff0_0000_0000_0000);
+    try expectPownD(0x8000_0000_0000_0001, -1, 0xfff0_0000_0000_0000);
+    try expectPownD(0x000f_ffff_ffff_ffff, -1, 0x7fd0_0000_0000_0001);
+    try expectPownD(0x0010_0000_0000_0000, -1, 0x7fd0_0000_0000_0000);
+    // The largest finite value is (2 - 2^-52) * 2^1023, and its
+    // reciprocal is above the subnormal 2^-1024 but rounds to it.
+    try expectPownD(0x7fef_ffff_ffff_ffff, -1, 0x0004_0000_0000_0000);
+
+    // Zero and infinity take their magnitude from the degree and their
+    // sign from the base sign and the degree parity.
+    try expectPownD(0x0000_0000_0000_0000, -1, 0x7ff0_0000_0000_0000);
+    try expectPownD(0x8000_0000_0000_0000, -1, 0xfff0_0000_0000_0000);
+    try expectPownD(0x7ff0_0000_0000_0000, -1, 0x0000_0000_0000_0000);
+    try expectPownD(0xfff0_0000_0000_0000, -1, 0x8000_0000_0000_0000);
+    try expectRootD(0x8000_0000_0000_0000, -1, 0xfff0_0000_0000_0000);
+    try expectRootD(0x7ff0_0000_0000_0000, -1, 0x0000_0000_0000_0000);
+    try expectRootD(0xfff0_0000_0000_0000, -1, 0x8000_0000_0000_0000);
+}
+
+test "binary64 power fast paths degree two sqrt rounds half ulp boundaries" {
+    // sqrt(1+3*2^-52) sits just below the midpoint between 1+2^-52
+    // and 1+2^-51, and sqrt(1-2^-53) sits just below the midpoint
+    // below one, so neither resolves a tie.
+    try expectRootD(0x3ff0_0000_0000_0003, 2, 0x3ff0_0000_0000_0001);
+    try expectRootD(0x3fef_ffff_ffff_ffff, 2, 0x3fef_ffff_ffff_ffff);
+    // The smallest subnormal root is the exact power 2^-537, and the
+    // largest subnormal root is one ulp under the exact power 2^-511.
+    try expectRootD(0x0000_0000_0000_0001, 2, 0x1e60_0000_0000_0000);
+    try expectRootD(0x000f_ffff_ffff_ffff, 2, 0x1fff_ffff_ffff_ffff);
+    // The root of the largest finite value lies just below the
+    // midpoint 2^512 - 2^458 and rounds to the predecessor of 2^512.
+    try expectRootD(0x7fef_ffff_ffff_ffff, 2, 0x5fef_ffff_ffff_ffff);
+}
+
+test "binary64 power fast paths degree one compound rounds one plus x once" {
+    // Cancellation near -1 keeps every bit of the exact sum.
+    try expectCompoundD(0xbfef_ffff_ffff_ffff, 1, 0x3ca0_0000_0000_0000);
+    try expectCompoundD(0xbfef_ffff_ffff_fffe, 1, 0x3cb0_0000_0000_0000);
+    // 1 + 2^-53 is the midpoint above one and takes the even one,
+    // 1 + 2^-54 is only a quarter ulp up so it stays one, and
+    // 1 - 2^-54 is the midpoint below one, which also takes one.
+    try expectCompoundD(0x3ca0_0000_0000_0000, 1, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0x3c90_0000_0000_0000, 1, 0x3ff0_0000_0000_0000);
+    try expectCompoundD(0xbc90_0000_0000_0000, 1, 0x3ff0_0000_0000_0000);
+    // 1 + 3*2^-53 is the midpoint between 1+2^-52 and 1+2^-51 and
+    // takes the even mantissa 2, while 1 - 3*2^-54 is the midpoint
+    // between 1-2^-53 and 1-2^-52 and takes the even 1-2^-52.
+    try expectCompoundD(0x3cb8_0000_0000_0000, 1, 0x3ff0_0000_0000_0002);
+    try expectCompoundD(0xbca8_0000_0000_0000, 1, 0x3fef_ffff_ffff_fffe);
+    // 1 + (1 + 2^-52) is a midpoint above two and ties to two, and
+    // negative zero adds nothing.
+    try expectCompoundD(0x3ff0_0000_0000_0001, 1, 0x4000_0000_0000_0000);
+    try expectCompoundD(0x8000_0000_0000_0000, 1, 0x3ff0_0000_0000_0000);
+}
+
+test "binary64 power fast paths NaN and domain rules stay ahead of the fast paths" {
+    try expectPownD(0x7ff0_0000_0000_0123, -1, 0x7ff8_0000_0000_0123);
+    try expectPownD(0xfff8_0000_0000_0456, -1, 0xfff8_0000_0000_0456);
+    try expectRootD(0x7ff0_0000_0000_0123, -1, 0x7ff8_0000_0000_0123);
+    try expectRootD(0x7ff0_0000_0000_0123, 2, 0x7ff8_0000_0000_0123);
+    try expectRootD(0xfff8_0000_0000_0456, 2, 0xfff8_0000_0000_0456);
+    try expectCompoundD(0x7ff0_0000_0000_0123, 1, 0x7ff8_0000_0000_0123);
+
+    // A negative nonzero value with an even degree is a domain error.
+    // Negative zero is exempt because it is not below zero, but
+    // negative infinity is a negative nonzero value, so the domain
+    // answer precedes the infinity rule.
+    try expectRootD(0xbff0_0000_0000_0000, 2, 0x7ff8_0000_0000_0000);
+    try expectRootD(0x8000_0000_0000_0000, 2, 0x0000_0000_0000_0000);
+    try expectRootD(0xfff0_0000_0000_0000, 2, 0x7ff8_0000_0000_0000);
+
+    // Every non-NaN value below -1 is outside the compoundn domain,
+    // -1 has its own zero result, and positive infinity stays infinite.
+    try expectCompoundD(0xc000_0000_0000_0000, 1, 0x7ff8_0000_0000_0000);
+    try expectCompoundD(0xfff0_0000_0000_0000, 1, 0x7ff8_0000_0000_0000);
+    try expectCompoundD(0xbff0_0000_0000_0000, 1, 0x0000_0000_0000_0000);
+    try expectCompoundD(0x7ff0_0000_0000_0000, 1, 0x7ff0_0000_0000_0000);
+}
+
+test "binary64 power fast paths out of range degrees stay ahead of the fast paths" {
+    const canonical: u64 = 0x7ff8_0000_0000_0000;
+
+    // Degrees outside the accepted -64 through 64 range report the
+    // canonical NaN sentinel with a false status.  Degree 65 is odd,
+    // so an in-range root of -1 would answer -1 instead.
+    const pown_snan = power.pownd(common.D.fromBits(0x7ff0_0000_0000_0123), -65);
+    try std.testing.expect(!pown_snan.ok);
+    try std.testing.expectEqual(canonical, common.D.toBits(pown_snan.value));
+    const pown_zero = power.pownd(common.D.fromBits(0x0000_0000_0000_0000), 65);
+    try std.testing.expect(!pown_zero.ok);
+    try std.testing.expectEqual(canonical, common.D.toBits(pown_zero.value));
+
+    const root_odd_degree = power.rootnd(common.D.fromBits(0xbff0_0000_0000_0000), 65);
+    try std.testing.expect(!root_odd_degree.ok);
+    try std.testing.expectEqual(canonical, common.D.toBits(root_odd_degree.value));
+    const root_negative_degree = power.rootnd(common.D.fromBits(0x8000_0000_0000_0000), -65);
+    try std.testing.expect(!root_negative_degree.ok);
+    try std.testing.expectEqual(canonical, common.D.toBits(root_negative_degree.value));
+
+    const compound_domain = power.compoundnd(common.D.fromBits(0xc000_0000_0000_0000), -65);
+    try std.testing.expect(!compound_domain.ok);
+    try std.testing.expectEqual(canonical, common.D.toBits(compound_domain.value));
+    const compound_snan = power.compoundnd(common.D.fromBits(0x7ff0_0000_0000_0123), 65);
+    try std.testing.expect(!compound_snan.ok);
+    try std.testing.expectEqual(canonical, common.D.toBits(compound_snan.value));
+}
+
+test "binary64 power fast paths degree minus two keeps one exact root" {
+    // 2^(-1/2) sits just above the midpoint between
+    // 0x3fe6_a09e_667f_3bcc and 0x3fe6_a09e_667f_3bcd, so the once
+    // rounded root is the upper neighbour.
+    try expectRootD(0x4000_0000_0000_0000, -2, 0x3fe6_a09e_667f_3bcd);
+    // sqrt(1 + 2^-52) rounds to one and 1/1 is one, but the exact
+    // root is above 1-2^-53 and rounds to it.
+    try expectRootD(0x3ff0_0000_0000_0001, -2, 0x3fef_ffff_ffff_ffff);
+    // sqrt(2^600 + 2^548) rounds to 2^300 and 1/2^300 is 2^-300, but
+    // the exact root is just above 2^-300 - 2^-353 and rounds to it.
+    try expectRootD(0x6570_0000_0000_0001, -2, 0x2d2f_ffff_ffff_ffff);
+}
+
+test "binary64 exact power optimization positive powers tie to even significands" {
+    // (3/2)^34 is 3^34 / 2^34 and 3^34 needs 54 significant bits, so the
+    // exact value is precisely the midpoint of 0x412d_9fe7_7988_1944 and
+    // 0x412d_9fe7_7988_1945.  The lower neighbour holds the even
+    // significand, so ties to even keeps that one.
+    try expectPownD(0x3ff8_0000_0000_0000, 34, 0x412d_9fe7_7988_1944);
+    // (7/4)^19 is 7^19 / 2^38 and 7^19 also needs 54 significant bits, so
+    // this is a second exact midpoint, here between an odd lower neighbour
+    // and an even upper one.
+    try expectPownD(0x3ffc_0000_0000_0000, 19, 0x40e4_3f9e_0d2d_93ec);
+}
+
+test "binary64 exact power optimization truncation keeps guard and sticky bits" {
+    // (5/4)^41 is 5^41 / 2^82 with 96 significant bits, and the discarded
+    // remainder sits above the midpoint, so the upper neighbour wins.
+    try expectPownD(0x3ff4_0000_0000_0000, 41, 0x40c2_5dfa_371a_19e7);
+    // 1.6 already fills all 53 significand bits, so its degree-20 power
+    // needs about a thousand of them and again lands above a midpoint.
+    try expectPownD(0x3ff9_9999_9999_999a, 20, 0x40c7_9ca1_0c92_422b);
+    // (1 + 2^-52)^63 is not exactly 1 + 63*2^-52; its retained fraction
+    // lies below half an ulp, so the result truncates to 63.
+    try expectPownD(0x3ff0_0000_0000_0001, 63, 0x3ff0_0000_0000_003f);
+    // The same base at degree 19 keeps a retained fraction below half an
+    // ulp as well.
+    try expectPownD(0x3ff0_0000_0000_0001, 19, 0x3ff0_0000_0000_0013);
+}
+
+test "binary64 exact power optimization subnormal powers round to whole ulps" {
+    // 1.5 * 2^-358 cubed is exactly 3.375 minimum subnormal ulps.
+    try expectPownD(0x2998_0000_0000_0000, 3, 0x0000_0000_0000_0003);
+    // 1.75 * 2^-359 cubed is 0.669921875 of a minimum subnormal ulp, which
+    // is past the half-ulp midpoint and so keeps one ulp.
+    try expectPownD(0x298c_0000_0000_0000, 3, 0x0000_0000_0000_0001);
+}
+
+test "binary64 exact power optimization negative odd degrees keep magnitude rounding" {
+    // The negative base reuses the degree-19 midpoint; the magnitude rounds
+    // exactly as the positive base does and only the sign follows parity.
+    try expectPownD(0xbffc_0000_0000_0000, 19, 0xc0e4_3f9e_0d2d_93ec);
+    try expectPownD(0xbff8_0000_0000_0000, 35, 0xc136_37ed_9b26_12f3);
+    // The subnormal rows keep their single-ulp significands under negation.
+    try expectPownD(0xa998_0000_0000_0000, 3, 0x8000_0000_0000_0003);
+    try expectPownD(0xa98c_0000_0000_0000, 3, 0x8000_0000_0000_0001);
+}
+
+test "binary64 exact power optimization compound powers expand once before rounding" {
+    // (1 + 2^-54)^2 is 1 + 2^-53 + 2^-108, strictly above the midpoint
+    // 1 + 2^-53, so it rounds up.  Rounding 1 + x first collapses it to
+    // one, and squaring that gives one.
+    try expectCompoundD(0x3c90_0000_0000_0000, 2, 0x3ff0_0000_0000_0001);
+    // At degree 21 the same base retains a fraction below half an ulp
+    // above 1 + 5.25 ulps, giving five ulps.
+    try expectCompoundD(0x3c90_0000_0000_0000, 21, 0x3ff0_0000_0000_0005);
+    try expectCompoundD(0x3ca0_0000_0000_0000, 19, 0x3ff0_0000_0000_000a);
+    // (2 + 2^-52)^19 is 2^19 + 9.5 ulps plus a positive second-order
+    // term, so it clears the midpoint to the even upper neighbour.
+    try expectCompoundD(0x3ff0_0000_0000_0001, 19, 0x4120_0000_0000_000a);
+    // Here 1 + x is exactly 2^-53, so the degree-20 value is the exact
+    // power 2^-1060 and the degree-21 value is the exact power 2^-1113,
+    // which is below half the minimum subnormal.
+    try expectCompoundD(0xbfef_ffff_ffff_ffff, 20, 0x0000_0000_0000_4000);
+    try expectCompoundD(0xbfef_ffff_ffff_ffff, 21, 0x0000_0000_0000_0000);
+}
+
+test "binary64 exact power optimization rootn stays exact across wide exponent offsets" {
+    // The cube root of the minimum subnormal is the exact power 2^-358.
+    try expectRootD(0x0000_0000_0000_0001, 3, 0x2990_0000_0000_0000);
+    // The minimum normal is 2^-1022, so its square root and its inverse
+    // square root are the exact powers 2^-511 and 2^511.
+    try expectRootD(0x0010_0000_0000_0000, 2, 0x2000_0000_0000_0000);
+    try expectRootD(0x0010_0000_0000_0000, -2, 0x5fe0_0000_0000_0000);
+    // The cube roots of the minimum normal and of the largest finite value
+    // share one significand, because the 2^-52 shortfall of the largest
+    // finite value is far below half an ulp of its cube root.
+    try expectRootD(0x0010_0000_0000_0000, 3, 0x2aa4_28a2_f98d_728b);
+    try expectRootD(0x7fef_ffff_ffff_ffff, 3, 0x5544_28a2_f98d_728b);
+    // The negative degrees of those same two bases are both inexact.
+    try expectRootD(0x0010_0000_0000_0000, -3, 0x5539_65fe_a53d_6e3d);
+    try expectRootD(0x7fef_ffff_ffff_ffff, -3, 0x2a99_65fe_a53d_6e3d);
+    // Degree -63 inverts the exponent scale, putting the largest finite
+    // value near 2^-16 and the largest subnormal near 2^16, and neither
+    // root is exact.
+    try expectRootD(0x7fef_ffff_ffff_ffff, -63, 0x3eea_d5b3_a4a1_6c79);
+    try expectRootD(0x000f_ffff_ffff_ffff, -63, 0x40f2_aa1a_5aad_04f5);
+    // The exact cube root of 2^600 + 2^548 lies between a quarter and a
+    // half of an ulp above 2^200, so it rounds back down to 2^200.
+    try expectRootD(0x6570_0000_0000_0001, 3, 0x4c70_0000_0000_0000);
+}
