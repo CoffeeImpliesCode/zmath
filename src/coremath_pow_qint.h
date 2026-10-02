@@ -44,7 +44,7 @@ SOFTWARE.
 #ifndef UINT128_T
 #define UINT128_T
 
-#if (defined(__clang__) && __clang_major__ >= 14) || (defined(__GNUC__) && __GNUC__ >= 14)
+#if (defined(__clang__) && __clang_major__ >= 14) || (defined(__GNUC__) && __GNUC__ >= 14 && __BITINT_MAXWIDTH__ && __BITINT_MAXWIDTH__ >= 128)
 typedef unsigned _BitInt(128) u128;
 #else
 typedef unsigned __int128 u128;
@@ -112,8 +112,8 @@ static inline int subu128 (u128 a, u128 b, u128 *r) {
 
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
 typedef union {
-  /* Use a little-endian representation.
-     FIXME: adapt for big-endian processors. */
+  /* The (ll, lh, hl, hh) view and the (rl, rh) view alias the same storage,
+     so the limb order follows the target byte order. */
   struct {
     u128 rl;
     u128 rh;

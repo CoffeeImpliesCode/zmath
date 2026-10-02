@@ -15,7 +15,7 @@ const c23 = @import("scalar_c23_types.zig");
 /// ties-to-even active. The implementation does not inspect or change fenv.
 pub const LgammaResult = c23.LgammaResult;
 
-extern fn zmath_core_lgammah(value: f16, sign: *c_int) callconv(.c) f16;
+extern fn zmath_core_lgammah_bits(value: u16, sign: *c_int) callconv(.c) u16;
 extern fn zmath_core_lgammaf(value: f32, sign: *c_int) callconv(.c) f32;
 extern fn zmath_core_lgammad(value: f64, sign: *c_int) callconv(.c) f64;
 
@@ -38,8 +38,8 @@ pub fn lgammah(value: f16) c23.LgammaResult(f16) {
     }
 
     var sign_c: c_int = 1;
-    const result = zmath_core_lgammah(value, &sign_c);
-    return .{ .value = result, .sign = @intCast(sign_c) };
+    const result = zmath_core_lgammah_bits(bits, &sign_c);
+    return .{ .value = @bitCast(result), .sign = @intCast(sign_c) };
 }
 
 /// Computes the correctly rounded binary32 lgamma result.

@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const fraction_mask_d: u64 = 0x000f_ffff_ffff_ffff;
 
 const magnitude_mask_h: u16 = 0x7fff;
@@ -191,7 +193,7 @@ noinline fn hypotfRefine(
     const inverse_squared_sum = 0.5 / squared_sum;
     const squared_sum_error = (x_squared - squared_sum) + y_squared;
     const root_inverse = root * inverse_squared_sum;
-    const squared_error = squared_sum_error - @mulAdd(f64, root, root, -squared_sum);
+    const squared_error = squared_sum_error - fma_impl.fma64(root, root, -squared_sum);
     const correction = root_inverse * squared_error;
     const refined = root + correction;
     const residual = correction + (root - refined);
@@ -375,7 +377,7 @@ pub fn hypotd(x: f64, y: f64) f64 {
     if (x_magnitude -% y_magnitude > (27 << 52)) {
         const x_value: f64 = @bitCast(x_magnitude);
         const y_value: f64 = @bitCast(original_y_magnitude);
-        return @mulAdd(f64, 0x1p-27, y_value, x_value);
+        return fma_impl.fma64(0x1p-27, y_value, x_value);
     }
 
     const offset: i64 = @as(i64, @intCast(exponent_bias_d << 52)) -
@@ -387,16 +389,16 @@ pub fn hypotd(x: f64, y: f64) f64 {
     const normalized_y: f64 = @bitCast(normalized_y_bits);
 
     const x_squared = normalized_x * normalized_x;
-    const x_squared_error = @mulAdd(f64, normalized_x, normalized_x, -x_squared);
+    const x_squared_error = fma_impl.fma64(normalized_x, normalized_x, -x_squared);
     const y_squared = normalized_y * normalized_y;
-    const y_squared_error = @mulAdd(f64, normalized_y, normalized_y, -y_squared);
+    const y_squared_error = fma_impl.fma64(normalized_y, normalized_y, -y_squared);
     const squared_sum = x_squared + y_squared;
     const inverse_squared_sum = 0.5 / squared_sum;
     const squared_sum_error = ((x_squared - squared_sum) + y_squared) +
         (x_squared_error + y_squared_error);
     var root = @sqrt(squared_sum);
     const root_inverse = root * inverse_squared_sum;
-    const squared_error = squared_sum_error - @mulAdd(f64, root, root, -squared_sum);
+    const squared_error = squared_sum_error - fma_impl.fma64(root, root, -squared_sum);
     const correction = root_inverse * squared_error;
     const sum = fastTwoSum(root, correction);
     root = sum.high;

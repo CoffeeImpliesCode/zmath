@@ -7,7 +7,7 @@
 
 const tiny = @import("scalar_tiny.zig");
 
-extern fn cr_log2p1f16(value: f16) callconv(.c) f16;
+extern fn zmath_core_log2p1h_bits(value: u16) callconv(.c) u16;
 extern fn zmath_core_log2p1f_finite(value: f32) callconv(.c) f32;
 extern fn zmath_core_log2p1_finite(value: f64) callconv(.c) f64;
 
@@ -43,7 +43,7 @@ pub fn log2p1h(value: f16) f16 {
     if ((bits & sign_mask_h) != 0 and magnitude > 0x3c00) return @bitCast(canonical_nan_bits_h);
     if (magnitude == infinity_bits_h) return value;
     if (magnitude == 0) return value;
-    return cr_log2p1f16(value);
+    return @bitCast(zmath_core_log2p1h_bits(bits));
 }
 
 /// Computes log2(1 + value) for a binary32 value.

@@ -7,7 +7,7 @@
 
 const tiny = @import("scalar_tiny.zig");
 
-extern fn cr_log10p1f16(value: f16) callconv(.c) f16;
+extern fn zmath_core_log10p1h_bits(value: u16) callconv(.c) u16;
 extern fn zmath_core_log10p1f_finite(value: f32) callconv(.c) f32;
 extern fn zmath_core_log10p1_finite(value: f64) callconv(.c) f64;
 
@@ -46,7 +46,7 @@ pub fn log10p1h(value: f16) f16 {
         return @bitCast(canonical_nan_bits_h);
     }
     if (magnitude == 0) return value;
-    return cr_log10p1f16(value);
+    return @bitCast(zmath_core_log10p1h_bits(bits));
 }
 
 /// Computes the correctly rounded base-10 logarithm of one plus a binary32 value.

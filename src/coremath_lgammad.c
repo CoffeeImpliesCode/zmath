@@ -32,6 +32,8 @@ SOFTWARE.
 #include <errno.h>
 #endif
 
+#include "coremath_fma.h"
+
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
@@ -39,40 +41,7 @@ SOFTWARE.
 
 #pragma STDC FENV_ACCESS ON
 
-/* __builtin_roundeven was introduced in gcc 10:
-   https://gcc.gnu.org/gcc-10/changes.html,
-   and in clang 17 */
-#if ((defined(__GNUC__) && __GNUC__ >= 10) || (defined(__clang__) && __clang_major__ >= 17)) && !defined(_MSC_VER) && (defined(__aarch64__) || defined(__x86_64__) || defined(__i386__))
-# define roundeven_finite(x) __builtin_roundeven (x)
-#else
-/* round x to nearest integer, breaking ties to even */
-static double
-roundeven_finite (double x)
-{
-  double ix;
-# if (defined(__GNUC__) || defined(__clang__)) && (defined(__AVX__) || defined(__SSE4_1__) || (__ARM_ARCH >= 8))
-#  if defined __AVX__
-   __asm__("vroundsd $0x8,%1,%1,%0":"=x"(ix):"x"(x));
-#  elif __ARM_ARCH >= 8
-   __asm__ ("frintn %d0, %d1":"=w"(ix):"w"(x));
-#  else /* __SSE4_1__ */
-   __asm__("roundsd $0x8,%1,%0":"=x"(ix):"x"(x));
-#  endif
-# else
-  ix = __builtin_round (x); /* nearest, away from 0 */
-  if (__builtin_fabs (ix - x) == 0.5)
-  {
-    /* if ix is odd, we should return ix-1 if x>0, and ix+1 if x<0 */
-    union { double f; uint64_t n; } u, v;
-    u.f = ix;
-    v.f = ix - __builtin_copysign (1.0, x);
-    if (__builtin_ctz (v.n) > __builtin_ctz (u.n))
-      ix = v.f;
-  }
-# endif
-  return ix;
-}
-#endif
+#include "coremath_roundeven.h"
 
 typedef unsigned short ushort;
 typedef uint64_t u64;
@@ -110,13 +79,13 @@ static inline double sumdd(double xh, double xl, double yh, double yl, double *e
 
 static inline double muldd(double xh, double xl, double ch, double cl, double *l){
   double ahhh = ch*xh;
-  *l = (ch*xl + cl*xh) + __builtin_fma(ch, xh, -ahhh);
+  *l = (ch*xl + cl*xh) + zmath_fma(ch, xh, -ahhh);
   return ahhh;
 }
 
 static inline double mulddd(double x, double ch, double cl, double *l){
   double ahhh = ch*x;
-  *l = cl*x + __builtin_fma(ch, x, -ahhh);
+  *l = cl*x + zmath_fma(ch, x, -ahhh);
   return ahhh;
 }
 
@@ -339,7 +308,7 @@ static __attribute__((noinline)) double as_lgamma_accurate(double x){
       fh = as_lgamma_asym_accurate(x, &fl, &fll);
     }
     if(sx<0){
-      double phi = (sx<-0.5)?sx - __builtin_floor(sx):-sx;
+      double phi = (sx<-0.5)?sx - zmath_floor(sx):-sx;
       double sl, sh = as_sinpipid_accurate(phi, &sl);
       double lll, ll, lh = as_logd_accurate(sh, &ll, &lll);
       ll += sl/sh + lll;
@@ -895,7 +864,7 @@ double zmath_core_lgammad(double x, int *sign_out){
       return 0x1.fp1023 * 0x1.fp1023; // huge positive integer
     }
   }
-  double fx = __builtin_floor(x);
+  double fx = zmath_floor(x);
   if(__builtin_expect(fx==x, 0)){ /* x is integer */
     if(x <= 0.0) {
       *sign_out = 1 - 2*(t.u>>63);
@@ -978,7 +947,7 @@ double zmath_core_lgammad(double x, int *sign_out){
 	-0x1.a7fd66a05ccfcp-10};
       lh = fastsum(lh,ll, c[0][0], c[0][1], &ll);
       if(ax<0x1p100){
-	double zh = 1.0/ax, zl = __builtin_fma(zh,-ax, 1.0)*zh;
+	double zh = 1.0/ax, zl = zmath_fma(zh,-ax, 1.0)*zh;
 	double z2h = zh*zh, z4h = z2h*z2h;
 	double q0 = q[0] + z2h*q[1], q2 = q[2] + z2h*q[3], q4 = q[4];
 	fl = z2h*(q0 + z4h*(q2 + z4h*q4));
@@ -1010,7 +979,7 @@ double zmath_core_lgammad(double x, int *sign_out){
       eps = __builtin_fabs(fh)*8.3e-20 + 1e-24;
     }
     if(t.u>>63){ // x<0 so use reflection formula
-      double sl, sh = as_sinpipid(x - __builtin_floor(x), &sl);
+      double sl, sh = as_sinpipid(x - zmath_floor(x), &sl);
       sh = mulddd(-x, sh,sl, &sl);
       double ll, lh = as_logd(sh, &ll);
       ll += sl/sh;
@@ -1104,9 +1073,9 @@ double as_logd(double x, double *l){
   t.u |= (int64_t)0x3ff<<52;
   int i1 = j>>5, i2 = j&0x1f;
   double r = r1[i1]*r2[i2];
-  double o = r*t.f, dxl = __builtin_fma(r,t.f,-o), dxh = o-1;
+  double o = r*t.f, dxl = zmath_fma(r,t.f,-o), dxh = o-1;
   static const double c[] = {-0x1.fffffffffffd3p-2, 0x1.55555555543d5p-2, -0x1.000002bb2d74ep-2, 0x1.999a692c56e4ep-3};
-  double dx = __builtin_fma(r,t.f,-1), dx2 = dx*dx;
+  double dx = zmath_fma(r,t.f,-1), dx2 = dx*dx;
   double f = dx2*((c[0] + dx*c[1]) + dx2*(c[2] + dx*c[3]));
   double lt = (l1[i1][1] + l2[i2][1]) + ed*0x1.62e42fef8p-1;
   double lh = lt + dxh, ll = (lt - lh) + dxh;
@@ -1224,7 +1193,7 @@ double as_logd_accurate(double x, double *l, double *l_){
   t.u |= (int64_t)0x3ff<<52;
   int i1 = j>>5, i2 = j&0x1f;
   double r = r1[i1]*r2[i2];
-  double o = r*t.f, dxl = __builtin_fma(r,t.f,-o), dxh = o-1;
+  double o = r*t.f, dxl = zmath_fma(r,t.f,-o), dxh = o-1;
   static const double c[][2] = {
     {0x1p+0, 0x1.a193d7f59d80ap-118}, {-0x1p-1, 0x1.8c7d7a8733406p-99},
     {0x1.5555555555555p-2, 0x1.55555554f571dp-56}, {-0x1p-2, -0x1.e516b5d7b8c15p-73},
@@ -1288,12 +1257,12 @@ double as_sinpipid(double x, double *l){
   x -= 0.5;
   double ax = __builtin_fabs(x);
   double sx = ax*128;
-  double ix = roundeven_finite(sx);
+  double ix = zmath_roundeven_finite(sx);
   int ky = ix, kx = 64-ky;
   if(__builtin_expect(kx<2,0)){
     static const double c[2] = {-0x1.a51a6625307d3p+0, -0x1.16cc8f2044a4ap-55};
     static const double cl[] = {0x1.9f9cb402bc42ap-1, -0x1.86a8e46ddf78dp-3, 0x1.ac644e7aa33e6p-6};
-    double z = 0.5-ax, z2 = z*z, z2l = __builtin_fma(z,z,-z2);
+    double z = 0.5-ax, z2 = z*z, z2l = zmath_fma(z,z,-z2);
     double fl = z2*(cl[0] + z2*(cl[1] + z2*(cl[2]))), fh = fasttwosum(c[0], fl, &fl), e;
     fl += c[1];
     fh = muldd(z2,z2l, fh,fl, &fl);
@@ -1334,7 +1303,7 @@ double as_sinpipid_accurate(double x, double *l){
   x -= 0.5;
   x = __builtin_fabs(x);
   x *= 128;
-  double ix = roundeven_finite(x), d = ix-x;
+  double ix = zmath_roundeven_finite(x), d = ix-x;
   int ky = ix, kx = 64-ky;
 
   double sh = stpi[kx][1], sl = stpi[kx][0];
@@ -1351,7 +1320,7 @@ double as_sinpipid_accurate(double x, double *l){
     {0x1.466bc6775aae2p-34, -0x1.6dc0d14c26b21p-89},  {-0x1.32d2cce62bd86p-50, 0x1.2ba6dbc4b37cp-104},
     {0x1.50783487e6b5cp-67, -0x1.b77efed0f9c1fp-122}, {-0x1.e306ec8cf7c02p-85, 0x1.5d2601f85289ap-139}};
 
-  double d2h = d*d, d2l = __builtin_fma(d,d,-d2h);
+  double d2h = d*d, d2l = zmath_fma(d,d,-d2h);
   double Pl=0, Ph = polydd(d2h,d2l, 5,c, &Pl);
   double Ql=0, Qh = polydd(d2h,d2l, 6,s, &Ql);
 
@@ -1372,9 +1341,9 @@ double as_lgamma_asym_accurate(double xh, double *xl, double *e){
 
   double l2, l1, l0 = as_logd_accurate(xh, &l1, &l2), l0x, l1x, l2x;
   if(xh<0x1p120){
-    double zh = 1.0/xh, dz = *xl*zh, zl = (__builtin_fma(zh,-xh,1.0) - dz)*zh;
+    double zh = 1.0/xh, dz = *xl*zh, zl = (zmath_fma(zh,-xh,1.0) - dz)*zh;
     if(*xl != 0){
-      double dl2, dl1 = mulddd(*xl, zh, __builtin_fma(zh,-xh,1.0)*zh, &dl2);
+      double dl2, dl1 = mulddd(*xl, zh, zmath_fma(zh,-xh,1.0)*zh, &dl2);
       dl2 -= dl1*dl1/2;
       l1 = sumdd(l1,l2,dl1,dl2, &l2);
     }
@@ -1390,8 +1359,8 @@ double as_lgamma_asym_accurate(double xh, double *xl, double *e){
     }
     l0 -= 1;
 
-    l0x = l0*wh; double l0xl = __builtin_fma(l0,wh,-l0x);
-    l1x = l1*wh; double l1xl = __builtin_fma(l1,wh,-l1x);
+    l0x = l0*wh; double l0xl = zmath_fma(l0,wh,-l0x);
+    l1x = l1*wh; double l1xl = zmath_fma(l1,wh,-l1x);
     l2x = l2*wh;
 
     l1x = sumdd(l1x,l2x, l0xl,l1xl, &l2x);
@@ -1445,8 +1414,8 @@ double as_lgamma_asym_accurate(double xh, double *xl, double *e){
   } else {
     double wl = *xl - 0.5;
     l0 -= 1;
-    l0x = l0*xh; double l0xl = __builtin_fma(l0,xh,-l0x);
-    l1x = l1*xh; double l1xl = __builtin_fma(l1,xh,-l1x);
+    l0x = l0*xh; double l0xl = zmath_fma(l0,xh,-l0x);
+    l1x = l1*xh; double l1xl = zmath_fma(l1,xh,-l1x);
     l2x = l2*xh;
     l1x = sumdd(l1x,l2x, l0xl,l1xl, &l2x);
     l1x = sumdd(l1x,l2x, l0*wl,l1*wl, &l2x);

@@ -467,15 +467,23 @@ fn eqOf(comptime V: type, a: V, b: V) bool {
     return same;
 }
 
-/// The array and the vector have the same size and alignment, so this is a
-/// reinterpretation of the same bits in the same order.
+/// The components of `a` as the lanes of a `@Vector`, and the lanes of a
+/// `@Vector` as the components of a `Vec`.
+///
+/// Both directions are the language coercion between an array and a `@Vector`
+/// of the same length and element type, which maps element `i` to lane `i` and
+/// back. `@bitCast` between the same two types would instead reinterpret the
+/// bytes one value happens to occupy: an array has a well-defined byte layout
+/// but a vector has none, so on a big-endian target that pun reversed the
+/// lanes of every `Vec` conversion.
 fn toVectorOf(comptime V: type, a: V) @Vector(componentCount(V), Component(V)) {
-    return @bitCast(toArrayOf(V, a));
+    const lanes: [componentCount(V)]Component(V) = toArrayOf(V, a);
+    return lanes;
 }
 
 fn fromVectorOf(comptime V: type, v: @Vector(componentCount(V), Component(V))) V {
-    const array: [componentCount(V)]Component(V) = @bitCast(v);
-    return fromArrayOf(V, array);
+    const lanes: [componentCount(V)]Component(V) = v;
+    return fromArrayOf(V, lanes);
 }
 
 // ---------------------------------------------------------------------------

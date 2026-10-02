@@ -1316,6 +1316,67 @@ test for it.
 
 ## Tests and benchmarks
 
+Local cross-target unit checks use the installed `cross-test` host tool and its
+auto-discovered [`cross-test.profile.sh`](cross-test.profile.sh). The profile
+builds the complete library suite through `zig build test-build`, which installs
+`bin/zmath-test` (with `.exe` on Windows and `.wasm` on WebAssembly) without
+running it. It inherits the host tool's version-pinned Zig 0.16.0 Tier 1/2
+matrix: all 53 published platforms, not an architecture/OS Cartesian product.
+The CPU is `baseline+fma` on x86/x86-64 and `baseline` elsewhere.
+
+Run these commands from this repository:
+
+```text
+cross-test --list
+cross-test
+cross-test --output zig-out/cross-test-release-safe -- -Doptimize=ReleaseSafe
+cross-test --targets 'x86_64-linux x86-linux aarch64_be-linux arm-linux mips-linux' --require-runners
+```
+
+The default execution uses `Debug`. Native targets run directly and available
+foreign targets use the tool's detected QEMU/Wine/Wasmtime runner. A successful
+compile without a suitable OS runtime is `build_only`, not a test pass.
+`--require-runners` makes that incomplete execution coverage fail; `--targets`
+selects a subset of the inherited matrix.
+The default output is `zig-out/cross-test`, with per-run build/run logs and a
+schema-2 `cross-test-summary.json`; the separate ReleaseSafe output preserves
+both modes' current summaries. The tool and its sibling helpers must already
+be installed; this profile does not install tools or replace the gate.
+
+On hosts with Node.js but no Wasmtime, an installed WASI artifact can also run
+through Node's built-in Preview 1 runner. This is separate from `cross-test`'s
+automatic runner classification; that summary still reports WASI as build-only.
+The Node.js WASI runner emits an experimental-WASI warning. For a built WASI
+artifact:
+
+```sh
+node --input-type=module -e '
+import { readFile } from "node:fs/promises";
+import { WASI } from "node:wasi";
+const artifact = process.argv[1];
+const wasi = new WASI({ version: "preview1", args: [artifact], env: {}, preopens: {}, returnOnExit: true });
+const module = await WebAssembly.compile(await readFile(artifact));
+const instance = await WebAssembly.instantiate(module, wasi.getImportObject());
+process.exitCode = wasi.start(instance);
+' zig-out/cross-test-release-safe/wasm32-wasi/bin/zmath-test.wasm
+```
+
+These checks exercise fixed local correctness suites, not corpus replay,
+oracle generation, or profiling. A compiler failure, a failed executed test,
+and an unavailable runtime are separate outcomes. Emulated execution is not
+hardware, throughput, or whole-domain accuracy evidence and does not extend
+the manifest-qualified target profile.
+
+The C kernels require IEEE binary32/binary64 representations, a known little-
+or big-endian byte order, and `_BitInt(128)` or native `__int128`. Half kernels
+exchange binary16 bits through `uint16_t`; native `_Float16` conversions are
+optional and the portable conversion rounds directly from binary64.
+`src/scalar_fma_target.zig` selects native binary32 and binary64 FMA for Zig
+and C; other CPUs use exact bounded integer arithmetic with one final rounding.
+Finite binary64 round-to-even terms also have a portable tie-corrected path
+when the compiler would otherwise emit an unavailable C23 `roundeven` call.
+The x86/x86-64 `+fma` floor is unchanged.
+
 `zmath` has no MPFR, GMP, FLINT, Arb, BLIS, Eigen, or C++ runtime dependency.
 The sibling `zmath-testing` project owns integration tests, oracle generation, typed corpus replay, and benchmarks.
 It is the acceptance authority and is colocated as `../zmath-testing`.

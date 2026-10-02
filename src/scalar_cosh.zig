@@ -6,6 +6,8 @@
 // Binary32 copyright (c) 2022-2023 Alexei Sibidanov.
 // Binary64 copyright (c) 2023-2025 Alexei Sibidanov.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const coshh_data = @import("scalar_coshh_data.zig");
 
 const coshh_magnitude_mask: u16 = 0x7fff;
@@ -27,7 +29,7 @@ pub fn coshh(value: f16) f16 {
     const cosh_x1: f32 = @bitCast(coshh_data.c1[table1_index]);
     const sinh_x2: f32 = @bitCast(coshh_data.s2[table2_index]);
     const cosh_x2: f32 = @bitCast(coshh_data.c2[table2_index]);
-    const result = @mulAdd(f32, cosh_x1, cosh_x2, sinh_x1 * sinh_x2);
+    const result = fma_impl.fma(cosh_x1, cosh_x2, sinh_x1 * sinh_x2);
     return @floatCast(result);
 }
 
@@ -325,7 +327,7 @@ fn coshdFastTwoSum(x: f64, y: f64) CoshdDoubleDouble {
 fn coshdMuldd(x_high: f64, x_low: f64, c_high: f64, c_low: f64) CoshdDoubleDouble {
     @setFloatMode(.strict);
     const high = c_high * x_high;
-    const low = @mulAdd(f64, c_high, x_high, -high) + x_high * c_low + c_high * x_low;
+    const low = fma_impl.fma64(c_high, x_high, -high) + x_high * c_low + c_high * x_low;
     return .{ .high = high, .low = low };
 }
 
@@ -357,7 +359,7 @@ fn coshdExpAccurate(x: f64, t: f64, t_high: f64, t_low: f64, low: *f64) f64 {
     const log_two_tail = 0x1.9ff0342542fc3p-102;
     const delta = x - log_two_high * t;
     var delta_low = log_two_low * t;
-    const delta_tail = log_two_tail * t + @mulAdd(f64, log_two_low, t, -delta_low);
+    const delta_tail = log_two_tail * t + fma_impl.fma64(log_two_low, t, -delta_low);
     const delta_high = delta + delta_low;
     delta_low = ((delta - delta_high) + delta_low) + delta_tail;
     var polynomial_low = delta_high *
@@ -401,7 +403,7 @@ noinline fn coshdDatabase(value: f64, fallback: f64) f64 {
 noinline fn coshdZero(value: f64) f64 {
     @setFloatMode(.strict);
     const square_high = value * value;
-    const square_low = @mulAdd(f64, value, value, -square_high);
+    const square_low = fma_impl.fma64(value, value, -square_high);
     var polynomial_low = square_high *
         (coshd_zero_odd[0] + square_high *
             (coshd_zero_odd[1] + square_high *
@@ -604,7 +606,7 @@ pub fn coshd(value: f64) f64 {
     }
 
     const scale = 0x1.71547652b82fep+12;
-    const reduction_value = @mulAdd(f64, absolute_value, scale, 0x1.8000002p+26);
+    const reduction_value = fma_impl.fma64(absolute_value, scale, 0x1.8000002p+26);
     const reduction_bits: u64 = @bitCast(reduction_value);
     const rounded_reduction_bits = reduction_bits & ~@as(u64, 0x03ff_ffff);
     const reduction = @as(f64, @bitCast(rounded_reduction_bits)) - 0x1.8p26;

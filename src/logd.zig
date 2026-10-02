@@ -24,6 +24,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const Dint = struct {
     hi: u64,
     lo: u64,
@@ -1159,22 +1161,22 @@ inline fn fastLog(e: i64, normalized: f64) struct { hi: f64, lo: f64 } {
     const y: f64 = @bitCast(y_bits);
     const inverse = inverse_table[index - 362];
     const log_inverse = log_inverse_table[index - 362];
-    const z = @mulAdd(f64, inverse, y, -1.0);
+    const z = fma_impl.fma64(inverse, y, -1.0);
 
     const z_squared = z * z;
-    const p45 = @mulAdd(f64, poly[5], z, poly[4]);
-    const p23 = @mulAdd(f64, poly[3], z, poly[2]);
-    var polynomial = @mulAdd(f64, p45, z_squared, p23);
-    polynomial = @mulAdd(f64, polynomial, z, poly[1]);
+    const p45 = fma_impl.fma64(poly[5], z, poly[4]);
+    const p23 = fma_impl.fma64(poly[3], z, poly[2]);
+    var polynomial = fma_impl.fma64(p45, z_squared, p23);
+    polynomial = fma_impl.fma64(polynomial, z, poly[1]);
     polynomial *= z_squared;
 
     const log2_high: f64 = 0x1.62e42fefa38p-1;
     const log2_low: f64 = 0x1.ef35793c7673p-45;
     var high: f64 = undefined;
     var low: f64 = undefined;
-    fastTwoSum(&high, &low, @mulAdd(f64, @floatFromInt(exponent), log2_high, log_inverse[0]), z);
+    fastTwoSum(&high, &low, fma_impl.fma64(@floatFromInt(exponent), log2_high, log_inverse[0]), z);
     low = polynomial + (low + log_inverse[1]);
-    low = @mulAdd(f64, @floatFromInt(exponent), log2_low, low);
+    low = fma_impl.fma64(@floatFromInt(exponent), log2_low, low);
     return .{ .hi = high, .lo = low };
 }
 

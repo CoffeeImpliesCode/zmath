@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const acoshf_data = @import("scalar_acoshf_data.zig");
 
 const magnitude_mask_h: u16 = 0x7fff;
@@ -117,11 +119,11 @@ pub fn acoshh(value: f16) f16 {
     const input_squared = input * input;
     const exponent_index: usize = @intCast((magnitude >> 10) - 15);
     const coefficients = acoshh_polynomials[exponent_index];
-    const coefficient_4 = @mulAdd(f32, coefficients[5], input, coefficients[4]);
-    const coefficient_2 = @mulAdd(f32, coefficients[3], input, coefficients[2]);
-    const coefficient_2_adjusted = @mulAdd(f32, coefficient_4, input_squared, coefficient_2);
-    const coefficient_0 = @mulAdd(f32, coefficients[1], input, coefficients[0]);
-    var result = @mulAdd(f32, coefficient_2_adjusted, input_squared, coefficient_0);
+    const coefficient_4 = fma_impl.fma(coefficients[5], input, coefficients[4]);
+    const coefficient_2 = fma_impl.fma(coefficients[3], input, coefficients[2]);
+    const coefficient_2_adjusted = fma_impl.fma(coefficient_4, input_squared, coefficient_2);
+    const coefficient_0 = fma_impl.fma(coefficients[1], input, coefficients[0]);
+    var result = fma_impl.fma(coefficient_2_adjusted, input_squared, coefficient_0);
     if (exponent_index < 5) result = @sqrt(input - 1.0) * result;
 
     switch (bits) {
@@ -275,7 +277,7 @@ fn acoshdMulDoubleDoubleAccurate(
     const a_high_low = c_high * x_low;
     const a_low_high = c_low * x_high;
     const a_high_high = c_high * x_high;
-    const a_high_error = @mulAdd(f64, c_high, x_high, -a_high_high);
+    const a_high_error = fma_impl.fma64(c_high, x_high, -a_high_high);
     const middle = a_high_error + (a_low_high + a_high_low);
     return acoshdFastTwoSum(a_high_high, middle, low);
 }
@@ -283,7 +285,7 @@ fn acoshdMulDoubleDoubleAccurate(
 fn acoshdMulDoubleDouble(x_high: f64, x_low: f64, c: f64, low: *f64) f64 {
     const a_high_low = c * x_low;
     const a_high_high = c * x_high;
-    const a_high_error = @mulAdd(f64, c, x_high, -a_high_high);
+    const a_high_error = fma_impl.fma64(c, x_high, -a_high_high);
     const middle = a_high_error + a_high_low;
     const high = a_high_high + middle;
     low.* = (a_high_high - high) + middle;
@@ -366,7 +368,7 @@ fn acoshdRefine(x: f64, approximation: f64) f64 {
     var exponent_adjustment: i64 = 0;
     if (input_bits < 0x4190_0000_0000_0000) {
         const x_squared_high = x * x;
-        const x_squared_low = @mulAdd(f64, x, x, -x_squared_high);
+        const x_squared_low = fma_impl.fma64(x, x, -x_squared_high);
         var root_argument_low: f64 = undefined;
         var root_argument_high = x_squared_high - 1.0;
         root_argument_high = acoshdFastTwoSum(
@@ -376,7 +378,7 @@ fn acoshdRefine(x: f64, approximation: f64) f64 {
         );
         const root_high = @sqrt(root_argument_high);
         const root_low = (root_argument_low -
-            @mulAdd(f64, root_high, root_high, -root_argument_high)) / (2.0 * root_high);
+            fma_impl.fma64(root_high, root_high, -root_argument_high)) / (2.0 * root_high);
         high = acoshdFastTwoSum(x, root_high, &low);
         low += root_low;
         high = acoshdFastTwoSum(high, low, &low);
@@ -423,11 +425,11 @@ fn acoshdRefine(x: f64, approximation: f64) f64 {
     const t12 = acoshd_data.refine_t1[index_1] * acoshd_data.refine_t2[index_2];
     const t34 = acoshd_data.refine_t3[index_3] * acoshd_data.refine_t4[index_4];
     const table_high = t12 * t34;
-    const table_low = @mulAdd(f64, t12, t34, -table_high);
+    const table_low = fma_impl.fma64(t12, t34, -table_high);
     const product_high = table_high * normalized;
-    const product_low = @mulAdd(f64, table_high, normalized, -product_high);
+    const product_low = fma_impl.fma64(table_high, normalized, -product_high);
     const product_low_high = table_low * normalized;
-    const product_low_low = @mulAdd(f64, table_low, normalized, -product_low_high);
+    const product_low_low = fma_impl.fma64(table_low, normalized, -product_low_high);
     var reduced_low: f64 = undefined;
     var reduced_high = acoshdFastTwoSum(product_high - 1.0, product_low, &reduced_low);
     if (low != 0.0) {
@@ -520,7 +522,7 @@ pub fn acoshd(value: f64) f64 {
         const inverse = -0.25 / z;
         const doubled = 2.0 * z;
         const square_root_high = @sqrt(doubled);
-        const square_root_low = @mulAdd(f64, square_root_high, square_root_high, -doubled) *
+        const square_root_low = fma_impl.fma64(square_root_high, square_root_high, -doubled) *
             (square_root_high * inverse);
         const coefficients = [_]f64{
             -0x1.5555555555555p-4,
@@ -535,19 +537,18 @@ pub fn acoshd(value: f64) f64 {
         };
         const z_squared = z * z;
         const z_fourth = z_squared * z_squared;
-        const coefficient_1 = @mulAdd(f64, z, coefficients[2], coefficients[1]);
-        const coefficient_3 = @mulAdd(f64, z, coefficients[4], coefficients[3]);
-        const coefficient_5 = @mulAdd(f64, z, coefficients[6], coefficients[5]);
-        const coefficient_7 = @mulAdd(f64, z, coefficients[8], coefficients[7]);
-        const first = @mulAdd(f64, z_squared, coefficient_3, coefficient_1);
-        const second = @mulAdd(f64, z_squared, coefficient_7, coefficient_5);
-        const polynomial = @mulAdd(
-            f64,
+        const coefficient_1 = fma_impl.fma64(z, coefficients[2], coefficients[1]);
+        const coefficient_3 = fma_impl.fma64(z, coefficients[4], coefficients[3]);
+        const coefficient_5 = fma_impl.fma64(z, coefficients[6], coefficients[5]);
+        const coefficient_7 = fma_impl.fma64(z, coefficients[8], coefficients[7]);
+        const first = fma_impl.fma64(z_squared, coefficient_3, coefficient_1);
+        const second = fma_impl.fma64(z_squared, coefficient_7, coefficient_5);
+        const polynomial = fma_impl.fma64(
             z,
-            @mulAdd(f64, z_fourth, second, first),
+            fma_impl.fma64(z_fourth, second, first),
             coefficients[0],
         );
-        const delta = @mulAdd(f64, square_root_high * z, polynomial, square_root_low);
+        const delta = fma_impl.fma64(square_root_high * z, polynomial, square_root_low);
         const epsilon = delta * 0x1.00p-50 - 0x1p-104 * square_root_high;
         const lower = square_root_high + (delta - epsilon);
         const upper = square_root_high + (delta + epsilon);
@@ -556,13 +557,13 @@ pub fn acoshd(value: f64) f64 {
     } else if (bits < 0x405b_f000_0000_0000) {
         offset = 0x3ff;
         const squared_high = value * value;
-        const squared_low = @mulAdd(f64, value, value, -squared_high);
+        const squared_low = fma_impl.fma64(value, value, -squared_high);
         const root_argument_low = squared_low;
         const root_argument_high = squared_high - 1.0;
         const square_root_high = @sqrt(root_argument_high);
         const inverse_root_argument = 0.5 / root_argument_high;
         const square_root_low = (root_argument_low -
-            @mulAdd(f64, square_root_high, square_root_high, -root_argument_high)) *
+            fma_impl.fma64(square_root_high, square_root_high, -root_argument_high)) *
             (square_root_high * inverse_root_argument);
         var sum_low: f64 = undefined;
         const sum_high = acoshdFastTwoSum(value, square_root_high, &sum_low);
@@ -578,13 +579,11 @@ pub fn acoshd(value: f64) f64 {
             -0x1.aab6691f2bae7p-5,
         };
         const inverse_squared = 1.0 / (value * value);
-        approximation = @mulAdd(
-            f64,
+        approximation = fma_impl.fma64(
             inverse_squared,
-            @mulAdd(
-                f64,
+            fma_impl.fma64(
                 inverse_squared,
-                @mulAdd(f64, inverse_squared, coefficients[3], coefficients[2]),
+                fma_impl.fma64(inverse_squared, coefficients[3], coefficients[2]),
                 coefficients[1],
             ),
             coefficients[0],
@@ -597,10 +596,9 @@ pub fn acoshd(value: f64) f64 {
             -0x1.8000268641bfep-4,
         };
         const inverse_squared = 1.0 / (value * value);
-        approximation = @mulAdd(
-            f64,
+        approximation = fma_impl.fma64(
             inverse_squared,
-            @mulAdd(f64, inverse_squared, coefficients[2], coefficients[1]),
+            fma_impl.fma64(inverse_squared, coefficients[2], coefficients[1]),
             coefficients[0],
         );
         error_bound = 0x1.9ap-63;
@@ -610,7 +608,7 @@ pub fn acoshd(value: f64) f64 {
             -0x1.000000017d048p-2,
         };
         const inverse_squared = 1.0 / (value * value);
-        approximation = @mulAdd(f64, inverse_squared, coefficients[1], coefficients[0]);
+        approximation = fma_impl.fma64(inverse_squared, coefficients[1], coefficients[0]);
         error_bound = 0x1.99p-63;
     } else {
         approximation = 0.0;
@@ -631,16 +629,15 @@ pub fn acoshd(value: f64) f64 {
     const interpolation_index_2: usize = @intCast(interpolation_index & 0x1f);
     const reciprocal = acoshd_data.r1[interpolation_index_1] *
         acoshd_data.r2[interpolation_index_2];
-    const delta = @mulAdd(f64, reciprocal, normalized, -1.0);
+    const delta = fma_impl.fma64(reciprocal, normalized, -1.0);
     const delta_squared = delta * delta;
-    const first = @mulAdd(f64, delta, acoshd_data.log_poly[1], acoshd_data.log_poly[0]);
-    const second = @mulAdd(f64, delta, acoshd_data.log_poly[3], acoshd_data.log_poly[2]);
-    const tail = @mulAdd(f64, delta_squared, acoshd_data.log_poly[4], second);
-    const log_correction = delta_squared * @mulAdd(f64, delta_squared, tail, first);
+    const first = fma_impl.fma64(delta, acoshd_data.log_poly[1], acoshd_data.log_poly[0]);
+    const second = fma_impl.fma64(delta, acoshd_data.log_poly[3], acoshd_data.log_poly[2]);
+    const tail = fma_impl.fma64(delta_squared, acoshd_data.log_poly[4], second);
+    const log_correction = delta_squared * fma_impl.fma64(delta_squared, tail, first);
     const log_two_high = 0x1.62e42fefa38p-1;
     const log_two_low = 0x1.ef35793c7673p-45;
-    const logarithm_high = @mulAdd(
-        f64,
+    const logarithm_high = fma_impl.fma64(
         log_two_high,
         exponent_float,
         acoshd_data.l1[interpolation_index_1][1] +

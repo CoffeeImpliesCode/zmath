@@ -25,13 +25,16 @@ SOFTWARE.
 */
 
 /* This code is based on the binary32 code tgammaf.c:
-   at input we convert the inputs to _Float16 (exactly),
+   the kernel receives binary16 bit patterns and decodes them to binary32
+   (exactly),
    we then use the same code than for tgammaf,
-   and at output we round to _Float16.
+   and at output we round once, directly to binary16.
    The changes with respect to tgammaf.c are marked with a comment
    "specific tgammaf16". */
 
 #include <stdint.h>
+
+#include "coremath_half.h"
 
 /* Warning: clang also defines __GNUC__. */
 #if defined(__GNUC__) && !defined(__clang__)
@@ -70,20 +73,20 @@ typedef union {
   uint32_t u;
 } b32u32_u;
 
-/* specific tgammaf16: input renamed to xf16 */
-_Float16
-cr_tgammaf16(_Float16 xf16)
+/* specific tgammaf16: the input is the binary16 bit pattern of x */
+uint16_t
+zmath_core_tgammah_bits(uint16_t x_bits)
 {
-  float x = xf16;
+  float x = zmath_half_to_float_bits(x_bits);
   b32u32_u t = {.f = x};
   uint32_t ax = t.u << 1;
   if (__builtin_expect(ax >= (0xffu << 24), 0)) { /* x=NaN or +/-Inf */
     if (ax == (0xffu << 24)) {                   /* x=+/-Inf */
       if (t.u >> 31)                             /* x=-Inf */
-        return x / x; /* Raise invalid operation. */
-      return x;       /* x=+Inf */
+        return ZMATH_HALF_CANONICAL_NAN_BITS;      /* x=-Inf */
+      return ZMATH_HALF_INFINITY_BITS;              /* x=+Inf */
     }
-    return x + x; /* Quiet an sNaN and raise invalid operation. */
+    return zmath_half_nan_bits(x_bits); /* Quiet an sNaN and raise invalid operation. */
   }
   double z = x;
   /* specific tgammaf16: changed threshold to deal with all overflow cases. */
@@ -92,28 +95,27 @@ cr_tgammaf16(_Float16 xf16)
         (0x1.fa658c23b1578p-1 - 0x1.d0a118f324b63p-1 * z) * z -
         0x1.2788cfc6fb619p-1;
     double f = 1.0 / z + d;
-    _Float16 r = f;
-    return r;
+    return zmath_half_from_double_bits(f);
   }
   float fx = floor_finite(x);
   if (__builtin_expect(x >= 0x1.274p+3f, 0))
-    return 0x1p127f * 0x1p127f;
+    return zmath_half_from_double_bits((double)(0x1p127f * 0x1p127f));
   int32_t k = fx; /* specific tgammaf16: no overflow possible */
   if (__builtin_expect(fx == x, 0)) { /* x is integer */
     if (x == 0.0f)
-      return 1.0f / x;
+      return ZMATH_HALF_INFINITY_BITS;
     if (x < 0.0f)
-      return 0.0f / 0.0f; /* Raise invalid operation. */
+      return ZMATH_HALF_CANONICAL_NAN_BITS; /* Raise invalid operation. */
     double t0 = 1, x0 = 1;
     for (int32_t i = 1; i < k; i++, x0 += 1.0)
       t0 *= x0;
-    return t0;
+    return zmath_half_from_double_bits(t0);
   }
   /* specific tgammaf16: changed threshold of -42 to -16 */
   if (__builtin_expect(x < -16.0f, 0)) { /* negative non-integer */
     /* For x < -16, x non-integer, |gamma(x)| < 2^-25. */
     static const float sgn[2] = {0x1p-127f, -0x1p-127f};
-    return 0x1p-127f * sgn[k & 1];
+    return zmath_half_from_double_bits((double)(0x1p-127f * sgn[k & 1]));
   }
   static const double c[] = {
       0x1.c9a76be577123p+0,  0x1.8f2754ddcf90dp+0,
@@ -148,6 +150,5 @@ cr_tgammaf16(_Float16 xf16)
   if (i <= -0.5)
     w = 1 / w;
   f *= w;
-  _Float16 r = f;
-  return r;
+  return zmath_half_from_double_bits(f);
 }

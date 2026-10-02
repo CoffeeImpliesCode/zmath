@@ -1,0 +1,59 @@
+{
+  "purpose": "Fixed local correctness probes; no profiling, warmup, corpus replay or oracle generation",
+  "fmaf_before": {
+    "command": "zig test src/scalar_fmaf_test.zig -target arm-linux-musleabi -mcpu baseline -O ReleaseSafe --test-no-exec -femit-bin=zig-out/portability-probes/fma-baseline-arm && qemu-arm zig-out/portability-probes/fma-baseline-arm",
+    "tests": 5,
+    "passed": 4,
+    "failed": 1,
+    "midpoint_expected_bits": "0x3f801001",
+    "midpoint_actual_bits": "0x3f801000"
+  },
+  "round_even_before": {
+    "compiler": "<zig-global-cache>/zig",
+    "compile_arguments": "cc -target arm-linux-musleabi -mcpu=baseline -O2 -ffp-contract=off zig-out/portability-probes/round-even.c -o zig-out/portability-probes/round-even-before-arm",
+    "runner": "qemu-arm zig-out/portability-probes/round-even-before-arm",
+    "cases": 7,
+    "failures": 4,
+    "failed_inputs": [
+      "0.5",
+      "2.5",
+      "-0.5",
+      "-2.5"
+    ]
+  },
+  "round_even_after": {
+    "compile_arguments": "cc -target arm-linux-musleabi -mcpu=baseline -O2 -ffp-contract=off zig-out/portability-probes/round-even.c -o zig-out/portability-probes/round-even-after-arm",
+    "runner": "qemu-arm zig-out/portability-probes/round-even-after-arm",
+    "cases": 7,
+    "failures": 0,
+    "output": "round-even smoke: 7 cases, 0 failures"
+  },
+  "fmaf_after": {
+    "command": "zig test src/scalar_fmaf_test.zig -target arm-linux-musleabi -mcpu baseline -O ReleaseSafe --test-no-exec -femit-bin=zig-out/portability-probes/fma-final-arm && qemu-arm zig-out/portability-probes/fma-final-arm",
+    "tests": 13,
+    "passed": 13,
+    "failed": 0,
+    "midpoint_result_bits": "0x3f801001"
+  },
+  "positive_zero_before": {
+    "target": "arm-linux-musleabi",
+    "tests": 14,
+    "passed": 13,
+    "failed": 1,
+    "expected_bits": "0x00000000",
+    "actual_bits": "0x80000000"
+  },
+  "positive_zero_after": {
+    "covered_by": "fmaf_after",
+    "expected_bits": "0x00000000",
+    "actual_bits": "0x00000000"
+  },
+  "round_even_smoke_source": "#include \"../../src/coremath_pow.h\"\n#include <stdio.h>\nint main(void) {\n  volatile double inputs[] = {0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2147483648.5};\n  const uint64_t expected[] = {0x0000000000000000ULL, 0x4000000000000000ULL,\n      0x4000000000000000ULL, 0x8000000000000000ULL, 0xc000000000000000ULL,\n      0xc000000000000000ULL, 0x41e0000000000000ULL};\n  int failures = 0;\n  for (unsigned i = 0; i < sizeof(inputs) / sizeof(inputs[0]); ++i) {\n    union { double f; uint64_t bits; } result = {.f = roundeven_finite(inputs[i])};\n    if (result.bits != expected[i]) {\n      printf(\"round-even(%g): expected %016llx, found %016llx\\n\", inputs[i],\n          (unsigned long long)expected[i], (unsigned long long)result.bits);\n      ++failures;\n    }\n  }\n  printf(\"round-even smoke: %u cases, %d failures\\n\", (unsigned)(sizeof(inputs) / sizeof(inputs[0])), failures);\n  return failures != 0;\n}\n",
+  "wasi_launcher_source": "import { readFile } from 'node:fs/promises';\nimport { WASI } from 'node:wasi';\n\nconst artifact = process.argv[2];\nif (!artifact) throw new Error('WASI artifact path required');\nconst wasi = new WASI({\n  version: 'preview1',\n  args: [artifact],\n  env: {},\n  preopens: {},\n  returnOnExit: true,\n});\nconst module = await WebAssembly.compile(await readFile(artifact));\nconst instance = await WebAssembly.instantiate(module, wasi.getImportObject());\nprocess.exitCode = wasi.start(instance);\n",
+  "round_even_consolidated_after": {
+    "command": "zig cc -target arm-linux-musleabi -mcpu=baseline -O2 zig-out/portability-probes/round-even.c -o zig-out/portability-probes/round-even-final-arm && qemu-arm zig-out/portability-probes/round-even-final-arm",
+    "exit_code": 0,
+    "observed_output": "round-even smoke: 7 cases, 0 failures",
+    "source": "#include \"../../src/coremath_pow.h\"\n#include <stdio.h>\nint main(void) {\n  volatile double inputs[] = {0.5, 1.5, 2.5, -0.5, -1.5, -2.5, 2147483648.5};\n  const uint64_t expected[] = {0x0000000000000000ULL, 0x4000000000000000ULL,\n      0x4000000000000000ULL, 0x8000000000000000ULL, 0xc000000000000000ULL,\n      0xc000000000000000ULL, 0x41e0000000000000ULL};\n  int failures = 0;\n  for (unsigned i = 0; i < sizeof(inputs) / sizeof(inputs[0]); ++i) {\n    union { double f; uint64_t bits; } result = {.f = zmath_roundeven_finite(inputs[i])};\n    if (result.bits != expected[i]) {\n      printf(\"round-even(%g): expected %016llx, found %016llx\\n\", inputs[i],\n          (unsigned long long)expected[i], (unsigned long long)result.bits);\n      ++failures;\n    }\n  }\n  printf(\"round-even smoke: %u cases, %d failures\\n\", (unsigned)(sizeof(inputs) / sizeof(inputs[0])), failures);\n  return failures != 0;\n}\n"
+  }
+}

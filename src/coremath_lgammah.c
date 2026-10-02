@@ -28,9 +28,10 @@ SOFTWARE.
    3bafed75e3c22399531857d63a3fa0e24bfb42fa and used under the MIT License above. */
 
 /* This code is based on the binary32 code lgammaf.c:
-   at input we convert the inputs to _Float16 (exactly),
+   the kernel receives binary16 bit patterns and decodes them to binary32
+   (exactly),
    we then use the same code than for lgammaf,
-   and at output we round to _Float16.
+   and at output we round once, directly to binary16.
    The changes with respect to lgammaf.c are marked with a comment
    "specific lgammaf16". */
 
@@ -38,6 +39,8 @@ SOFTWARE.
 #ifdef CORE_MATH_SUPPORT_ERRNO
 #include <errno.h>
 #endif
+
+#include "coremath_half.h"
 
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
@@ -86,10 +89,10 @@ static double as_ln(double x){
   return e*0x1.62e42fefa39efp-1 + il[i] + z*((c[0] + z*c[1]) + z2*(c[2] + z*c[3]) + z4*((c[4] + z*c[5]) + z2*(c[6] + z*c[7])));
 }
 
-// specific lgammaf16: input renamed to xf16
-_Float16 zmath_core_lgammah (_Float16 xf16, int *sign_out){
+// specific lgammaf16: the input is the binary16 bit pattern of x
+uint16_t zmath_core_lgammah_bits(uint16_t x_bits, int *sign_out){
   *sign_out = 1;
-  float x = xf16;
+  float x = zmath_half_to_float_bits(x_bits);
   // specific lgammaf16: removed array tb[] of exceptional cases
 
   float fx = __builtin_floor(x), ax = __builtin_fabsf(x);
@@ -97,9 +100,9 @@ _Float16 zmath_core_lgammah (_Float16 xf16, int *sign_out){
   if(__builtin_expect(t.u>=(0xffu<<23), 0)){ // NaN or Inf
     if(t.u==(0xffu<<23)){ // +-inf
       *sign_out = 1;
-      return 1.0f/0.0f;
+      return ZMATH_HALF_INFINITY_BITS;
     }
-    return x + x; // nan
+    return zmath_half_nan_bits(x_bits); // nan
   }
   if(__builtin_expect(fx==x, 0)){ // x integer
     if(x <= 0.0f) {
@@ -110,11 +113,11 @@ _Float16 zmath_core_lgammah (_Float16 xf16, int *sign_out){
       // gamma(+0) = +Inf with sign +1; -0 and every negative integer pole
       // carry gamma sign -1. Upstream left the pole sign at +1.
       *sign_out = 1 - 2*(t.u >> 31);
-      return 1.0f/0.0f;
+      return ZMATH_HALF_INFINITY_BITS;
     }
     if(x==1.0f || x==2.0f) {
       *sign_out = 1;
-      return 0.0f;
+      return 0x0000;
     }
   }
 
@@ -142,22 +145,10 @@ _Float16 zmath_core_lgammah (_Float16 xf16, int *sign_out){
     if(ax > 0x1.afc1ap+1f){
       if(__builtin_expect(x >= 0x1.ff4p+12f, 0)){ // specific lgammaf16
         /* for x=0x1.ff4p+12, lgamma(x) ~ 0x1.ffd3p+15, thus there is no
-           overflow for rounding towards zero, downwards or to nearest */
-#ifndef __clang__
-	_Float16 r = (x > 0x1.ff4p+12f) ? 0x1p15f16 * 0x1p15f16
-          : 0x1.ffcp+15f16 + 1.0f16;
-#else
-        /* clang 19 raises a spurious overflow with the above code
-           for x=0x1.ff4p+12 and RNDN with -frounding-math: apparently it
-           evaluates the ? part even if the conditional is false:
-           https://github.com/llvm/llvm-project/issues/157395.
-           We thus use a workaround. */
-        _Float16 r;
-        if (x > 0x1.ff4p+12f)
-          r = 0x1p15f16 * 0x1p15f16;
-        else
-          r = 0x1.ffcp+15f16 + 1.0f16;
-#endif
+           overflow for rounding towards zero, downwards or to nearest.
+           The threshold returns max-finite; only larger inputs return infinity. */
+        uint16_t r = (x > 0x1.ff4p+12f) ? ZMATH_HALF_INFINITY_BITS
+            : zmath_half_from_double_bits((double)(0x1.ffcp+15f + 1.0f));
 #ifdef CORE_MATH_SUPPORT_ERRNO
 	if (x > 0x1.ff4p+12f || (x == 0x1.ff4p+12f && x + 0x1p-12f > x))
           errno = ERANGE; // overflow
@@ -233,8 +224,7 @@ _Float16 zmath_core_lgammah (_Float16 xf16, int *sign_out){
     }
   }
 
-  _Float16 r = f; // specific lgammaf16
+  return zmath_half_from_double_bits(f); // specific lgammaf16
   // specific lgammaf16: removed exceptional cases
-  return r;
 }
 

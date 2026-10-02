@@ -30,6 +30,7 @@ SOFTWARE.
 #include <errno.h>
 #endif
 #include "coremath_log10p1_dint.h"
+#include "coremath_fma.h"
 
 typedef union { double f; uint64_t u; } d64u64;
 
@@ -519,7 +520,7 @@ static const double p1a_c11 = 0x1.74b40dd1707d3p-4;
 // Multiply exactly a and b, such that *hi + *lo = a * b.
 static inline void a_mul(double *hi, double *lo, double a, double b) {
   *hi = a * b;
-  *lo = __builtin_fma(a, b, -*hi);
+  *lo = zmath_fma(a, b, -*hi);
 }
 
 // Multiply a double with a double double : a * (bh + bl)
@@ -528,15 +529,15 @@ static inline void s_mul (double *hi, double *lo, double a, double bh,
   double s;
 
   a_mul (hi, &s, a, bh); /* exact */
-  *lo = __builtin_fma (a, bl, s);
+  *lo = zmath_fma (a, bl, s);
 }
 
 // Returns (ah + al) * (bh + bl) - (al * bl)
 static inline void d_mul(double *hi, double *lo, double ah, double al,
                          double bh, double bl) {
   a_mul (hi, lo, ah, bh);
-  *lo = __builtin_fma (ah, bl, *lo);
-  *lo = __builtin_fma (al, bh, *lo);
+  *lo = zmath_fma (ah, bl, *lo);
+  *lo = zmath_fma (al, bh, *lo);
 }
 
 /* put in h+l a double-double approximation of log(z)-z for
@@ -548,11 +549,11 @@ p_1 (double *h, double *l, double z)
 {
   double z2h, z2l;
   a_mul (&z2h, &z2l, z, z); /* exact: z2h+z2l = z*z */
-  double p56 = __builtin_fma (p1_c7, z, p1_c6);
-  double p34 = __builtin_fma (p1_c5, z, p1_c4);
-  double ph = __builtin_fma (p56, z2h, p34);
+  double p56 = zmath_fma (p1_c7, z, p1_c6);
+  double p34 = zmath_fma (p1_c5, z, p1_c4);
+  double ph = zmath_fma (p56, z2h, p34);
   /* ph approximates p1_c4+p1_c5*z+p1_c6*z^2+p1_c7*z^3 */
-  ph = __builtin_fma (ph, z, p1_c3);
+  ph = zmath_fma (ph, z, p1_c3);
   /* ph approximates p1_c3*z^2+...+p1_c7*z^6 */
   ph *= z2h;
   fast_two_sum (h, l, -0.5 * z2h, ph * z);
@@ -571,14 +572,14 @@ p_1a (double *h, double *l, double z)
   else // avoid spurious underflow
     z2h = z2l = 0;
   double z4h = z2h * z2h;
-  double p910 = __builtin_fma (p1a_c11, z, p1a_c10);
-  double p78 = __builtin_fma (p1a_c9, z, p1a_c8);
-  double p56 = __builtin_fma (p1a_c7, z, p1a_c6);
-  double p34 = __builtin_fma (p1a_c5, z, p1a_c4);
-  double p710 = __builtin_fma (p910, z2h, p78);
-  double p36 = __builtin_fma (p56, z2h, p34);
-  double ph = __builtin_fma (p710, z4h, p36);
-  ph = __builtin_fma (ph, z, p1a_c3);
+  double p910 = zmath_fma (p1a_c11, z, p1a_c10);
+  double p78 = zmath_fma (p1a_c9, z, p1a_c8);
+  double p56 = zmath_fma (p1a_c7, z, p1a_c6);
+  double p34 = zmath_fma (p1a_c5, z, p1a_c4);
+  double p710 = zmath_fma (p910, z2h, p78);
+  double p36 = zmath_fma (p56, z2h, p34);
+  double ph = zmath_fma (p710, z4h, p36);
+  ph = zmath_fma (ph, z, p1a_c3);
   ph *= z2h;
   fast_two_sum (h, l, -0.5 * z2h, ph * z);
   *l += -0.5 * z2l;
@@ -606,7 +607,7 @@ cr_log_fast (double *h, double *l, int e, d64u64 v)
   double r = _INVERSE[i-OFFSET];
   double l1 = _LOG_INV[i-OFFSET][0];
   double l2 = _LOG_INV[i-OFFSET][1];
-  double z = __builtin_fma (r, y, -1.0); /* exact */
+  double z = zmath_fma (r, y, -1.0); /* exact */
   /* evaluate P(z), for |z| < 0.00212097167968735 */
   double ph, pl;
   p_1 (&ph, &pl, z);
@@ -625,7 +626,7 @@ cr_log_fast (double *h, double *l, int e, d64u64 v)
      representable. */
 
   double ee = e;
-  fast_two_sum (h, l, __builtin_fma (ee, log2_h, l1), z);
+  fast_two_sum (h, l, zmath_fma (ee, log2_h, l1), z);
   /* here |hh+l1|+|z| <= 3275606777621385*2^-42 + 0.0022 < 745
      thus |h| < 745, and the additional error from the fast_two_sum() call is
      bounded by 2^-105*745 < 2^-95.4. */
@@ -639,7 +640,7 @@ cr_log_fast (double *h, double *l, int e, d64u64 v)
      rounding error on ph + ... is bounded by ulp(2^-18.7) = 2^-71, which
      yields a cumulated error bound of 2^-71 + 2^-95 + 2^-94 < 2^-70.99. */
 
-  *l = __builtin_fma (ee, log2_l, *l);
+  *l = zmath_fma (ee, log2_l, *l);
   /* let l_in be the input value of *l, and l_out the output value.
      We have |l_in| < 2^-18.7 (from above)
      and |e*log2_l| <= 1074*0x1.ef35793c7673p-45
@@ -653,7 +654,7 @@ cr_log_fast (double *h, double *l, int e, d64u64 v)
      2^-97 for the maximal difference |l1 + l2 - (-log(r))|
      2^-95.4 from the fast_two_sum call
      2^-70.99 from the *l = ph + (*l + l2) instruction
-     2^-71 from the last __builtin_fma call.
+     2^-71 from the last fused multiply-add.
      This gives an absolute error bounded by < 2^-69.99.
   */
 }
@@ -676,7 +677,7 @@ cr_log10p1_accurate_tiny (double x)
   double sx = x * 0x1p106;
   s_mul (&h, &l, sx, INVLOG10H, INVLOG10L);
   double res = (h + l) * 0x1p-106; // expected result
-  l = __builtin_fma (-res, 0x1p106, h) + l;
+  l = zmath_fma (-res, 0x1p106, h) + l;
   // the correction to apply to res is l*2^-106
   /* For RNDN, we have underflow for |x| <= 0x1.26bb1bbb55515p-1021,
      and for rounding away, for |x| < 0x1.26bb1bbb55515p-1021. */
@@ -684,10 +685,10 @@ cr_log10p1_accurate_tiny (double x)
 #define X0 0x1.26bb1bbb55515p-1021
   double dummy = __builtin_copysign (1.0, x);
   if (__builtin_fabs (x) < X0 ||
-      (__builtin_fabs (x) == X0 && __builtin_fma (dummy, 0x1p-53, dummy) == dummy))
+      (__builtin_fabs (x) == X0 && zmath_fma (dummy, 0x1p-53, dummy) == dummy))
     errno = ERANGE; // underflow
 #endif
-  return __builtin_fma (l, 0x1p-106, res);
+  return zmath_fma (l, 0x1p-106, res);
 }
 
 /* the following is a degree-17 polynomial approximating log10p1(x) for
@@ -1195,10 +1196,10 @@ static const int8_t exceptions_rnd[EXCEPTIONS] = {
      with a double only, and even with degree 10 (this does not increase
      the number of exceptional cases) */
 
-  h = __builtin_fma (Pacc[24], x, Pacc[23]);    // degree 16
+  h = zmath_fma (Pacc[24], x, Pacc[23]);    // degree 16
   // degrees 15 down to 10
   for (int i = 15; i >= 10; i--)
-    h = __builtin_fma (h, x, Pacc[i+7]);
+    h = zmath_fma (h, x, Pacc[i+7]);
   // degree 9
   a_mul (&h, &l, x, h);
   fast_two_sum (&h, &t, Pacc[9+7], h);
@@ -1312,8 +1313,8 @@ cr_log10p1_fast (double *h, double *l, double x, int e, d64u64 v)
     d_mul (h, l, *h, *l, INVLOG10H, INVLOG10L);
     /* the d_mul() call decomposes into:
        a_mul (h_out, l1, h, INVLOG10H)
-       l2 = __builtin_fma (h, INVLOG10L, l1)
-       l_out = __builtin_fma (l, INVLOG10H, l2)
+       l2 = zmath_fma (h, INVLOG10L, l1)
+       l_out = zmath_fma (l, INVLOG10H, l2)
        we have |l1| <= ulp(h_out)
        since |INVLOG10L/INVLOG10H| < 2^-55, then |h*INVLOG10L| <= 2^-55*|h_out|
        and since |x| < 2^53*ulp(x): |h*INVLOG10L| <= ulp(h_out)/4
@@ -1377,11 +1378,11 @@ cr_log10p1_fast (double *h, double *l, double x, int e, d64u64 v)
   d_mul (h, l, *h, *l, INVLOG10H, INVLOG10L);
   /* the d_mul() call decomposes into:
      a_mul (h_out, l1, h, INVLOG10H)
-     l2 = __builtin_fma (h, INVLOG10L, l1)
-     l_out = __builtin_fma (l, INVLOG10H, l2)
+     l2 = zmath_fma (h, INVLOG10L, l1)
+     l_out = zmath_fma (l, INVLOG10H, l2)
      We have three errors:
-     * the rounding error in l2 = __builtin_fma (h, INVLOG10L, l1)
-     * the rounding error in l_out = __builtin_fma (l, INVLOG10H, l2)
+     * the rounding error in l2 = zmath_fma (h, INVLOG10L, l1)
+     * the rounding error in l_out = zmath_fma (l, INVLOG10H, l2)
      * the ignored term l * INVLOG10L
      We have |h| < 745 thus |h*INVLOG10H| < 324 thus |h_out| <= 324
      and |l1| <= ulp(h_out) <= 2^-44.

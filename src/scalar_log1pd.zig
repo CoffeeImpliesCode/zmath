@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_log1pd_data.zig");
 const std = @import("std");
 
@@ -92,8 +94,8 @@ pub fn log1pd(x: f64) f64 {
             const x_cubed = x_squared * x;
             const x_fourth = x_squared * x_squared;
             const half_x = -0.5 * x;
-            ln_high = @mulAdd(f64, half_x, x, x);
-            ln_low = @mulAdd(f64, half_x, x, x - ln_high);
+            ln_high = fma_impl.fma64(half_x, x, x);
+            ln_low = fma_impl.fma64(half_x, x, x - ln_high);
             const polynomial =
                 ((coefficients[0] + x * coefficients[1]) +
                     x_squared * (coefficients[2] + x * coefficients[3])) +
@@ -163,7 +165,7 @@ pub fn log1pd(x: f64) f64 {
 
         const reciprocal = fromBits(reciprocal_bits);
         const product_high = reciprocal * t;
-        const product_low = @mulAdd(f64, reciprocal, t, -product_high) + reciprocal * delta_t;
+        const product_low = fma_impl.fma64(reciprocal, t, -product_high) + reciprocal * delta_t;
         const reduced_sum = fastTwoSum(product_high - 1.0, product_low);
         const reduced_squared = reduced_sum.hi * reduced_sum.hi;
         const reduced_low = reduced_sum.lo + reduced_squared *
@@ -230,11 +232,11 @@ noinline fn log1pRefine(x: f64, approximation: f64) f64 {
     if (absolute_shifted < 0x7ea0_0000_0000_0000) {
         if (absolute_shifted < 0x7940_0000_0000_0000) {
             if (absolute_shifted == 0) return x;
-            return @mulAdd(f64, fromBits(x_bits & 0x7fff_ffff_ffff_ffff), -0x1p-54, x);
+            return fma_impl.fma64(fromBits(x_bits & 0x7fff_ffff_ffff_ffff), -0x1p-54, x);
         }
 
         const x_squared_high = x * x;
-        const x_squared_low = @mulAdd(f64, x, x, -x_squared_high);
+        const x_squared_low = fma_impl.fma64(x, x, -x_squared_high);
         const x_cubed = mulDdd(x, x_squared_high, x_squared_low);
         var polynomial_low = x *
             ((near_zero_low_coefficients[0] + x * near_zero_low_coefficients[1]) +
@@ -297,11 +299,11 @@ noinline fn log1pRefine(x: f64, approximation: f64) f64 {
         const table_product_12 = data.rt[0][index_1] * data.rt[1][index_2];
         const table_product_34 = data.rt[2][index_3] * data.rt[3][index_4];
         const table_high = table_product_12 * table_product_34;
-        const table_low = @mulAdd(f64, table_product_12, table_product_34, -table_high);
+        const table_low = fma_impl.fma64(table_product_12, table_product_34, -table_high);
         const product_high = table_high * t;
-        const product_low = @mulAdd(f64, table_high, t, -product_high);
+        const product_low = fma_impl.fma64(table_high, t, -product_high);
         const low_product_high = table_low * t;
-        const low_product_low = @mulAdd(f64, table_low, t, -low_product_high);
+        const low_product_low = fma_impl.fma64(table_low, t, -low_product_high);
         var reduced = fastTwoSum(product_high - 1.0, product_low);
         reduced = fastSum(reduced.hi, reduced.lo, low_product_high, low_product_low);
 
@@ -311,7 +313,7 @@ noinline fn log1pRefine(x: f64, approximation: f64) f64 {
             delta_t = fromBits(delta_bits);
             const delta_high = table_high * delta_t;
             const delta_low =
-                @mulAdd(f64, table_high, delta_t, -delta_high) + table_low * delta_t;
+                fma_impl.fma64(table_high, delta_t, -delta_high) + table_low * delta_t;
             reduced = fastSum(reduced.hi, reduced.lo, delta_high, delta_low);
         }
 
@@ -409,7 +411,7 @@ fn mulDd(x_high: f64, x_low: f64, y_high: f64, y_low: f64) DoubleDouble {
     return .{
         .hi = high_product,
         .lo = (y_low * x_high + y_high * x_low) +
-            @mulAdd(f64, y_high, x_high, -high_product),
+            fma_impl.fma64(y_high, x_high, -high_product),
     };
 }
 
@@ -417,7 +419,7 @@ fn mulDdd(x: f64, y_high: f64, y_low: f64) DoubleDouble {
     const high_product = y_high * x;
     return .{
         .hi = high_product,
-        .lo = y_low * x + @mulAdd(f64, y_high, x, -high_product),
+        .lo = y_low * x + fma_impl.fma64(y_high, x, -high_product),
     };
 }
 

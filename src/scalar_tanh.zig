@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const tangent_s1 = [_]f32{
     0x0p+0,
     0x1.fffffep-20,
@@ -8249,7 +8251,7 @@ pub fn tanh(value: f16) f16 {
     // For |x| <= 0x1.d1p-6, tan(x) rounds to x to nearest.
     if (magnitude <= 0x2744) {
         const x: f32 = @floatCast(value);
-        return @floatCast(@mulAdd(f32, x, 0x1p-12, x));
+        return @floatCast(fma_impl.fma(x, 0x1p-12, x));
     }
 
     if (magnitude == 0x55ed) {
@@ -8269,14 +8271,12 @@ pub fn tanh(value: f16) f16 {
     if (bits == 0xe807) return @bitCast(@as(u16, 0xc015));
     if (bits == 0x6f4d) return @bitCast(@as(u16, 0xbe1a));
 
-    const s = @mulAdd(
-        f32,
+    const s = fma_impl.fma(
         tangent_s1[index_1],
         tangent_c2[index_2],
         tangent_c1[index_1] * tangent_s2[index_2],
     );
-    const c = @mulAdd(
-        f32,
+    const c = fma_impl.fma(
         tangent_c1[index_1],
         tangent_c2[index_2],
         -tangent_s1[index_1] * tangent_s2[index_2],
@@ -8364,10 +8364,10 @@ pub fn tanhf(value: f32) f32 {
     if (exponent < 115) {
         if (exponent < 102) {
             if (magnitude == 0) return value;
-            return @mulAdd(f32, -value, @abs(value), value);
+            return fma_impl.fma(-value, @abs(value), value);
         }
         const value_squared = value * value;
-        return @mulAdd(f32, value, -0x1.555556p-2 * value_squared, value);
+        return fma_impl.fma(value, -0x1.555556p-2 * value_squared, value);
     }
     if ((magnitude << 1) > (0x4110_2cb3 << 1)) {
         return signedOneF(value) - signedOneF(value) * 0x1p-25;
@@ -8421,7 +8421,7 @@ fn mulDdAcc(xh: f64, xl: f64, ch: f64, cl: f64, low: *f64) f64 {
     const product_low_high = xl * ch;
     const product_high_low = xh * cl;
     const product_high = xh * ch;
-    var product_high_rest = @mulAdd(f64, xh, ch, -product_high);
+    var product_high_rest = fma_impl.fma64(xh, ch, -product_high);
     product_high_rest += product_high_low + product_low_high;
     return fastTwoSum(product_high, product_high_rest, low);
 }
@@ -8429,7 +8429,7 @@ fn mulDdAcc(xh: f64, xl: f64, ch: f64, cl: f64, low: *f64) f64 {
 fn mulDddAcc(xh: f64, xl: f64, c: f64, low: *f64) f64 {
     const product_low = xl * c;
     const product_high = xh * c;
-    var product_high_rest = @mulAdd(f64, xh, c, -product_high);
+    var product_high_rest = fma_impl.fma64(xh, c, -product_high);
     product_high_rest += product_low;
     return fastTwoSum(product_high, product_high_rest, low);
 }
@@ -8462,7 +8462,7 @@ fn asExpAccurate(x: f64, t: f64, th: f64, tl: f64, low: *f64) f64 {
     const log_two_low_low = 0x1.9ff0342542fc3p-102;
     const delta = x - log_two_high * t;
     const delta_low = log_two_low * t;
-    const delta_low_low = log_two_low_low * t + @mulAdd(f64, log_two_low, t, -delta_low);
+    const delta_low_low = log_two_low_low * t + fma_impl.fma64(log_two_low, t, -delta_low);
     const delta_high = delta + delta_low;
     const corrected_delta_low = (delta - delta_high) + delta_low + delta_low_low;
     var polynomial_low = delta_high * (0x1.5555555555555p-5 +
@@ -8641,7 +8641,7 @@ fn asTanhZero(value: f64) f64 {
         -0x1.aade68fb2f076p-18, 0x1.22e609bf8671fp-19,
     };
     const value_squared = value * value;
-    const value_squared_low = @mulAdd(f64, value, value, -value_squared);
+    const value_squared_low = fma_impl.fma64(value, value, -value_squared);
     var correction = value_squared * (low_coefficients[0] + value_squared *
         (low_coefficients[1] + value_squared * (low_coefficients[2] +
             value_squared * (low_coefficients[3] + value_squared * low_coefficients[4]))));
@@ -8704,7 +8704,7 @@ pub fn tanhd(value: f64) f64 {
     if (magnitude < 0x3fd0_0000_0000_0000) {
         if (magnitude <= 0x3e4d_12ed_0af1_a27f) {
             if (magnitude == 0) return value;
-            return @mulAdd(f64, value, -0x1p-55, value);
+            return fma_impl.fma64(value, -0x1p-55, value);
         }
         const coefficients = [_]f64{
             -0x1.5555555555555p-2,  0x1.1111111110f33p-3,  -0x1.ba1ba1b9b8ea6p-5,
@@ -8731,7 +8731,7 @@ pub fn tanhd(value: f64) f64 {
         return asTanhZero(value);
     }
     const scale = -0x1.71547652b82fep+13;
-    const rounded = @mulAdd(f64, @as(f64, @bitCast(magnitude)), scale, 0x1.8000004p+25);
+    const rounded = fma_impl.fma64(@as(f64, @bitCast(magnitude)), scale, 0x1.8000004p+25);
     const rounded_bits: u64 = @bitCast(rounded);
     const table_bits = rounded_bits & ~@as(u64, (1 << 27) - 1);
     const table_offset = @as(f64, @bitCast(table_bits)) - 0x1.8p25;
@@ -8750,7 +8750,7 @@ pub fn tanhd(value: f64) f64 {
         const table_zero_low = tanhd_t0[index_zero][0];
         const table_one_low = tanhd_t1[index_one][0];
         table_low = table_zero_high * table_one_low + table_one_high * table_zero_low +
-            @mulAdd(f64, table_zero_high, table_one_high, -table_high);
+            fma_impl.fma64(table_zero_high, table_one_high, -table_high);
         table_high *= scale_factor;
         table_low *= scale_factor;
         const log_two_high = -0x1.62e42ffp-14;
@@ -8772,7 +8772,7 @@ pub fn tanhd(value: f64) f64 {
         reciprocal_low += correction;
         const reciprocal = 1.0 / reciprocal_high;
         reciprocal_low = (reciprocal_low * reciprocal +
-            @mulAdd(f64, reciprocal, reciprocal_high, -1.0)) * -reciprocal;
+            fma_impl.fma64(reciprocal, reciprocal_high, -1.0)) * -reciprocal;
         product_high = mulDdAcc(
             product_high,
             product_low,
@@ -8790,7 +8790,7 @@ pub fn tanhd(value: f64) f64 {
         if (lower == upper) return lower;
     } else {
         const log_two = -0x1.62e42fefa39efp-14;
-        const delta = @mulAdd(f64, log_two, table_offset, -@abs(value));
+        const delta = fma_impl.fma64(log_two, table_offset, -@abs(value));
         const delta_squared = delta * delta;
         const polynomial = delta * ((ch[0] + delta * ch[1]) +
             delta_squared * (ch[2] + delta * ch[3]));
@@ -8806,7 +8806,7 @@ pub fn tanhd(value: f64) f64 {
         const table_zero_low = tanhd_t0[index_zero][0];
         const table_one_low = tanhd_t1[index_one][0];
         table_low = table_zero_high * table_one_low + table_one_high * table_zero_low +
-            @mulAdd(f64, table_zero_high, table_one_high, -table_high);
+            fma_impl.fma64(table_zero_high, table_one_high, -table_high);
         table_high *= scale_factor;
         table_low *= scale_factor;
     }
@@ -8826,7 +8826,7 @@ pub fn tanhd(value: f64) f64 {
     denominator_high = fastTwoSum(denominator_high, denominator_low, &denominator_low);
     const reciprocal = 1.0 / denominator_high;
     const reciprocal_low = (denominator_low * reciprocal +
-        @mulAdd(f64, reciprocal, denominator_high, -1.0)) * -reciprocal;
+        fma_impl.fma64(reciprocal, denominator_high, -1.0)) * -reciprocal;
     // SAFETY: mulDdAcc writes product_low before the value is read.
     var product_low: f64 = undefined;
     const product_high = mulDdAcc(

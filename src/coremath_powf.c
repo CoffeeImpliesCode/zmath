@@ -26,6 +26,8 @@ SOFTWARE.
 
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 typedef union {double f; uint64_t u;} b64u64_u;
 
 /* x_bits must encode a positive, finite, nonzero binary32 value. */
@@ -42,44 +44,11 @@ static inline uint32_t normalizef_fraction(uint32_t x_bits, int *exponent) {
   return fraction;
 }
 
-/* __builtin_roundeven was introduced in gcc 10:
-   https://gcc.gnu.org/gcc-10/changes.html,
-   and in clang 17 */
-#if ((defined(__GNUC__) && __GNUC__ >= 10) || (defined(__clang__) && __clang_major__ >= 17)) && !defined(_MSC_VER) && (defined(__aarch64__) || defined(__x86_64__) || defined(__i386__))
-# define roundeven_finite(x) __builtin_roundeven (x)
-#else
-/* round x to nearest integer, breaking ties to even */
-static double
-roundeven_finite (double x)
-{
-  double ix;
-# if (defined(__GNUC__) || defined(__clang__)) && (defined(__AVX__) || defined(__SSE4_1__) || (__ARM_ARCH >= 8))
-#  if defined __AVX__
-   __asm__("vroundsd $0x8,%1,%1,%0":"=x"(ix):"x"(x));
-#  elif __ARM_ARCH >= 8
-   __asm__ ("frintn %d0, %d1":"=w"(ix):"w"(x));
-#  else /* __SSE4_1__ */
-   __asm__("roundsd $0x8,%1,%0":"=x"(ix):"x"(x));
-#  endif
-# else
-  ix = __builtin_round (x); /* nearest, away from 0 */
-  if (__builtin_fabs (ix - x) == 0.5)
-  {
-    /* if ix is odd, we should return ix-1 if x>0, and ix+1 if x<0 */
-    union { double f; uint64_t n; } u, v;
-    u.f = ix;
-    v.f = ix - __builtin_copysign (1.0, x);
-    if (__builtin_ctz (v.n) > __builtin_ctz (u.n))
-      ix = v.f;
-  }
-# endif
-  return ix;
-}
-#endif
+#include "coremath_roundeven.h"
 
 
 static inline double muldd(double xh, double xl, double ch, double cl, double *l){
-  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += alhh + ahlh;
   ch = ahhh + ahhl;
   *l = (ahhh - ch) + ahhl;
@@ -87,7 +56,7 @@ static inline double muldd(double xh, double xl, double ch, double cl, double *l
 }
 
 static inline double mulddd(double xh, double xl, double ch, double *l){
-  double ahlh = ch*xl, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += ahlh;
   ch = ahhh + ahhl;
   *l = (ahhh - ch) + ahhl;
@@ -149,16 +118,16 @@ float cr_powfFiniteBits(uint32_t x_bits, float y0){
   int j = (fraction + (1u << (23 - 6))) >> (23 - 5), k = j > 13;
   e += k;
   b64u64_u xd = {.u = (0x3ffull << 52) | ((uint64_t)fraction << 29)};
-  double z = __builtin_fma(xd.f, ix[j], -1.0);
+  double z = zmath_fma(xd.f, ix[j], -1.0);
   double z2 = z*z, z4 = z2*z2;
-  double c6 = __builtin_fma(z, -0x1.717d824a520f7p+1, 0x1.a6406efd4b877p+1);
-  double c4 = __builtin_fma(z, -0x1.ec709bdf453ecp+1, 0x1.2776c441b72ep+2);
-  double c2 = __builtin_fma(z, -0x1.71547652bc4a9p+2, 0x1.ec709dc3a2d0bp+2);
-  double c0 = __builtin_fma(z, -0x1.71547652b82fep+3, 0x1.71547652b82fep+4);
-  c0 = __builtin_fma(z2, c2, c0);
-  c4 = __builtin_fma(z2, c6, c4);
-  c0 = __builtin_fma(z4, c4, c0);
-  double l = __builtin_fma(z, c0, -lix16[j][1]);
+  double c6 = zmath_fma(z, -0x1.717d824a520f7p+1, 0x1.a6406efd4b877p+1);
+  double c4 = zmath_fma(z, -0x1.ec709bdf453ecp+1, 0x1.2776c441b72ep+2);
+  double c2 = zmath_fma(z, -0x1.71547652bc4a9p+2, 0x1.ec709dc3a2d0bp+2);
+  double c0 = zmath_fma(z, -0x1.71547652b82fep+3, 0x1.71547652b82fep+4);
+  c0 = zmath_fma(z2, c2, c0);
+  c4 = zmath_fma(z2, c6, c4);
+  c0 = zmath_fma(z4, c4, c0);
+  double l = zmath_fma(z, c0, -lix16[j][1]);
   double zt = (e * 16 - lix16[j][0])*y;
   z = l*y + zt;
   if(__builtin_expect(z>2048, 0)){
@@ -177,7 +146,7 @@ float cr_powfFiniteBits(uint32_t x_bits, float y0){
     return 0x1p-126f*0x1p-126f;
   }
   if(__builtin_fabs(z)<0x1p-26) return 1.0 + z;
-  double ia = __builtin_floor(z), h = __builtin_fma(l, y, zt - ia);
+  double ia = __builtin_floor(z), h = zmath_fma(l, y, zt - ia);
   static const uint64_t tb[] = {
     UINT64_C(0x3ff0000000000000), UINT64_C(0x3fefb5586cf9890f), UINT64_C(0x3fef72b83c7d517b), UINT64_C(0x3fef387a6e756238),
     UINT64_C(0x3fef06fe0a31b715), UINT64_C(0x3feedea64c123422), UINT64_C(0x3feebfdad5362a27), UINT64_C(0x3feeab07dd485429),
@@ -191,12 +160,12 @@ float cr_powfFiniteBits(uint32_t x_bits, float y0){
   b64u64_u scaled = {.u = tb[integral_bits.u & 0xf] + (integral_bits.u << 48)};
   double s = scaled.f;
   double h2 = h*h;
-  c0 = __builtin_fma(h, 0x1.ebfbdff84555ap-11, 0x1.62e42fefa398bp-5);
-  c2 = __builtin_fma(h, 0x1.3b2ad1b1716a2p-23, 0x1.c6b08d4ad86d3p-17);
-  c4 = __builtin_fma(h, 0x1.4a1d7f457ac56p-37, 0x1.5d7472718ce9dp-30);
-  c0 = __builtin_fma(h2, __builtin_fma(h2, c4, c2), c0);
+  c0 = zmath_fma(h, 0x1.ebfbdff84555ap-11, 0x1.62e42fefa398bp-5);
+  c2 = zmath_fma(h, 0x1.3b2ad1b1716a2p-23, 0x1.c6b08d4ad86d3p-17);
+  c4 = zmath_fma(h, 0x1.4a1d7f457ac56p-37, 0x1.5d7472718ce9dp-30);
+  c0 = zmath_fma(h2, zmath_fma(h2, c4, c2), c0);
   double w = s*h;
-  b64u64_u rr = {.f = __builtin_fma(w, c0, s)};
+  b64u64_u rr = {.f = zmath_fma(w, c0, s)};
   // with off=467, fails for x,y=0x1.fd12b4p-1,-0x1.d0b058p+13 and RNDZ
   uint64_t off = 468;
   if(((rr.u+off)&0xfffffff) <= 2*off)
@@ -233,12 +202,12 @@ static __attribute__((noinline)) float as_powf_accurate2(uint64_t x_bits, int e,
   int k = (t.u & (~(uint64_t)0 >> 12)) > 0x6a09e667f3bcdull;
   e += k;
   double x = t.f;
-  double xm = x-o[k], xp = x+o[k], zh = xm/xp, zl = __builtin_fma(zh,-xp,xm)/xp;
+  double xm = x-o[k], xp = x+o[k], zh = xm/xp, zl = zmath_fma(zh,-xp,xm)/xp;
   double z2l, z2h = muldd(zh, zl, zh, zl, &z2l);
   z2h = polydd(z2h,z2l, 13, ch, &z2l);
   zh = muldd(zh,zl, z2h,z2l, &zl);
   zh = mulddd(zh,zl, y, &zl);
-  double ey = e*y, eh = ey + zh, el = ((ey - eh) + zh) + zl, ee = roundeven_finite(eh);
+  double ey = e*y, eh = ey + zh, el = ((ey - eh) + zh) + zl, ee = zmath_roundeven_finite(eh);
   eh -= ee;
   eh = polydd(eh, el, 18, ce, &el);
   b64u64_u r = {.u = ((uint64_t)0x3ff+(int64_t)ee)<<52};

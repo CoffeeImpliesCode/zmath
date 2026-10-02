@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const sign_mask_h: u16 = 0x8000;
 const magnitude_mask_h: u16 = 0x7fff;
 const infinity_bits_h: u16 = 0x7c00;
@@ -100,7 +102,7 @@ fn mulDd(x_high: f64, x_low: f64, coefficient_high: f64, coefficient_low: f64, l
     @setFloatMode(.strict);
     const high_product = x_high * coefficient_high;
     low.* = (x_high * coefficient_low + x_low * coefficient_high) +
-        @mulAdd(f64, x_high, coefficient_high, -high_product);
+        fma_impl.fma64(x_high, coefficient_high, -high_product);
     return high_product;
 }
 
@@ -151,9 +153,9 @@ pub fn acosh(value: f16) f16 {
     const squared = t * t;
     var result: f32 = undefined;
     if (input_magnitude < 0x3e80_0000) {
-        const first = @mulAdd(f32, -0x1.25e6b8p-10, t, -0x1.fffb44p-1);
-        const third = @mulAdd(f32, -0x1.a85b22p-5, t, -0x1.3cc114p-3);
-        result = @mulAdd(f32, @mulAdd(f32, third, squared, first), t, 0x1.921fb4p+0);
+        const first = fma_impl.fma(-0x1.25e6b8p-10, t, -0x1.fffb44p-1);
+        const third = fma_impl.fma(-0x1.a85b22p-5, t, -0x1.3cc114p-3);
+        result = fma_impl.fma(fma_impl.fma(third, squared, first), t, 0x1.921fb4p+0);
         if (negative) {
             result = 0x1.921fb4p+1 - result;
             if (input_magnitude >= 0x3696_0000 and input_magnitude <= 0x369a_0000) {
@@ -163,14 +165,14 @@ pub fn acosh(value: f16) f16 {
             if (input_bits == 0xbcfc_0000) result = 0x1.9a0006p+0;
         }
     } else if (input_magnitude < 0x3f00_0000) {
-        const first = @mulAdd(f32, -0x1.bd043ap-4, t, -0x1.f515cap-1);
-        const third = @mulAdd(f32, -0x1.190806p-2, t, 0x1.7e2d5ap-4);
-        result = @mulAdd(f32, @mulAdd(f32, third, squared, first), t, 0x1.91b678p+0);
+        const first = fma_impl.fma(-0x1.bd043ap-4, t, -0x1.f515cap-1);
+        const third = fma_impl.fma(-0x1.190806p-2, t, 0x1.7e2d5ap-4);
+        result = fma_impl.fma(fma_impl.fma(third, squared, first), t, 0x1.91b678p+0);
         if (negative) result = 0x1.921fb4p+1 - result;
     } else {
-        const first = @mulAdd(f32, 0x1.31640cp-4, t, -0x1.ae5c5ep-3);
-        const third = @mulAdd(f32, 0x1.251b5p-8, t, -0x1.98038p-6);
-        const polynomial = @mulAdd(f32, @mulAdd(f32, third, squared, first), t, 0x1.91fa1cp+0);
+        const first = fma_impl.fma(0x1.31640cp-4, t, -0x1.ae5c5ep-3);
+        const third = fma_impl.fma(0x1.251b5p-8, t, -0x1.98038p-6);
+        const polynomial = fma_impl.fma(fma_impl.fma(third, squared, first), t, 0x1.91fa1cp+0);
         result = @sqrt(1.0 - t) * polynomial;
         if (negative) result = 0x1.921fb4p+1 - result;
     }
@@ -404,13 +406,13 @@ const acos_coefficients = [33][8]f64{
 fn acosRefine(value: f64, approximation: f64) f64 {
     @setFloatMode(.strict);
     const square = value * value;
-    const square_error = @mulAdd(f64, value, value, -square);
+    const square_error = fma_impl.fma64(value, value, -square);
     var complement_low: f64 = undefined;
     var complement_high = fastTwoSum(1.0, -square, &complement_low);
     complement_low -= square_error;
     complement_high = fastTwoSum(complement_high, complement_low, &complement_low);
     const cosine_high = @sqrt(complement_high);
-    const cosine_low = (complement_low - @mulAdd(f64, cosine_high, cosine_high, -complement_high)) *
+    const cosine_low = (complement_low - fma_impl.fma64(cosine_high, cosine_high, -complement_high)) *
         (0.5 / cosine_high);
     const table_index_signed = roundEvenFinite(
         absD(approximation - 0x1.921fb54442d18p+0) * 0x1.45f306dc9c883p+4,
@@ -462,10 +464,10 @@ fn acosRefine(value: f64, approximation: f64) f64 {
     const cosine_delta_high = cosine_high - cosine_table_high;
     const cosine_delta_low = cosine_low - cosine_table_low;
     const magic = 0x1.8p-4;
-    const sine_correction = @mulAdd(f64, sine_table_high, cosine_delta_high, magic) - magic;
-    const sine_correction_error = @mulAdd(f64, sine_table_high, cosine_delta_high, -sine_correction);
-    const cosine_correction = @mulAdd(f64, cosine_table_high, sine_delta_high, magic) - magic;
-    const cosine_correction_error = @mulAdd(f64, cosine_table_high, sine_delta_high, -cosine_correction);
+    const sine_correction = fma_impl.fma64(sine_table_high, cosine_delta_high, magic) - magic;
+    const sine_correction_error = fma_impl.fma64(sine_table_high, cosine_delta_high, -sine_correction);
+    const cosine_correction = fma_impl.fma64(cosine_table_high, sine_delta_high, magic) - magic;
+    const cosine_correction_error = fma_impl.fma64(cosine_table_high, sine_delta_high, -cosine_correction);
     var delta = cosine_correction - sine_correction;
     var delta_error = (cosine_table_high * sine_delta_low + cosine_table_low * sine_delta_high) -
         (sine_table_high * cosine_delta_low + sine_table_low * cosine_delta_high) -
@@ -568,7 +570,7 @@ pub fn acosd(value: f64) f64 {
         coefficient_index = @intCast(roundEvenFinite(reduced * 0x1p5));
         const table_offset: f64 = @floatFromInt(coefficient_index);
         root = copySignD(@sqrt(reduced), value);
-        root_low = @mulAdd(f64, root, root, -reduced) * ((-0.5 / reduced) * root);
+        root_low = fma_impl.fma64(root, root, -reduced) * ((-0.5 / reduced) * root);
         reduced = 0.25 * reduced - table_offset * 0x1p-7;
         error_bound = absD(root * reduced) * 0x1.8cp-52 + 0x1p-105;
     } else {
@@ -590,18 +592,18 @@ pub fn acosd(value: f64) f64 {
         const square = value * value;
         coefficient_index = @intCast(roundEvenFinite(square * 0x1p7));
         const table_offset: f64 = @floatFromInt(coefficient_index);
-        reduced = @mulAdd(f64, value, value, -0x1p-7 * table_offset);
+        reduced = fma_impl.fma64(value, value, -0x1p-7 * table_offset);
         root = -value;
         root_low = 0.0;
         error_bound = absD(value * reduced) * 0x1.81p-52;
     }
     const coefficient = acos_coefficients[coefficient_index];
     const reduced_squared = reduced * reduced;
-    const coefficient_2 = @mulAdd(f64, reduced, coefficient[3], coefficient[2]);
-    const coefficient_4 = @mulAdd(f64, reduced, coefficient[5], coefficient[4]);
-    const coefficient_6 = @mulAdd(f64, reduced, coefficient[7], coefficient[6]);
-    const tail = @mulAdd(f64, reduced_squared, coefficient_6, coefficient_4);
-    const polynomial = reduced * @mulAdd(f64, reduced_squared, tail, coefficient_2);
+    const coefficient_2 = fma_impl.fma64(reduced, coefficient[3], coefficient[2]);
+    const coefficient_4 = fma_impl.fma64(reduced, coefficient[5], coefficient[4]);
+    const coefficient_6 = fma_impl.fma64(reduced, coefficient[7], coefficient[6]);
+    const tail = fma_impl.fma64(reduced_squared, coefficient_6, coefficient_4);
+    const polynomial = reduced * fma_impl.fma64(reduced_squared, tail, coefficient_2);
     var high = coefficient[0];
     var low = coefficient[1] + polynomial;
     high = mulDd(root, root_low, high, low, &low);

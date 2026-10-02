@@ -29,7 +29,7 @@
 //! | `argf` `argd` | angle `f32`/`f64` | none | `(-pi, +pi]` | `+0` for `+0 + i0`, `-0` for `+0 - i0`, `+pi` for `-0 + i0`, `-pi` for `-0 - i0` | first NaN component, quieted | `scalar.atan2` quadrant rules | none | none | `scalar.atan2` rounding |
 //! | `addf` `addd` `subf` `subd` | `Complex` | none | none | IEEE addition of the components | per component, the first NaN of that component, quieted | IEEE addition, so one `inf` component and one opposing `inf` give canonical | none | `+inf` per IEEE | `+0` per IEEE |
 //! | `mulf` `muld` | `Complex` | none | none | IEEE multiplication of the products | both parts, first NaN of the four operands, quieted | IEEE multiplication, so `inf * 0` gives canonical | none | `+inf` per IEEE | `+0` per IEEE |
-//! | `divf` `divd` | `Complex` | none | none | IEEE division of the scaled numerator, so a zero `z.re` with a nonzero `z.im` keeps the divisor's zero sign | both parts, first NaN of the four operands, quieted | an infinite divisor gives the signed zeros of the leading term of its reciprocal; an infinite numerator over an infinite divisor and a divisor with two infinite components give canonical | `+0 + i0` divisor gives an infinite real part signed by the naive numerator and a canonical imaginary part; `0/0` gives canonical in both parts | `+inf` per IEEE | `+0` per IEEE |
+//! | `divf` `divd` | `Complex` | none | none | IEEE division of the scaled numerator, so a zero `z.re` with a nonzero `z.im` keeps the divisor's zero sign | both parts, first NaN of the four operands, quieted | an infinite divisor gives the signed zeros of the leading term of its reciprocal; an infinite numerator over an infinite divisor and a divisor with two infinite components give canonical | `+0 + i0` divisor gives an infinite real part signed by the naive numerator and a canonical imaginary part; `0/0` gives canonical in both parts | `+inf` per IEEE | `+0` only where the exact quotient underflows, so a subnormal quotient is exact |
 //! | `expf` `expd` | `Complex` | none | real part unbounded, imaginary in `(-pi, pi]` | `z.im == 0` returns `e^z.re` with `z.im` verbatim, so `exp(x - i0) = e^x - i0` | canonical in both parts | infinite imaginary part gives canonical in both parts; `+inf` real with nonzero imaginary gives `(+inf, canonical)`; `+inf + i0` gives `(+inf, +0)` and `-inf + i0` gives `(+0, +0)` | none | real part is `e^z.re`, so `+inf` once `z.re` exceeds the range | `+0` real once `z.re` is below the range |
 //! | `logf` `logd` | `Complex` | none | real in `(-inf, +inf]`, imaginary in `(-pi, pi]` | `z = +0 + i0` gives `(-inf, +0)` and `z = +0 - i0` gives `(-inf, -0)` | canonical in both parts | infinite real part gives `(+inf, +0)`; infinite imaginary part gives `(+inf, +-pi/2)`; both infinite gives `(+inf, canonical)` | none | `+inf` for an infinite input only | `-inf` real when the magnitude underflows to zero |
 //! | `log10f` `log10d` | `Complex` | as `log`, because the imaginary part is that of `log` divided by `ln 10` | real in `(-inf, +inf]`, imaginary in `(-pi/ln 10, pi/ln 10]` | inherits `log` | canonical in both parts | inherits `log` | none | inherits `log` | inherits `log` |
@@ -50,6 +50,7 @@
 
 const ieee = @import("ieee.zig");
 const scalar = @import("scalar.zig");
+const scalar_div = @import("scalar_div.zig");
 
 /// A complex value in binary32.
 pub const Complexf = struct { re: f32, im: f32 };
@@ -274,6 +275,20 @@ inline fn withSign(comptime T: type, value: T, sign: T) T {
     return ieee.copySignd(value, sign);
 }
 
+/// `a / b` through the divide that keeps a finite binary64 underflow.
+///
+/// The binary32 kernel divides natively, and so does every binary64 target
+/// with a native FMA. Elsewhere the target lowers the binary64 divide to a
+/// software helper that flushes a subnormal quotient to a signed zero, so the
+/// reductions below would lose a quotient they are written to survive. Every
+/// quotient in this module can reach that range, so they all take the shared
+/// exact path, which is the same single divide for a normal, an infinite or a
+/// NaN result and so leaves every other result bit alone.
+inline fn divide(comptime T: type, a: T, b: T) T {
+    if (T == f32) return a / b;
+    return scalar_div.div64(a, b);
+}
+
 // ---------------------------------------------------------------------------
 // Accessors
 // ---------------------------------------------------------------------------
@@ -348,6 +363,8 @@ inline fn magnitude(comptime T: type, x: T, y: T) T {
     // kernel's own correctly rounded reduction is both safe and the most
     // accurate answer. Above it the magnitude can round to infinity, so the
     // ratio is reduced to `[0, 1]` first and the scale is applied once.
+    // A subnormal ratio is not observable through the kernel, which answers one
+    // for any argument this small, so the reduced divide keeps the target's own.
     if (m <= F.magnitude_limit) return F.hypot(a, b);
     return m * F.hypot(1, @min(a, b) / m);
 }
@@ -549,8 +566,8 @@ fn divValue(comptime T: type, a: ComplexOf(T), b: ComplexOf(T)) ComplexOf(T) {
     if (scale >= F.sqrt_min_normal and scale <= F.magnitude_limit) {
         const d = b.re * b.re + b.im * b.im;
         return .{
-            .re = (product(T, a.re, b.re) + product(T, a.im, b.im)) / d,
-            .im = (product(T, a.im, b.re) - product(T, a.re, b.im)) / d,
+            .re = divide(T, product(T, a.re, b.re) + product(T, a.im, b.im), d),
+            .im = divide(T, product(T, a.im, b.re) - product(T, a.re, b.im), d),
         };
     }
 
@@ -558,12 +575,14 @@ fn divValue(comptime T: type, a: ComplexOf(T), b: ComplexOf(T)) ComplexOf(T) {
     // `scale^2 * d * (numerator)`, so the scale must come off the quotient as a
     // division. Multiplying by it here would underflow a tiny numerator against
     // a tiny divisor and overflow a large one against a large divisor.
-    const divisor_re = b.re / scale;
-    const divisor_im = b.im / scale;
+    const divisor_re = divide(T, b.re, scale);
+    const divisor_im = divide(T, b.im, scale);
     const d = divisor_re * divisor_re + divisor_im * divisor_im;
+    const numerator_re = product(T, a.re, divisor_re) + product(T, a.im, divisor_im);
+    const numerator_im = product(T, a.im, divisor_re) - product(T, a.re, divisor_im);
     return .{
-        .re = ((product(T, a.re, divisor_re) + product(T, a.im, divisor_im)) / d) / scale,
-        .im = ((product(T, a.im, divisor_re) - product(T, a.re, divisor_im)) / d) / scale,
+        .re = divide(T, divide(T, numerator_re, d), scale),
+        .im = divide(T, divide(T, numerator_im, d), scale),
     };
 }
 
@@ -603,7 +622,7 @@ fn expValue(comptime T: type, z: ComplexOf(T)) ComplexOf(T) {
 /// otherwise. The division keeps `log10(z) = log(z) / ln(10)` to one rounding.
 inline fn toBaseTen(comptime T: type, value: T, comptime base_ten: bool) T {
     if (!base_ten) return value;
-    return value / Format(T).ln_10;
+    return divide(T, value, Format(T).ln_10);
 }
 
 /// The answer for an input the polar reduction cannot handle, or `null` when
@@ -670,10 +689,10 @@ fn sqrtScaled(comptime T: type, z: ComplexOf(T)) ComplexOf(T) {
         // The larger half is the square root of the real part, and the other
         // one comes from the identity 2 * u * v = y, which never cancels.
         re = F.sqrt(0.5 * r + 0.5 * x);
-        im = y / (2 * re);
+        im = divide(T, y, 2 * re);
     } else {
         im = F.sqrt(0.5 * r - 0.5 * x);
-        re = @abs(y) / (2 * im);
+        re = divide(T, @abs(y), 2 * im);
     }
     const half = @divFloor(split.exponent, 2);
     if (split.exponent - 2 * half == 1) {
@@ -709,10 +728,10 @@ fn sqrtValue(comptime T: type, z: ComplexOf(T)) ComplexOf(T) {
         const r = F.hypot(x, y);
         if (z.re >= 0) {
             const re = F.sqrt(0.5 * r + 0.5 * z.re);
-            return .{ .re = re, .im = z.im / (2 * re) };
+            return .{ .re = re, .im = divide(T, z.im, 2 * re) };
         }
         const im = F.sqrt(0.5 * r - 0.5 * z.re);
-        return .{ .re = y / (2 * im), .im = withSign(T, im, z.im) };
+        return .{ .re = divide(T, y, 2 * im), .im = withSign(T, im, z.im) };
     }
     return sqrtScaled(T, z);
 }
@@ -869,8 +888,8 @@ fn tanValue(comptime T: type, z: ComplexOf(T)) ComplexOf(T) {
         return .{ .re = withSign(T, 0, numerator_re), .im = F.tanh(2 * z.im) };
     }
     return .{
-        .re = numerator_re / denominator,
-        .im = (2 * sinh_b * cosh_b) / denominator,
+        .re = divide(T, numerator_re, denominator),
+        .im = divide(T, 2 * sinh_b * cosh_b, denominator),
     };
 }
 
@@ -964,8 +983,8 @@ fn tanhValue(comptime T: type, z: ComplexOf(T)) ComplexOf(T) {
         };
     }
     return .{
-        .re = (2 * sinh_a * cosh_a) / denominator,
-        .im = (2 * sin_b * cos_b) / denominator,
+        .re = divide(T, 2 * sinh_a * cosh_a, denominator),
+        .im = divide(T, 2 * sin_b * cos_b, denominator),
     };
 }
 

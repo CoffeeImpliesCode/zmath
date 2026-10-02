@@ -8,16 +8,16 @@ const common = @import("scalar_c23_common.zig");
 const c23 = @import("scalar_c23_types.zig");
 const tiny = @import("scalar_tiny.zig");
 
-extern fn zmath_core_asinpih(value: f16) callconv(.c) f16;
+extern fn zmath_core_asinpih_bits(value: u16) callconv(.c) u16;
 extern fn zmath_core_asinpif(value: f32) callconv(.c) f32;
 extern fn zmath_core_asinpid_finite_bits(value: f64, bits: u64) callconv(.c) f64;
-extern fn zmath_core_acospih(value: f16) callconv(.c) f16;
+extern fn zmath_core_acospih_bits(value: u16) callconv(.c) u16;
 extern fn zmath_core_acospif(value: f32) callconv(.c) f32;
 extern fn zmath_core_acospid(value: f64) callconv(.c) f64;
-extern fn zmath_core_atanpih(value: f16) callconv(.c) f16;
+extern fn zmath_core_atanpih_bits(value: u16) callconv(.c) u16;
 extern fn zmath_core_atanpif(value: f32) callconv(.c) f32;
 extern fn zmath_core_atanpid(value: f64) callconv(.c) f64;
-extern fn zmath_core_atan2pih(y: f16, x: f16) callconv(.c) f16;
+extern fn zmath_core_atan2pih_bits(y: u16, x: u16) callconv(.c) u16;
 extern fn zmath_core_atan2pif(y: f32, x: f32) callconv(.c) f32;
 extern fn zmath_core_atan2pid_finite_bits(
     y: f64,
@@ -99,7 +99,7 @@ pub fn asinpih(value: f16) f16 {
     if (magnitude > one_bits_h) return common.H.canonicalNaN();
     if (common.H.isZeroBits(bits)) return value;
     if (magnitude == one_bits_h) return signedH(half_bits_h, bits);
-    return zmath_core_asinpih(value);
+    return @bitCast(zmath_core_asinpih_bits(bits));
 }
 
 /// Return asin(x) / pi for binary32.
@@ -151,7 +151,7 @@ pub fn acospih(value: f16) f16 {
         if ((bits & sign_mask_h) == 0) return @bitCast(@as(u16, 0x0000));
         return @bitCast(one_result_bits_h);
     }
-    return zmath_core_acospih(value);
+    return @bitCast(zmath_core_acospih_bits(bits));
 }
 
 /// Return acos(x) / pi for binary32.
@@ -202,7 +202,7 @@ pub fn atanpih(value: f16) f16 {
     if (common.H.isZeroBits(bits)) return value;
     if (common.H.isInfinityBits(bits)) return signedH(half_bits_h, bits);
     if (magnitude == one_bits_h) return signedH(quarter_bits_h, bits);
-    return zmath_core_atanpih(value);
+    return @bitCast(zmath_core_atanpih_bits(bits));
 }
 
 /// Return atan(x) / pi for binary32.
@@ -272,7 +272,7 @@ pub fn atan2pih(y: f16, x: f16) c23.Atan2Result(f16) {
             three_quarter_bits_h;
         return atan2ResolvedH(signedH(magnitude, y_bits));
     }
-    return atan2ResolvedH(zmath_core_atan2pih(y, x));
+    return atan2ResolvedH(@bitCast(zmath_core_atan2pih_bits(y_bits, x_bits)));
 }
 
 /// Return atan2(y, x) / pi for binary32.

@@ -70,6 +70,13 @@
 //! the `unit` constructors return `null` for a zero, negative, or non-finite
 //! scale instead of writing a non-finite result.
 //!
+//! `inverse`, `inverseChecked`, and `normalized` divide a nonzero finite scale.
+//! A binary32 quotient of a nonzero divisor is normal whenever it is nonzero,
+//! so binary32 keeps the hardware divide. A binary64 reciprocal of a scale near
+//! the top of the range is subnormal, and a soft-float binary64 divide flushes
+//! that to a signed zero, so the binary64 reciprocal goes through the shared
+//! exact quotient packer of `scalar_div.zig` and keeps its subnormal value.
+//!
 //! Normalization table
 //!
 //! Every row is implemented. Scale is the factor the operation applies, sign is
@@ -134,16 +141,18 @@
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
+const scalar_div = @import("scalar_div.zig");
 
 /// The three families this file instantiates.
 pub const Family = enum { clifford, projective, conformal };
 
 /// The widest basis any of the twelve types uses, `Cga4`.
 const max_basis = 6;
+const MaskShift = std.math.Log2Int(usize);
 
 /// The blade mask of the basis vector at `index`.
 fn bit(index: usize) usize {
-    return @as(usize, 1) << @as(u6, @intCast(index));
+    return @as(usize, 1) << @as(MaskShift, @intCast(index));
 }
 
 /// The grade of the blade at `mask`, its population count.
@@ -177,6 +186,19 @@ fn IsFinite(comptime T: type, x: T) bool {
     return switch (T) {
         f32 => std.math.isFinite(x),
         f64 => std.math.isFinite(x),
+        else => @compileError("zmath.algebra supports f32 and f64 only"),
+    };
+}
+
+/// The reciprocal of a nonzero coefficient. The binary32 quotient of a
+/// nonzero divisor is normal whenever it is nonzero, so it keeps the
+/// hardware divide. The binary64 reciprocal of a coefficient near the top of
+/// the range is subnormal, and a soft-float binary64 divide flushes that to a
+/// signed zero, so it goes through the shared exact quotient packer.
+fn Reciprocal(comptime T: type, x: T) T {
+    return switch (T) {
+        f32 => 1 / x,
+        f64 => scalar_div.div64(1.0, x),
         else => @compileError("zmath.algebra supports f32 and f64 only"),
     };
 }
@@ -674,7 +696,7 @@ fn Multivector(
         /// `inverseChecked` to test it.
         pub fn inverse(self: Self) Self {
             const sandwich = self.sandwichConjugate();
-            return sandwich.scale(1 / scalarProduct(sandwich, self));
+            return sandwich.scale(Reciprocal(T, scalarProduct(sandwich, self)));
         }
 
         /// The multivector inverse, or `null` when `self` holds a non-finite
@@ -684,16 +706,23 @@ fn Multivector(
             if (!self.isFinite()) return null;
             const conjugate_part = self.sandwichConjugate();
             const product = conjugate_part.geometricProduct(self);
+            // The scan accumulates a flag instead of returning from inside the
+            // loop. The accepted set is identical, but with the early return in
+            // the loop the big-endian AArch64 backend builds this optional
+            // aggregate return wrongly: `Pga4f` and `Cga3f`, the two 128-byte
+            // binary32 payloads, then answer `null` for an inverse they accept,
+            // while `normalized`, which returns the same optional shape and has
+            // no loop, stays correct.
+            var residue = false;
             for (0..coefficient_count) |mask| {
-                if (mask == scalar_mask) continue;
-                if (product.c[mask] != 0) return null;
+                if (mask != scalar_mask and product.c[mask] != 0) residue = true;
             }
             // The residue scan reads the whole product, and its grade-0 part is
             // the sandwich scalar, so the scale is the one `inverse` reads from
             // that same product instead of building a second one.
             const sandwich = product.c[scalar_mask];
-            if (sandwich == 0 or !IsFinite(T, sandwich)) return null;
-            return conjugate_part.scale(1 / sandwich);
+            if (residue or sandwich == 0 or !IsFinite(T, sandwich)) return null;
+            return conjugate_part.scale(Reciprocal(T, sandwich));
         }
 
         /// The squared norm, the grade-0 part of `A * A(reverse)`. It is
@@ -712,7 +741,7 @@ fn Multivector(
             if (squared <= 0 or !IsFinite(T, squared)) return null;
             const magnitude = Sqrt(T, squared);
             if (magnitude == 0 or !IsFinite(T, magnitude)) return null;
-            return self.scale(1 / magnitude);
+            return self.scale(Reciprocal(T, magnitude));
         }
 
         // ------------------------------------------------------------------

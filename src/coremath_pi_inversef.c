@@ -1,6 +1,8 @@
 /* Direct correctly-rounded inverse-pi kernels for binary32. */
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 /* Pinned CORE-MATH source: revision 3bafed75e3c22399531857d63a3fa0e24bfb42fa, src/binary32/asinpi/asinpif.c. */
 /* Correctly-rounded half-revolution arc-sine function for binary32 value.
 
@@ -101,7 +103,7 @@ return __builtin_nanf("1"); // |x| > 1
     c0 += c2*z2;
     c4 += c6*z2;
     c0 += c4*z4;
-    double r = __builtin_fma(-c0, __builtin_copysign(f, x), __builtin_copysign(0.5, x));
+    double r = zmath_fma(-c0, __builtin_copysign(f, x), __builtin_copysign(0.5, x));
     return r;
   }
 }
@@ -204,7 +206,7 @@ return __builtin_nanf("1");
       c0 = (c4 * z4) * z4 + c0;
     else
 #endif
-      c0 = __builtin_fma (c4 * z4, z4, c0);
+      c0 = zmath_fma (c4 * z4, z4, c0);
     return 0.5 - z*c0;
   } else {
     double f = __builtin_sqrt(1-az);
@@ -344,7 +346,7 @@ typedef union {float f; uint32_t u;} zmath_pi_atan2pif_b32u32_u;
 typedef union {double f; uint64_t u;} zmath_pi_atan2pif_b64u64_u;
 
 static inline double zmath_pi_atan2pif_muldd(double xh, double xl, double ch, double cl, double *l){
-  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += alhh + ahlh;
   ch = ahhh + ahhl;
   *l = (ahhh - ch) + ahhl;
@@ -449,10 +451,10 @@ float zmath_core_atan2pif(float y, float x){
       double zh,zl;
       if(!gt){
 	zh = zy/zx;
-	zl = __builtin_fma(zh,-zx,zy)/zx;
+	zl = zmath_fma(zh,-zx,zy)/zx;
       } else {
 	zh = zx/zy;
-	zl = __builtin_fma(zh,-zy,zx)/zy;
+	zl = zmath_fma(zh,-zy,zx)/zy;
       }
       double z2l, z2h = zmath_pi_atan2pif_muldd(zh,zl,zh,zl,&z2l);
       static const double c[][2] =

@@ -24,6 +24,8 @@
 // SOFTWARE.
 //
 // The finite Dint arithmetic is shared with the pinned CORE-MATH sine port.
+const fma_impl = @import("scalar_fma.zig");
+
 const sind_impl = @import("scalar_sind.zig");
 
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
@@ -65,13 +67,13 @@ inline fn tanSmall(value: f64) f64 {
     const square = value * value;
     const cubic = value * square;
     var polynomial: f64 = 0x1.3558248036744p-11;
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.7da36452b75e3p-10);
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.d6d3d0e157de0p-9);
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.226e355e6c23dp-7);
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.664f4882c10fap-6);
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.ba1ba1ba1ba1cp-5);
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.1111111111111p-3);
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.5555555555555p-2);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.7da36452b75e3p-10);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.d6d3d0e157de0p-9);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.226e355e6c23dp-7);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.664f4882c10fap-6);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.ba1ba1ba1ba1cp-5);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.1111111111111p-3);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.5555555555555p-2);
     const correction = cubic * polynomial;
     const high = value + correction;
     const low = correction - (high - value);

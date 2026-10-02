@@ -14,6 +14,13 @@ const generic_scalar_test = @import("generic_scalar_test.zig");
 const c23_public_surface_test = @import("c23_public_surface_test.zig");
 const scalar_c23_types = @import("scalar_c23_types.zig");
 const scalar_narrow = @import("scalar_narrow.zig");
+const scalar_fma = @import("scalar_fma.zig");
+const scalar_div = @import("scalar_div.zig");
+
+comptime {
+    _ = scalar_fma;
+    _ = scalar_div;
+}
 
 pub const FromFpRound = scalar_c23_types.FromFpRound;
 pub const IntegerResult = scalar_c23_types.IntegerResult;

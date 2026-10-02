@@ -1,55 +1,26 @@
+const fma_impl = @import("scalar_fma.zig");
+
 // Correctly rounded fused multiply-add for binary64 values.
-// Uses @mulAdd with IEEE round-to-nearest, ties-to-even.
+// The exceptional cases are settled here so that the result never depends on
+// which operand a target's fused instruction chooses to propagate. The single
+// rounding itself, and the whole software path of a target without a binary64
+// fused instruction, is the shared helper's job; this file must not screen a
+// case that the helper screens again.
+// Uses the target's fused instruction where it has a binary64 one, and exact
+// integer dyadic arithmetic everywhere else.
 // No host libm, no fenv mutation, no dynamic allocation.
 
-const sign_mask_d: u64 = 0x8000_0000_0000_0000;
-const magnitude_mask_d: u64 = 0x7fff_ffff_ffff_ffff;
-const infinity_bits_d: u64 = 0x7ff0_0000_0000_0000;
-const quiet_nan_bit_d: u64 = 0x0008_0000_0000_0000;
-const canonical_nan_bits_d: u64 = 0x7ff8_0000_0000_0000;
-
 /// Computes the correctly rounded fused multiply-add of three binary64 values.
-// Callers must keep IEEE round-to-nearest, ties-to-even active.
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn fmad(a: f64, b: f64, c: f64) f64 {
     @setFloatMode(.strict);
-    const a_bits: u64 = @bitCast(a);
-    const b_bits: u64 = @bitCast(b);
-    const c_bits: u64 = @bitCast(c);
-    const a_magnitude: u64 = a_bits & magnitude_mask_d;
-    const b_magnitude: u64 = b_bits & magnitude_mask_d;
-    const c_magnitude: u64 = c_bits & magnitude_mask_d;
-
-    // Check for NaN in a, b, c (first NaN in argument order)
-    if (a_magnitude > infinity_bits_d) {
-        return @bitCast(a_bits | quiet_nan_bit_d);
-    }
-    if (b_magnitude > infinity_bits_d) {
-        return @bitCast(b_bits | quiet_nan_bit_d);
-    }
-    if (c_magnitude > infinity_bits_d) {
-        return @bitCast(c_bits | quiet_nan_bit_d);
-    }
-    // Check for (inf * 0) or (0 * inf) which produces a NaN in the product
-    if ((a_magnitude == infinity_bits_d and b_magnitude == 0) or
-        (a_magnitude == 0 and b_magnitude == infinity_bits_d))
-    {
-        return @bitCast(canonical_nan_bits_d);
+    if (comptime fma_impl.has_native_fma64) {
+        const a_bits: u64 = @bitCast(a);
+        const b_bits: u64 = @bitCast(b);
+        const c_bits: u64 = @bitCast(c);
+        if (fma_impl.exceptionalResult64(a_bits, b_bits, c_bits)) |result| return @bitCast(result);
     }
 
-    // Check for product infinite and c infinite with opposite sign
-    const a_sign: bool = (a_bits & sign_mask_d) != 0;
-    const b_sign: bool = (b_bits & sign_mask_d) != 0;
-    const product_sign: bool = a_sign != b_sign;
-    const product_infinite: bool = (a_magnitude == infinity_bits_d and b_magnitude != 0) or
-        (b_magnitude == infinity_bits_d and a_magnitude != 0);
-    const c_sign: bool = (c_bits & sign_mask_d) != 0;
-    if (product_infinite and
-        (c_magnitude == infinity_bits_d) and
-        (product_sign != c_sign))
-    {
-        return @bitCast(canonical_nan_bits_d);
-    }
-
-    // Otherwise, compute a*b + c with one rounding
-    return @mulAdd(f64, a, b, c);
+    // Otherwise, compute a*b + c with one rounding.
+    return fma_impl.fma64(a, b, c);
 }

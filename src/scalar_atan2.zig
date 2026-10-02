@@ -11,7 +11,7 @@
 
 const c23 = @import("scalar_c23_types.zig");
 
-extern fn cr_atan2f16(y: f16, x: f16) callconv(.c) f16;
+extern fn zmath_core_atan2h_bits(y: u16, x: u16) callconv(.c) u16;
 extern fn zmath_core_atan2f_finite(y: f32, x: f32) callconv(.c) f32;
 extern fn zmath_core_atan2d_checked(y: f64, x: f64, out: *f64) callconv(.c) c_int;
 extern fn zmath_core_atan2d_forced_ambiguity(y: f64, x: f64, out: *f64) callconv(.c) c_int;
@@ -133,7 +133,7 @@ pub fn atan2h(y: f16, x: f16) c23.Atan2Result(f16) {
     }
 
     if (x_magnitude == 0) return .{ .value = signedH(pi_over_two_bits_h, y_bits), .resolved = true };
-    return .{ .value = cr_atan2f16(y, x), .resolved = true };
+    return .{ .value = @bitCast(zmath_core_atan2h_bits(y_bits, x_bits)), .resolved = true };
 }
 
 /// Return an `Atan2Result(f32)` for correctly rounded atan2(y, x).

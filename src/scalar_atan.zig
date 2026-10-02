@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const sign_mask_h: u16 = 0x8000;
 const magnitude_mask_h: u16 = 0x7fff;
 const infinity_bits_h: u16 = 0x7c00;
@@ -85,22 +87,22 @@ pub fn atanh(value: f16) f16 {
         if (!do_reduce and reduced <= 0x1.d14p-6) {
             if (absolute_bits == 0) return value;
             const signed = sign * reduced;
-            return @floatCast(@mulAdd(f32, signed, -0x1p-23, signed));
+            return @floatCast(fma_impl.fma(signed, -0x1p-23, signed));
         }
         if (absolute_bits == 0x3e56_a000) return @floatCast(copySignF(0x1.a72002p-3, t_bits));
         if (absolute_bits == 0x4115_c000) return @floatCast(copySignF(0x1.76dffep+0, t_bits));
         if (absolute_bits == 0x42c3_2000) return @floatCast(copySignF(0x1.8f7ffep+0, t_bits));
 
-        const c5 = @mulAdd(f32, p0[3], square, p0[2]);
-        const c1 = @mulAdd(f32, p0[1], square, p0[0]);
-        const c1_adjusted = @mulAdd(f32, c5, square * square, c1);
+        const c5 = fma_impl.fma(p0[3], square, p0[2]);
+        const c1 = fma_impl.fma(p0[1], square, p0[0]);
+        const c1_adjusted = fma_impl.fma(c5, square * square, c1);
         y = reduced * c1_adjusted;
     } else {
         const p = if (reduced <= 0.5) p1 else if (reduced <= 0.75) p2 else p3;
-        const c3 = @mulAdd(f32, p[4], reduced, p[3]);
-        const c2 = @mulAdd(f32, c3, reduced, p[2]);
-        y = @mulAdd(f32, p[1], reduced, p[0]);
-        y = @mulAdd(f32, c2, square, y);
+        const c3 = fma_impl.fma(p[4], reduced, p[3]);
+        const c2 = fma_impl.fma(c3, reduced, p[2]);
+        y = fma_impl.fma(p[1], reduced, p[0]);
+        y = fma_impl.fma(c2, square, y);
     }
 
     if (do_reduce) y = 0x1.921fb6p+0 - y;
@@ -124,10 +126,10 @@ pub fn atanf(value: f32) f32 {
         if (exponent < 127 - 25) {
             if (magnitude == 0) return value;
             const absolute_value: f32 = @bitCast(magnitude);
-            return @mulAdd(f32, -value, absolute_value, value);
+            return fma_impl.fma(-value, absolute_value, value);
         }
         const linear_coefficient = -0x1.5555555555555p-2 * value;
-        return @mulAdd(f32, linear_coefficient, value * value, value);
+        return fma_impl.fma(linear_coefficient, value * value, value);
     }
 
     var z: f64 = @floatCast(value);
@@ -188,7 +190,7 @@ fn mulDoubleDoubleAcc(x_high: f64, x_low: f64, c_high: f64, c_low: f64, low: *f6
     const high_low = c_high * x_low;
     const low_high = c_low * x_high;
     const high_high = c_high * x_high;
-    const high_error = @mulAdd(f64, c_high, x_high, -high_high);
+    const high_error = fma_impl.fma64(c_high, x_high, -high_high);
     const middle = high_error + (low_high + high_low);
     return fastTwoSum(high_high, middle, low);
 }
@@ -408,19 +410,19 @@ fn atanRefine(value: f64, approximation: f64) f64 {
     var h_low: f64 = undefined;
     if (table_index == 128) {
         h = -1.0 / value;
-        h_low = @mulAdd(f64, h, value, 1.0) * h;
+        h_low = fma_impl.fma64(h, value, 1.0) * h;
     } else {
         const table_value = copySignD(atan_table[table_index][0], value_bits);
         const product = value * table_value;
-        const product_low = @mulAdd(f64, value, table_value, -product);
+        const product_low = fma_impl.fma64(value, table_value, -product);
         const difference = value - table_value;
         const sum = 1.0 + product;
         const delta = 1.0 - sum;
         const sum_error = (delta + product) - ((delta + sum) - 1.0) + product_low;
         const reciprocal = 1.0 / sum;
-        const reciprocal_low = (@mulAdd(f64, reciprocal, -sum, 1.0) - sum_error * reciprocal) * reciprocal;
+        const reciprocal_low = (fma_impl.fma64(reciprocal, -sum, 1.0) - sum_error * reciprocal) * reciprocal;
         h = reciprocal * difference;
-        h_low = @mulAdd(f64, reciprocal, difference, -h) + reciprocal_low * difference;
+        h_low = fma_impl.fma64(reciprocal, difference, -h) + reciprocal_low * difference;
     }
 
     var h_squared_low: f64 = undefined;
@@ -558,7 +560,7 @@ pub fn atand(value: f64) f64 {
     const coefficients = [_]f64{ 0x1p+0, -0x1.555555555552bp-2, 0x1.9999999069c2p-3, -0x1.248d2c8444ac6p-3 };
     const polynomial = (coefficients[0] + h_squared * coefficients[1]) +
         h_fourth * (coefficients[2] + h_squared * coefficients[3]);
-    low = @mulAdd(f64, h, polynomial, low);
+    low = fma_impl.fma64(h, polynomial, low);
     const error_bound = h * 0x3.fp-52;
     const upper = (low + error_bound) + high;
     const lower = (low - error_bound) + high;

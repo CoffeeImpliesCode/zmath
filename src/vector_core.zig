@@ -17,6 +17,17 @@
 //! layout. They are never `extern` or `packed`, so `@bitCast` and `@offsetOf`
 //! do not apply. Each field is assigned explicitly, never reinterpreted.
 //!
+//! Lanes are addressed by index, never reinterpreted. Every result element type
+//! here except `bool` is a whole number of bytes wide, so writing a result lane
+//! by lane puts each lane at its own offset and the result never depends on how
+//! a target lays a vector out in memory. A `@Vector(N, bool)` is the one
+//! exception: it holds one bit per lane, so its lanes are not byte-addressable
+//! and the in-memory form of the mask is a bit-packed value whose layout the
+//! language leaves undefined. `mapBinaryR`, the only helper that returns a
+//! mask, therefore stages the flags in byte lanes and builds the mask with one
+//! vector comparison, so the mask is produced as a single value instead of one
+//! packed bit at a time.
+//!
 //! Width is inferred from the argument, so one helper covers every
 //! `@Vector(N, T)`. A non-vector argument, a mismatched lane type, or mismatched
 //! argument types or widths are `@compileError` failures, never silent casts.
@@ -81,6 +92,18 @@ pub fn mapBinaryR(
     requireLaneType(@TypeOf(a), T);
     if (@TypeOf(b) != @TypeOf(a)) {
         @compileError("zmath vector binary operations require both arguments to have the same type");
+    }
+    // A `bool` result is the one element type whose lanes are not
+    // byte-addressable, so a mask filled lane by lane would depend on how the
+    // target packs the bits of a `@Vector(n, bool)`. Its flags go into byte
+    // lanes instead, which are ordinary lane assignments, and the mask itself
+    // comes out of one vector comparison, which produces it as a single value.
+    // Lane `i` of the mask is still the verdict the scalar kernel returned for
+    // lane `i` of `a` and `b`.
+    if (R == bool) {
+        var flags: @Vector(n, u8) = undefined;
+        inline for (0..n) |i| flags[i] = @as(u8, @intFromBool(f(a[i], b[i])));
+        return flags != @as(@Vector(n, u8), @splat(0));
     }
     var out: ResultVector(R, @TypeOf(a)) = undefined;
     inline for (0..n) |i| out[i] = f(a[i], b[i]);

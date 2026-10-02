@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_sinhh_data.zig");
 
 const sign_mask: u16 = 0x8000;
@@ -47,5 +49,5 @@ pub fn sinhh(value: f16) f16 {
     const cosh_1: f32 = @bitCast(data.c1[table_1_index]);
     const sinh_2: f32 = @bitCast(data.s2[table_2_index]);
     const cosh_2: f32 = @bitCast(data.c2[table_2_index]);
-    return @floatCast(@mulAdd(f32, sinh_1, cosh_2, cosh_1 * sinh_2));
+    return @floatCast(fma_impl.fma(sinh_1, cosh_2, cosh_1 * sinh_2));
 }

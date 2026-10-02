@@ -30,6 +30,8 @@ SOFTWARE.
 
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 /*
  * zmath has a caller-round-to-nearest contract.  Keep the CORE-MATH
  * nearest-even paths active while making directed-environment code inert.
@@ -67,40 +69,7 @@ static inline void fast_extract(int64_t *e, uint64_t *m, double x) {
 }
 
 
-/* __builtin_roundeven was introduced in gcc 10:
-   https://gcc.gnu.org/gcc-10/changes.html,
-   and in clang 17 */
-#if ((defined(__GNUC__) && __GNUC__ >= 10) || (defined(__clang__) && __clang_major__ >= 17)) && !defined(_MSC_VER) && (defined(__aarch64__) || defined(__x86_64__) || defined(__i386__))
-# define roundeven_finite(x) __builtin_roundeven (x)
-#else
-/* round x to nearest integer, breaking ties to even */
-static double
-roundeven_finite (double x)
-{
-  double ix;
-# if (defined(__GNUC__) || defined(__clang__)) && (defined(__AVX__) || defined(__SSE4_1__) || (__ARM_ARCH >= 8))
-#  if defined __AVX__
-   __asm__("vroundsd $0x8,%1,%1,%0":"=x"(ix):"x"(x));
-#  elif __ARM_ARCH >= 8
-   __asm__ ("frintn %d0, %d1":"=w"(ix):"w"(x));
-#  else /* __SSE4_1__ */
-   __asm__("roundsd $0x8,%1,%0":"=x"(ix):"x"(x));
-#  endif
-# else
-  ix = __builtin_round (x); /* nearest, away from 0 */
-  if (__builtin_fabs (ix - x) == 0.5)
-  {
-    /* if ix is odd, we should return ix-1 if x>0, and ix+1 if x<0 */
-    union { double f; uint64_t n; } u, v;
-    u.f = ix;
-    v.f = ix - __builtin_copysign (1.0, x);
-    if (__builtin_ctz (v.n) > __builtin_ctz (u.n))
-      ix = v.f;
-  }
-# endif
-  return ix;
-}
-#endif
+#include "coremath_roundeven.h"
 /*
   Utility functions
 */
@@ -154,7 +123,7 @@ static inline void fast_sum(double *hi, double *lo, double a, double bh,
 // Multiply exactly a and b, such that *hi + *lo = a * b.
 static inline void a_mul(double *hi, double *lo, double a, double b) {
   *hi = a * b;
-  *lo = __builtin_fma (a, b, -*hi);
+  *lo = zmath_fma (a, b, -*hi);
 }
 
 // Multiply a double with a double double : a * (bh + bl)
@@ -163,7 +132,7 @@ static inline void s_mul (double *hi, double *lo, double a, double bh,
   double s;
 
   a_mul (hi, &s, a, bh); /* exact */
-  *lo = __builtin_fma (a, bl, s);
+  *lo = zmath_fma (a, bl, s);
   /* the error is bounded by ulp(lo), where |lo| < |a*bl| + ulp(hi) */
 }
 
@@ -174,15 +143,15 @@ static inline void d_mul(double *hi, double *lo, double ah, double al,
   double s, t;
 
   a_mul(hi, &s, ah, bh);
-  t = __builtin_fma(al, bh, s);
-  *lo = __builtin_fma(ah, bl, t);
+  t = zmath_fma(al, bh, s);
+  *lo = zmath_fma(ah, bl, t);
 }
 
 static inline void d_square(double *hi, double *lo, double ah, double al) {
   double s, b = al + al;
 
   a_mul(hi, &s, ah, ah);
-  *lo = __builtin_fma(ah, b, s);
+  *lo = zmath_fma(ah, b, s);
 }
 
 static inline long dtoi(double x) { return (long)x; }

@@ -188,14 +188,14 @@ test "the scalar and vector grades form a commutative subalgebra" {
         scalar_and_vector[A.scalar_mask] = 1.5;
         for (0..A.dimension) |index| {
             const offset = if (A.metric[0] == 0) 1 else 0;
-            scalar_and_vector[@as(usize, 1) << @as(u6, @intCast(index + offset))] = 0.5;
+            scalar_and_vector[@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index + offset))] = 0.5;
         }
         const a = A.fromCoefficients(scalar_and_vector);
         var other = [_]A.element{0} ** A.coefficient_count;
         other[A.scalar_mask] = 0.25;
         for (0..A.dimension) |index| {
             const offset = if (A.metric[0] == 0) 1 else 0;
-            other[@as(usize, 1) << @as(u6, @intCast(index + offset))] = 1;
+            other[@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index + offset))] = 1;
         }
         const b = A.fromCoefficients(other);
         try expectCoefficients(A, A.geometricProduct(a, b), A.geometricProduct(b, a));
@@ -438,7 +438,7 @@ test "the scalar form is symmetric and is the dot product on vectors" {
 fn bladeIndexList(comptime A: type, mask: usize, out: *[A.basis_count]usize) usize {
     var length: usize = 0;
     for (0..A.basis_count) |index| {
-        if (mask & (@as(usize, 1) << @as(u6, @intCast(index))) != 0) {
+        if (mask & (@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index))) != 0) {
             out[length] = index;
             length += 1;
         }
@@ -660,7 +660,7 @@ test "the embedding round trips the Euclidean part" {
         const recovered = embedded.sub(A.n_o()).sub(A.n_inf().scale(squared / 2));
         var expected = [_]A.element{0} ** A.coefficient_count;
         for (x, 0..) |value, index| {
-            expected[@as(usize, 1) << @as(u6, @intCast(index))] = value;
+            expected[@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index))] = value;
         }
         try expectCoefficients(A, A.fromCoefficients(expected), recovered);
     }
@@ -684,13 +684,13 @@ test "the projective point blade multiplies a position into the null direction" 
         };
         var position = [_]A.element{0} ** A.coefficient_count;
         for (x, 0..) |value, index| {
-            position[@as(usize, 1) << @as(u6, @intCast(index + 1))] = value;
+            position[@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index + 1))] = value;
         }
         const p = A.point(x);
         // The point blade stores the position in the e0 wedge ei components and
         // has no scalar and no vector part.
         for (x, 0..) |value, index| {
-            const mask = @as(usize, 1) | (@as(usize, 1) << @as(u6, @intCast(index + 1)));
+            const mask = @as(usize, 1) | (@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index + 1)));
             try testing.expectEqual(value, p.bladeValue(mask));
         }
         try testing.expectEqual(@as(A.element, 0), p.grade(0));
@@ -804,6 +804,34 @@ test "the checked forms reject zero and non-finite input" {
         try testing.expect(!broken.isFinite());
         try testing.expect(broken.normalized() == null);
         try testing.expect(broken.inverseChecked() == null);
+    }
+}
+
+test "the binary64 inverse of a huge versor keeps its subnormal reciprocal" {
+    // The sandwich scalar of `k * (1 + b)`, for a bivector `b` over two metric
+    // `+1` directions, is exactly `2 * k^2`, so `k = 2^511` puts it at `2^1023`,
+    // the last power of two binary64 holds below its overflow. Both inverses
+    // then divide by `2^-1023`, which is subnormal: a soft-float binary64
+    // divide answers a signed zero there, and every coefficient of the answer
+    // goes with it.
+    const k: f64 = 0x1p+511;
+    const reciprocal: f64 = 0x1p-1023;
+    inline for (.{
+        algebra.Cl3d,
+        algebra.Cl4d,
+        algebra.Pga3d,
+        algebra.Pga4d,
+        algebra.Cga3d,
+        algebra.Cga4d,
+    }) |A| {
+        // `0b0110` is a Euclidean bivector in every family, including `Pga`,
+        // whose leading null direction it deliberately skips.
+        const huge = A.one().add(bladeOf(A, 0b0110)).scale(k);
+        const expected = huge.conjugate().scale(reciprocal);
+        const checked = huge.inverseChecked() orelse return error.InverseRejected;
+        try expectCoefficients(A, expected, checked);
+        try expectCoefficients(A, A.one(), A.geometricProduct(huge, checked));
+        try expectCoefficients(A, expected, huge.inverse());
     }
 }
 

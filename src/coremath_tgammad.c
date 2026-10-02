@@ -26,45 +26,14 @@ SOFTWARE.
 
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #endif
 
-/* __builtin_roundeven was introduced in gcc 10:
-   https://gcc.gnu.org/gcc-10/changes.html,
-   and in clang 17 */
-#if ((defined(__GNUC__) && __GNUC__ >= 10) || (defined(__clang__) && __clang_major__ >= 17)) && !defined(_MSC_VER) && (defined(__aarch64__) || defined(__x86_64__) || defined(__i386__))
-# define roundeven_finite(x) __builtin_roundeven (x)
-#else
-/* round x to nearest integer, breaking ties to even */
-static double
-roundeven_finite (double x)
-{
-  double ix;
-# if (defined(__GNUC__) || defined(__clang__)) && (defined(__AVX__) || defined(__SSE4_1__) || (__ARM_ARCH >= 8))
-#  if defined __AVX__
-   __asm__("vroundsd $0x8,%1,%1,%0":"=x"(ix):"x"(x));
-#  elif __ARM_ARCH >= 8
-   __asm__ ("frintn %d0, %d1":"=w"(ix):"w"(x));
-#  else /* __SSE4_1__ */
-   __asm__("roundsd $0x8,%1,%0":"=x"(ix):"x"(x));
-#  endif
-# else
-  ix = __builtin_round (x); /* nearest, away from 0 */
-  if (__builtin_fabs (ix - x) == 0.5)
-  {
-    /* if ix is odd, we should return ix-1 if x>0, and ix+1 if x<0 */
-    union { double f; uint64_t n; } u, v;
-    u.f = ix;
-    v.f = ix - __builtin_copysign (1.0, x);
-    if (__builtin_ctz (v.n) > __builtin_ctz (u.n))
-      ix = v.f;
-  }
-# endif
-  return ix;
-}
-#endif
+#include "coremath_roundeven.h"
 
 typedef unsigned short ushort;
 typedef uint64_t u64;
@@ -100,12 +69,12 @@ static inline double twosum(double x, double y, double *e){
 
 static inline double muldd(double xh, double xl, double ch, double cl, double *l){
   double ahhh = ch*xh;
-  *l = (ch*xl + cl*xh) + __builtin_fma(ch, xh, -ahhh);
+  *l = (ch*xl + cl*xh) + zmath_fma(ch, xh, -ahhh);
   return ahhh;
 }
 
 static inline double muldd3(double xh, double xl, double yh, double yl, double *l){
-  double ch = xh*yh, cl1 = __builtin_fma(xh,yh,-ch);
+  double ch = xh*yh, cl1 = zmath_fma(xh,yh,-ch);
   double tl0 = xl*yl;
   double tl1 = tl0 + xh*yl;
   double cl2 = tl1 + xl*yh;
@@ -115,7 +84,7 @@ static inline double muldd3(double xh, double xl, double yh, double yl, double *
 
 static inline double mulddd(double x, double ch, double cl, double *l){
   double ahhh = ch*x;
-  *l = cl*x + __builtin_fma(ch, x, -ahhh);
+  *l = cl*x + zmath_fma(ch, x, -ahhh);
   return ahhh;
 }
 
@@ -170,7 +139,7 @@ static inline double splt(double x, double *xl){
 // multiplies x by x0+x1+x2 where x1 <~ ulp(x0) and x2 <~ ulp(x1)
 // and return the result as l0+l1+l2 where l0 is the return value
 static inline double sprod(double x, double x0, double x1, double x2, double *l1, double *l2){
-  double z0 = x*x0, z0l = __builtin_fma(x,x0,-z0), z1 = x*x1, z2 = x*x2 + __builtin_fma(x,x1,-z1), e;
+  double z0 = x*x0, z0l = zmath_fma(x,x0,-z0), z1 = x*x1, z2 = x*x2 + zmath_fma(x,x1,-z1), e;
   z0 = splt(z0, &e);
   e = fasttwosum(e, z0l, &z0l);
   *l1 = twosum(e, z1, &e);
@@ -307,7 +276,7 @@ static __attribute__((noinline)) double as_tgamma_accurate(double x){
     c0 += x4*c4;
     
     double cl = x*c0, ch = polyddd(x, 28, cc, &cl);
-    double fh = 1.0/x, dh = __builtin_fma(fh,-x,1.0), fl = dh*fh, fll = __builtin_fma(fl,-x,dh)*fh;
+    double fh = 1.0/x, dh = zmath_fma(fh,-x,1.0), fl = dh*fh, fll = zmath_fma(fl,-x,dh)*fh;
     fl = sumdd(fl,fll, ch,cl, &fll);
     fl = twosum(fl,fll, &fll);
     fh = fasttwosum(fh,fl, &fl);
@@ -572,7 +541,7 @@ static __attribute__((noinline)) double as_tgamma_accurate(double x){
   }
 
   if(jm>0){
-    double rh = 1.0/wh, rl = (__builtin_fma(rh,-wh,1.0) - wl*rh)*rh;
+    double rh = 1.0/wh, rl = (zmath_fma(rh,-wh,1.0) - wl*rh)*rh;
     fh = muldd3(fh,fl, rh,rl, &fl);
   } else if(jm<0){
     fh = muldd3(fh,fl, wh,wl, &fl);
@@ -622,7 +591,7 @@ double cr_tgamma_finite(double x){
       }
       r = 1/x;
       // the following raises the inexact flag in case x=2^k
-      if (__builtin_expect(__builtin_fma (r, x, -1.0) == 0, 0)) r -= 0.5;
+      if (__builtin_expect(zmath_fma (r, x, -1.0) == 0, 0)) r -= 0.5;
       /* gamma(x) ~ 1/x - euler_gamma near x=0, thus we should raise the
          inexact exception even for x = 2^k.
          More precisely gamma(x) overflows:
@@ -649,7 +618,7 @@ double cr_tgamma_finite(double x){
     c8 += x4*c12;
     double cl = x*(c0 + x8*c8);
     double ch = polyddd(x, 5, cc, &cl);
-    double fh = 1.0/z, fl = __builtin_fma(fh,-z,1.0)*fh;
+    double fh = 1.0/z, fl = zmath_fma(fh,-z,1.0)*fh;
     fh = fastsum(fh,fl, ch,cl, &fl);
     double eps = fh*(3.5e-19 + (x2*x4)*4e-15);
     // revision 221543c fails with 0.152*eps and x=-0x1.d098fca069c16p-3 (rndu)
@@ -688,7 +657,7 @@ double cr_tgamma_finite(double x){
     double sl, sh = as_sinpid(dx, &sl);
     lh = muldd(sh,sl, lh,ll, &ll);
     const double pih = 0x1.921fb54442d18p+1, pil = 0x1.1a62633145c07p-53;
-    double rcp = 1/lh, rh = rcp*pih, rl = rcp*(pil - ll*rh - __builtin_fma(rh,lh,-pih));
+    double rcp = 1/lh, rh = rcp*pih, rl = rcp*(pil - ll*rh - zmath_fma(rh,lh,-pih));
     if(ip&1) {
       rh = -rh;
       rl = -rl;
@@ -755,7 +724,7 @@ double cr_tgamma_finite(double x){
     0x1.c9e94992c88c1p-9, 0x1.90ba7276a0c19p-11, 0x1.49cfed9d63c8bp-13, 0x1.ec018849c245bp-16,
     0x1.65e5a18d31c17p-18, 0x1.ca1890add8727p-21, 0x1.378b3b91f9033p-23, 0x1.432cdb3640fcap-26,
     0x1.f239fc9cf2155p-29, 0x1.e3ea4e1366932p-33};
-  double m = z - 3.5, i = roundeven_finite(m);
+  double m = z - 3.5, i = zmath_roundeven_finite(m);
   double d = z - (i + 3.5);
   double d2 = d*d, d4 = d2*d2;
   double fl = d*((c[10] + d*c[11]) + d2*(c[12] + d*c[13]) + d4*((c[14] + d*c[15]) + d2*(c[16] + d*c[17])));
@@ -776,7 +745,7 @@ double cr_tgamma_finite(double x){
       wh = muldd(xph,xpl,wh,wl,&wl);
     }
   }
-  double rh = 1.0/wh, rl = (__builtin_fma(rh,-wh,1.0) - wl*rh)*rh;
+  double rh = 1.0/wh, rl = (zmath_fma(rh,-wh,1.0) - wl*rh)*rh;
   fh = muldd(rh,rl,fh,fl,&fl);
   double eps = fh*1e-21;
   // revision 221543c fails for 0.925*eps with x=0x1.80ea59ee2340dp+1 (rndu)
@@ -851,9 +820,9 @@ double as_logd(double x, double *l){
   t.u |= (int64_t)0x3ff<<52;
   int i1 = j>>5, i2 = j&0x1f;
   double r = r1[i1]*r2[i2];
-  double o = r*t.f, dxl = __builtin_fma(r,t.f,-o), dxh = o-1;
+  double o = r*t.f, dxl = zmath_fma(r,t.f,-o), dxh = o-1;
   static const double c[] = {-0x1.fffffffffffd3p-2, 0x1.55555555543d5p-2, -0x1.000002bb2d74ep-2, 0x1.999a692c56e4ep-3};
-  double dx = __builtin_fma(r,t.f,-1), dx2 = dx*dx;
+  double dx = zmath_fma(r,t.f,-1), dx2 = dx*dx;
   double f = dx2*((c[0] + dx*c[1]) + dx2*(c[2] + dx*c[3]));
   double lt = (l1[i1][1] + l2[i2][1]) + ed*0x1.62e42fef8p-1;
   double lh = lt + dxh, ll = (lt - lh) + dxh;
@@ -902,7 +871,7 @@ static double as_sinpid(double x, double *l){
   x -= 0.5;
   x = __builtin_fabs(x);
   x *= 128;
-  double ix = roundeven_finite(x), d = ix-x, d2 = d*d;
+  double ix = zmath_roundeven_finite(x), d = ix-x, d2 = d*d;
   int ky = ix, kx = 64-ky;
   
   double sh = st[kx][1], sl = st[kx][0];
@@ -964,7 +933,7 @@ static double as_expd(double x, double *l, int *e){
   const double ln2h = 0x1.71547652b82fep+10, ln2l = 0x1.777d0ffda0d24p-46;
   double xh = x, xl = *l; 
   xh = muldd(xh,xl, ln2h,ln2l, &xl);
-  double ix = roundeven_finite(xh);
+  double ix = zmath_roundeven_finite(xh);
   xh = fasttwosum(xh-ix, xl, &xl);
   int k = ix, i0 = (k>>5)&31, i1 = k&31;
   *e = k>>10;
@@ -986,7 +955,7 @@ static double as_expd(double x, double *l, int *e){
 }
 
 static double as_lgamma_asym(double xh, double *xl){
-  double zh = 1.0/xh, dz = *xl*zh, zl = (__builtin_fma(zh,-xh,1.0) - dz)*zh;
+  double zh = 1.0/xh, dz = *xl*zh, zl = (zmath_fma(zh,-xh,1.0) - dz)*zh;
   double ll, lh = as_logd(xh, &ll); ll += dz;
   lh = muldd(xh-0.5, *xl, lh-1,ll, &ll);
   double z2l, z2h = muldd(zh,zl,zh,zl, &z2l);

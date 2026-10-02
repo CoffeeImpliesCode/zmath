@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const sign_mask: u32 = 0x8000_0000;
 const magnitude_mask: u32 = 0x7fff_ffff;
 const infinity_bits: u32 = 0x7f80_0000;
@@ -101,8 +103,7 @@ pub fn exp10m1f(value: f32) f32 {
                                             return @as(f32, 0x1.60f974p-37) -
                                                 @as(f32, 0x1p-90);
                                         }
-                                        result_wide = @mulAdd(
-                                            f64,
+                                        result_wide = fma_impl.fma64(
                                             value_wide,
                                             0x1.53524c73cea69p+1,
                                             0x1.26bb1bbb55516p+1,
@@ -113,14 +114,12 @@ pub fn exp10m1f(value: f32) f32 {
                                         return -@as(f32, 0x1.1ff87ep-16) +
                                             @as(f32, 0x1p-68);
                                     }
-                                    const inner = @mulAdd(
-                                        f64,
+                                    const inner = fma_impl.fma64(
                                         value_wide,
                                         0x1.0470591de2c75p+1,
                                         0x1.53524c73cea62fp+1,
                                     );
-                                    result_wide = @mulAdd(
-                                        f64,
+                                    result_wide = fma_impl.fma64(
                                         value_wide,
                                         inner,
                                         0x1.26bb1bbb55516p+1,
@@ -133,9 +132,9 @@ pub fn exp10m1f(value: f32) f32 {
                                     0x1.0470595038cc2p+1,
                                     0x1.2bd7609fe1561p+0,
                                 };
-                                const low = @mulAdd(f64, value_wide, cp[1], cp[0]);
-                                const high = @mulAdd(f64, value_wide, cp[3], cp[2]);
-                                result_wide = @mulAdd(f64, squared, high, low);
+                                const low = fma_impl.fma64(value_wide, cp[1], cp[0]);
+                                const high = fma_impl.fma64(value_wide, cp[3], cp[2]);
+                                result_wide = fma_impl.fma64(squared, high, low);
                             }
                         } else {
                             const cp = [5]f64{
@@ -145,10 +144,10 @@ pub fn exp10m1f(value: f32) f32 {
                                 0x1.2bd76b79060e6p+0,
                                 0x1.1429ffd3a963dp-1,
                             };
-                            const low = @mulAdd(f64, value_wide, cp[1], cp[0]);
-                            const tail = @mulAdd(f64, value_wide, cp[4], cp[3]);
-                            const high = @mulAdd(f64, value_wide, tail, cp[2]);
-                            result_wide = @mulAdd(f64, squared, high, low);
+                            const low = fma_impl.fma64(value_wide, cp[1], cp[0]);
+                            const tail = fma_impl.fma64(value_wide, cp[4], cp[3]);
+                            const high = fma_impl.fma64(value_wide, tail, cp[2]);
+                            result_wide = fma_impl.fma64(squared, high, low);
                         }
                     } else {
                         const cp = [6]f64{
@@ -159,11 +158,11 @@ pub fn exp10m1f(value: f32) f32 {
                             0x1.142a85da6f072p-1,
                             0x1.a7ed70725b00ep-3,
                         };
-                        const low = @mulAdd(f64, value_wide, cp[1], cp[0]);
-                        const middle = @mulAdd(f64, value_wide, cp[3], cp[2]);
-                        const high = @mulAdd(f64, value_wide, cp[5], cp[4]);
-                        const upper = @mulAdd(f64, squared, high, middle);
-                        result_wide = @mulAdd(f64, squared, upper, low);
+                        const low = fma_impl.fma64(value_wide, cp[1], cp[0]);
+                        const middle = fma_impl.fma64(value_wide, cp[3], cp[2]);
+                        const high = fma_impl.fma64(value_wide, cp[5], cp[4]);
+                        const upper = fma_impl.fma64(squared, high, middle);
+                        result_wide = fma_impl.fma64(squared, upper, low);
                     }
                 } else {
                     const cp = [7]f64{
@@ -175,12 +174,12 @@ pub fn exp10m1f(value: f32) f32 {
                         0x1.a7f2a6a0f7dc8p-3,
                         0x1.16e4dfbce0f56p-4,
                     };
-                    const low = @mulAdd(f64, value_wide, cp[1], cp[0]);
-                    const middle = @mulAdd(f64, value_wide, cp[3], cp[2]);
-                    const tail = @mulAdd(f64, value_wide, cp[6], cp[5]);
-                    const high = @mulAdd(f64, value_wide, tail, cp[4]);
-                    const upper = @mulAdd(f64, squared, high, middle);
-                    result_wide = @mulAdd(f64, squared, upper, low);
+                    const low = fma_impl.fma64(value_wide, cp[1], cp[0]);
+                    const middle = fma_impl.fma64(value_wide, cp[3], cp[2]);
+                    const tail = fma_impl.fma64(value_wide, cp[6], cp[5]);
+                    const high = fma_impl.fma64(value_wide, tail, cp[4]);
+                    const upper = fma_impl.fma64(squared, high, middle);
+                    result_wide = fma_impl.fma64(squared, upper, low);
                 }
             } else {
                 const cp = [8]f64{
@@ -194,13 +193,13 @@ pub fn exp10m1f(value: f32) f32 {
                     0x1.4116b0388aa9fp-6,
                 };
                 const fourth = squared * squared;
-                const low_0 = @mulAdd(f64, value_wide, cp[1], cp[0]);
-                const low_2 = @mulAdd(f64, value_wide, cp[3], cp[2]);
-                const low = @mulAdd(f64, squared, low_2, low_0);
-                const high_0 = @mulAdd(f64, value_wide, cp[5], cp[4]);
-                const high_2 = @mulAdd(f64, value_wide, cp[7], cp[6]);
-                const high = @mulAdd(f64, squared, high_2, high_0);
-                result_wide = @mulAdd(f64, fourth, high, low);
+                const low_0 = fma_impl.fma64(value_wide, cp[1], cp[0]);
+                const low_2 = fma_impl.fma64(value_wide, cp[3], cp[2]);
+                const low = fma_impl.fma64(squared, low_2, low_0);
+                const high_0 = fma_impl.fma64(value_wide, cp[5], cp[4]);
+                const high_2 = fma_impl.fma64(value_wide, cp[7], cp[6]);
+                const high = fma_impl.fma64(squared, high_2, high_0);
+                result_wide = fma_impl.fma64(fourth, high, low);
             }
         } else {
             const cp = [9]f64{
@@ -215,14 +214,14 @@ pub fn exp10m1f(value: f32) f32 {
                 0x1.4897c4b3e329ap-8,
             };
             const fourth = squared * squared;
-            const low_0 = @mulAdd(f64, value_wide, cp[1], cp[0]);
-            const low_2 = @mulAdd(f64, value_wide, cp[3], cp[2]);
-            const low = @mulAdd(f64, squared, low_2, low_0);
-            const high_0 = @mulAdd(f64, value_wide, cp[5], cp[4]);
-            const high_tail = @mulAdd(f64, value_wide, cp[8], cp[7]);
-            const high_2 = @mulAdd(f64, value_wide, high_tail, cp[6]);
-            const high = @mulAdd(f64, squared, high_2, high_0);
-            result_wide = @mulAdd(f64, fourth, high, low);
+            const low_0 = fma_impl.fma64(value_wide, cp[1], cp[0]);
+            const low_2 = fma_impl.fma64(value_wide, cp[3], cp[2]);
+            const low = fma_impl.fma64(squared, low_2, low_0);
+            const high_0 = fma_impl.fma64(value_wide, cp[5], cp[4]);
+            const high_tail = fma_impl.fma64(value_wide, cp[8], cp[7]);
+            const high_2 = fma_impl.fma64(value_wide, high_tail, cp[6]);
+            const high = fma_impl.fma64(squared, high_2, high_0);
+            result_wide = fma_impl.fma64(fourth, high, low);
         }
         result_wide *= value_wide;
         return @floatCast(result_wide);
@@ -245,7 +244,7 @@ pub fn exp10m1f(value: f32) f32 {
     const log2_10_low: f64 = 0x1.e68dc57f2496p-29 * 16.0;
     const scaled = log2_10_high * value_wide;
     const integral = @floor(scaled);
-    const remainder = @mulAdd(f64, log2_10_low, value_wide, scaled - integral);
+    const remainder = fma_impl.fma64(log2_10_low, value_wide, scaled - integral);
     // The finite guards bound integral to [-400, 2047]. The bias sum is exact,
     // and its low 32 encoding bits hold the signed integer in two's complement.
     const integral_bits: u64 = @bitCast(integral + 0x1.8p52);
@@ -258,16 +257,15 @@ pub fn exp10m1f(value: f32) f32 {
     const scale: f64 = @bitCast(table_bits +% exponent_bits);
 
     const remainder_squared = remainder * remainder;
-    const c0 = @mulAdd(f64, remainder, coefficients[1], coefficients[0]);
-    const c2 = @mulAdd(f64, remainder, coefficients[3], coefficients[2]);
-    const c4 = @mulAdd(f64, remainder, coefficients[5], coefficients[4]);
-    const polynomial = @mulAdd(
-        f64,
+    const c0 = fma_impl.fma64(remainder, coefficients[1], coefficients[0]);
+    const c2 = fma_impl.fma64(remainder, coefficients[3], coefficients[2]);
+    const c4 = fma_impl.fma64(remainder, coefficients[5], coefficients[4]);
+    const polynomial = fma_impl.fma64(
         remainder_squared,
-        @mulAdd(f64, remainder_squared, c4, c2),
+        fma_impl.fma64(remainder_squared, c4, c2),
         c0,
     );
     const correction = scale * remainder;
-    const result_wide = @mulAdd(f64, correction, polynomial, scale - 1.0);
+    const result_wide = fma_impl.fma64(correction, polynomial, scale - 1.0);
     return @floatCast(result_wide);
 }

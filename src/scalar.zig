@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const c23_types = @import("scalar_c23_types.zig");
 pub const FromFpRound = c23_types.FromFpRound;
 pub const IntegerResult = c23_types.IntegerResult;
@@ -1054,7 +1056,7 @@ pub fn sinh(value: f16) f16 {
     const cos_x1: f32 = @bitCast(sinh_data.c1[table1_index]);
     const sin_x2: f32 = @bitCast(sinh_data.s2[table2_index]);
     const cos_x2: f32 = @bitCast(sinh_data.c2[table2_index]);
-    const result = @mulAdd(f32, sin_x1, cos_x2, cos_x1 * sin_x2);
+    const result = fma_impl.fma(sin_x1, cos_x2, cos_x1 * sin_x2);
     return @floatCast(result);
 }
 // Correctly rounded cosine for binary16 values.
@@ -1102,7 +1104,7 @@ pub fn cosh(value: f16) f16 {
     const cos_x1: f32 = @bitCast(cosh_data.c1[table1_index]);
     const minus_sin_x2: f32 = @bitCast(cosh_data.s2[table2_index]);
     const cos_x2: f32 = @bitCast(cosh_data.c2[table2_index]);
-    const result = @mulAdd(f32, cos_x1, cos_x2, sin_x1 * minus_sin_x2);
+    const result = fma_impl.fma(cos_x1, cos_x2, sin_x1 * minus_sin_x2);
     return @floatCast(result);
 }
 
@@ -1406,9 +1408,9 @@ pub fn expf(value: f32) f32 {
     const exponent_bits = (rounded_bits >> 6) << 52;
     const scale_bits = expf_scale_bits[table_index] +% exponent_bits;
     const scale: f64 = @bitCast(scale_bits);
-    var polynomial = @mulAdd(f64, expf_fast_coefficients[3], reduced, expf_fast_coefficients[2]);
-    polynomial = @mulAdd(f64, polynomial, reduced, expf_fast_coefficients[1]);
-    polynomial = @mulAdd(f64, polynomial, reduced, expf_fast_coefficients[0]);
+    var polynomial = fma_impl.fma64(expf_fast_coefficients[3], reduced, expf_fast_coefficients[2]);
+    polynomial = fma_impl.fma64(polynomial, reduced, expf_fast_coefficients[1]);
+    polynomial = fma_impl.fma64(polynomial, reduced, expf_fast_coefficients[0]);
     const result = polynomial * scale;
     // Horner changes the original evaluation by less than 16u, u=2^-53.
     // Its total relative error remains below 2^-32. Every binary32
@@ -1632,7 +1634,7 @@ fn expdMultiplyDoubleDouble(
     c_low: f64,
 ) ExpdDoubleDouble {
     const high = c_high * x_high;
-    const low = (c_high * x_low + c_low * x_high) + @mulAdd(f64, c_high, x_high, -high);
+    const low = (c_high * x_low + c_low * x_high) + fma_impl.fma64(c_high, x_high, -high);
     return .{ .high = high, .low = low };
 }
 
@@ -1644,9 +1646,9 @@ fn expdFastFmaDoubleWord(
     c_high: f64,
     c_low: f64,
 ) ExpdDoubleDouble {
-    const high = @mulAdd(f64, a_high, b_high, c_high);
+    const high = fma_impl.fma64(a_high, b_high, c_high);
     const correction = c_high - high;
-    const product_error = @mulAdd(f64, a_high, b_high, correction);
+    const product_error = fma_impl.fma64(a_high, b_high, correction);
     const combined_error = product_error + c_low;
     const cross = a_high * b_low + combined_error;
     const low = a_low * b_high + cross;
@@ -1753,7 +1755,7 @@ fn expdAccurate(value: f64) f64 {
     const log2_tail = 0x1.9ff0342542fc3p-102;
     const reduced = value - log2_high * reduction;
     var reduced_low = log2_low * reduction;
-    const reduced_tail = log2_tail * reduction + @mulAdd(f64, log2_low, reduction, -reduced_low);
+    const reduced_tail = log2_tail * reduction + fma_impl.fma64(log2_low, reduction, -reduced_low);
     const reduced_high = reduced + reduced_low;
     reduced_low = (reduced - reduced_high) + reduced_low + reduced_tail;
 
@@ -2351,7 +2353,7 @@ pub fn cosf(value: f32) f32 {
         @branchHint(.unlikely);
         if (absolute_bits < 0x7400_0000) {
             if (absolute_bits <= 0x7300_0000) return 1.0;
-            return 0.5 * @mulAdd(f32, value, -value, 2.0);
+            return 0.5 * fma_impl.fma(value, -value, 2.0);
         }
         if (absolute_bits >= 0xff00_0000) {
             if ((absolute_bits << 8) != 0) return @bitCast(bits | 0x0040_0000);
@@ -2363,9 +2365,9 @@ pub fn cosf(value: f32) f32 {
     if (absolute_bits <= 0x7d00_0000) {
         const value_wide: f64 = value;
         const square = value_wide * value_wide;
-        var polynomial = @mulAdd(f64, -0x1.6c16c16c16c17p-10, square, 0x1.5555555555555p-5);
-        polynomial = @mulAdd(f64, polynomial, square, -0.5);
-        const approximation = @mulAdd(f64, polynomial, square, 1.0);
+        var polynomial = fma_impl.fma64(-0x1.6c16c16c16c17p-10, square, 0x1.5555555555555p-5);
+        polynomial = fma_impl.fma64(polynomial, square, -0.5);
+        const approximation = fma_impl.fma64(polynomial, square, 1.0);
         // On 2^-11 <= |x| <= 1/4, the degree-six remainder plus all
         // rounding error is below 2^-31. The result lies in [1/2, 1),
         // so this is 2^22 binary64 ulps around a binary32 midpoint.

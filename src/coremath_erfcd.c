@@ -41,7 +41,8 @@ SOFTWARE.
        Cambridge University Press, 2011.
 */
 
-#include <stdint.h>
+#include "coremath_fma.h"
+#include "coremath_roundeven.h"
 
 /*
  * zmath keeps the caller's nearest-even mode as a precondition and does not
@@ -228,7 +229,7 @@ static inline void two_sum(double *hi, double *lo, double a, double b) {
 
 static inline void a_mul(double *hi, double *lo, double a, double b) {
   *hi = a * b;
-  *lo = __builtin_fma (a, b, -*hi);
+  *lo = zmath_fma (a, b, -*hi);
 }
 
 /* Assuming 0 <= z <= 0x1.7afb48dc96626p+2, put in h+l an approximation
@@ -245,19 +246,19 @@ cr_erf_fast (double *h, double *l, double z)
     const double square = z * z;
     const double cubic = z * square;
     double polynomial = 0x1.f9a326f9b89b7p-14;
-    polynomial = __builtin_fma (polynomial, square,
+    polynomial = zmath_fma (polynomial, square,
                                 -0x1.c02db40040b86p-11);
-    polynomial = __builtin_fma (polynomial, square,
+    polynomial = zmath_fma (polynomial, square,
                                 0x1.565bcd0e6a53fp-8);
-    polynomial = __builtin_fma (polynomial, square,
+    polynomial = zmath_fma (polynomial, square,
                                 -0x1.b82ce31288b51p-6);
-    polynomial = __builtin_fma (polynomial, square,
+    polynomial = zmath_fma (polynomial, square,
                                 0x1.ce2f21a042be2p-4);
-    polynomial = __builtin_fma (polynomial, square,
+    polynomial = zmath_fma (polynomial, square,
                                 -0x1.812746b0379e7p-2);
     const double linear = CH * z;
     const double linear_low =
-      __builtin_fma (CL, z, __builtin_fma (CH, z, -linear));
+      zmath_fma (CL, z, zmath_fma (CH, z, -linear));
     const double correction = linear_low + cubic * polynomial;
     /* Normalize before the 1 +/- erf transforms. On this interval h > z.
        The degree-15 Taylor tail is below 2^-10*u*z^3. Coefficient,
@@ -273,12 +274,12 @@ cr_erf_fast (double *h, double *l, double z)
   z = (z - 0.03125) - 0.0625 * (double)i;
   const double *c = C[i-1];
   double z2 = z*z, z4 = z2*z2;
-  double c9 = __builtin_fma (c[12], z, c[11]);
-  double c7 = __builtin_fma (c[10], z, c[9]);
-  double c5 = __builtin_fma (c[8], z, c[7]);
+  double c9 = zmath_fma (c[12], z, c[11]);
+  double c7 = zmath_fma (c[10], z, c[9]);
+  double c5 = zmath_fma (c[8], z, c[7]);
   double c3h, c3l;
   fast_two_sum (&c3h, &c3l, c[5], z * c[6]);
-  c7 = __builtin_fma (c9, z2, c7);
+  c7 = zmath_fma (c9, z2, c7);
   fast_two_sum (&c3h, &tl, c3h, c5 * z2);
   c3l += tl;
   fast_two_sum (&c3h, &tl, c3h, c7 * z4);
@@ -286,12 +287,12 @@ cr_erf_fast (double *h, double *l, double z)
   double c2h, c2l;
   a_mul (&th, &tl, z, c3h);
   fast_two_sum (&c2h, &c2l, c[4], th);
-  c2l += __builtin_fma (z, c3l, tl);
+  c2l += zmath_fma (z, c3l, tl);
   a_mul (&th, &tl, z, c2h);
   fast_two_sum (h, l, c[2], th);
-  *l += tl + __builtin_fma (z, c2l, c[3]);
+  *l += tl + zmath_fma (z, c2l, c[3]);
   a_mul (&th, &tl, z, *h);
-  tl = __builtin_fma (z, *l, tl); /* tl += z*l */
+  tl = zmath_fma (z, *l, tl); /* tl += z*l */
   fast_two_sum (h, l, c[0], th);
   *l += tl + c[1];
   return 0x1.11p-69;
@@ -318,15 +319,15 @@ cr_erf_accurate_tiny (double *h, double *l, double z)
   double z2 = z * z, th, tl;
   *h = p[21/2+4]; /* degree 21 */
   for (int j = 19; j > 11; j-=2)
-    *h = __builtin_fma (*h, z2, p[j/2+4]); /* degree j */
+    *h = zmath_fma (*h, z2, p[j/2+4]); /* degree j */
   *l = 0;
   for (int j = 11; j > 7; j-=2)
   {
     /* multiply h+l by z^2 */
     a_mul (&th, &tl, *h, z);
-    tl = __builtin_fma (*l, z, tl);
+    tl = zmath_fma (*l, z, tl);
     a_mul (h, l, th, z);
-    *l = __builtin_fma (tl, z, *l);
+    *l = zmath_fma (tl, z, *l);
     /* add p[j] to h + l */
     fast_two_sum (h, &tl, p[j/2+4], *h);
     *l += tl;
@@ -335,15 +336,15 @@ cr_erf_accurate_tiny (double *h, double *l, double z)
   {
     /* multiply h+l by z^2 */
     a_mul (&th, &tl, *h, z);
-    tl = __builtin_fma (*l, z, tl);
+    tl = zmath_fma (*l, z, tl);
     a_mul (h, l, th, z);
-    *l = __builtin_fma (tl, z, *l);
+    *l = zmath_fma (tl, z, *l);
     fast_two_sum (h, &tl, p[j-1], *h);
     *l += p[j] + tl;
   }
   /* multiply by z */
   a_mul (h, &tl, *h, z);
-  *l = __builtin_fma (*l, z, tl);
+  *l = zmath_fma (*l, z, tl);
   return;
 }
 
@@ -414,20 +415,20 @@ cr_erf_accurate (double *h, double *l, double z)
   double th, tl;
   if (z < 0.125) /* z < 1/8 */
     return cr_erf_accurate_tiny (h, l, z);
-  double v = __builtin_floor (8.0 * z);
+  double v = zmath_floor(8.0 * z);
   uint32_t i = 8.0 * z;
   z = (z - 0.0625) - 0.125 * v;
   /* now |z| <= 1/16 */
   const double *p = C2[i-1];
   *h = p[26]; /* degree-18 */
   for (int j = 17; j > 10; j--)
-    *h = __builtin_fma (*h, z, p[8+j]); /* degree j */
+    *h = zmath_fma (*h, z, p[8+j]); /* degree j */
   *l = 0;
   for (int j = 10; j > 7; j--)
   {
     /* multiply h+l by z */
     a_mul (&th, &tl, *h, z);
-    tl = __builtin_fma (*l, z, tl);
+    tl = zmath_fma (*l, z, tl);
     /* add p[8+j] to th + tl */
     two_sum (h, l, p[8+j], th);
     *l += tl;
@@ -436,7 +437,7 @@ cr_erf_accurate (double *h, double *l, double z)
   {
     /* multiply h+l by z */
     a_mul (&th, &tl, *h, z);
-    tl = __builtin_fma (*l, z, tl);
+    tl = zmath_fma (*l, z, tl);
     /* add p[2*j] + p[2*j+1] to th + tl: we use two_sum() instead of
        fast_two_sum because for example for i=3, the coefficient of
        degree 7 is tiny (0x1.060b78c935b8ep-13) with respect to that
@@ -459,15 +460,15 @@ typedef union {
 static inline void s_mul (double *hi, double *lo, double a, double bh,
                           double bl) {
   a_mul (hi, lo, a, bh); /* exact */
-  *lo = __builtin_fma (a, bl, *lo);
+  *lo = zmath_fma (a, bl, *lo);
 }
 
 // Returns (ah + al) * (bh + bl) - (al * bl)
 static inline void d_mul(double *hi, double *lo, double ah, double al,
                          double bh, double bl) {
   a_mul (hi, lo, ah, bh);
-  *lo = __builtin_fma (ah, bl, *lo);
-  *lo = __builtin_fma (al, bh, *lo);
+  *lo = zmath_fma (ah, bl, *lo);
+  *lo = zmath_fma (al, bh, *lo);
 }
 
 // Add a + (bh + bl), assuming |a| >= |bh|
@@ -634,9 +635,9 @@ static const double Q_1[] = {0x1p0,                 /* degree 0 */
 // (assuming x^y does not overflow or underflow)
 static inline void q_1 (double *hi, double *lo, double zh, double zl) {
   double z = zh + zl;
-  double q = __builtin_fma (Q_1[4], zh, Q_1[3]);
+  double q = zmath_fma (Q_1[4], zh, Q_1[3]);
 
-  q = __builtin_fma (q, z, Q_1[2]);
+  q = zmath_fma (q, z, Q_1[2]);
 
   fast_two_sum (hi, lo, Q_1[1], q * z);
 
@@ -757,14 +758,14 @@ exp_accurate (double *h, double *l, int *e, double xh, double xl)
      k*LOG2Lacc is exact (k has at most 11 bits) */
 #define LOG2Lacc 0x1.abc9e3b398p-56
 #define LOG2tiny 0x1.f97b57a079a19p-103
-  yh = __builtin_fma (-k, LOG2Hacc, xh);
+  yh = zmath_fma (-k, LOG2Hacc, xh);
   /* since |xh+xl| >= 2.92 we have |k| >= 4;
   (|k|-1/2)*log(2) <= |x| <= (|k|+1/2)*log(2) thus
   1-1/(2|k|) <= |x/(k*log(2))| <= 1+1/(2|k|) thus by Sterbenz theorem
   yh is exact too */
   two_sum (&th, &tl, -(double) k * LOG2Lacc, xl);
   fast_two_sum (&yh, &yl, yh, th);
-  yl = __builtin_fma (-k, LOG2tiny, yl + tl);
+  yl = zmath_fma (-k, LOG2tiny, yl + tl);
   /* now yh+yl approximates xh + xl - k*log(2), and we approximate p(yh+yl)
      in h + l */
   /* Since |xh| <= 742, we assume |xl| <= ulp(742) = 2^-43. Then since
@@ -775,18 +776,18 @@ exp_accurate (double *h, double *l, int *e, double xh, double xl)
   */
   *h = E2[19 + 8]; // degree 19
   for (int i = 18; i >= 16; i--)
-    *h = __builtin_fma (*h, yh, E2[i + 8]); // degree i
+    *h = zmath_fma (*h, yh, E2[i + 8]); // degree i
   /* degree 15: h*(yh+yl)+E2[15 + 8] */
   a_mul (&th, &tl, *h, yh);
-  tl = __builtin_fma (*h, yl, tl);
+  tl = zmath_fma (*h, yl, tl);
   fast_two_sum (h, l, E2[15 + 8], th);
   *l += tl;
   for (int i = 14; i >= 8; i--)
   {
     /* degree i: (h+l)*(yh+yl)+E2[i+8] */
     a_mul (&th, &tl, *h, yh);
-    tl = __builtin_fma (*h, yl, tl);
-    tl = __builtin_fma (*l, yh, tl);
+    tl = zmath_fma (*h, yl, tl);
+    tl = zmath_fma (*l, yh, tl);
     fast_two_sum (h, l, E2[i+8], th);
     *l += tl;
   }
@@ -794,8 +795,8 @@ exp_accurate (double *h, double *l, int *e, double xh, double xl)
   {
     /* degree i: (h+l)*(yh+yl)+E2[2i]+E2[2i+1] */
     a_mul (&th, &tl, *h, yh);
-    tl = __builtin_fma (*h, yl, tl);
-    tl = __builtin_fma (*l, yh, tl);
+    tl = zmath_fma (*h, yl, tl);
+    tl = zmath_fma (*l, yh, tl);
     fast_two_sum (h, l, E2[2*i], th);
     *l += tl + E2[2*i+1];
   }
@@ -837,12 +838,12 @@ erfc_asympt_fast (double *h, double *l, double x)
   /* Assume 1 <= x < 2, then 0.5 <= yh <= 1,
      and yh = 1/x + eps with |eps| <= 2^-53. */
   /* Newton's iteration for 1/x is y -> y + y*(1-x*y) */
-  yl = yh * __builtin_fma (-x, yh, 1.0);
+  yl = yh * zmath_fma (-x, yh, 1.0);
   /* x*yh-1 = x*(1/x+eps)-1 = x*eps
      with |x*eps| <= 2^-52, thus the error on the FMA is bounded by
      ulp(2^-52.1) = 2^-105.
      Now |yl| <= |yh| * 2^-52 <= 2^-52, thus the rounding error on
-     yh * __builtin_fma (-x, yh, 1.0) is bounded also by ulp(2^-52.1) = 2^-105.
+     yh * zmath_fma (-x, yh, 1.0) is bounded also by ulp(2^-52.1) = 2^-105.
      From [6], Lemma 3.7, if yl was computed exactly, then yh+yl would differ
      from 1/x by at most yh^2/theta^3*(1/x-yh)^2 for some theta in [yh,1/x]
      or [1/x,yh].
@@ -863,7 +864,7 @@ erfc_asympt_fast (double *h, double *l, double x)
   const double *p = T[i];
   a_mul (&uh, &ul, yh, yh); // exact
   /* Since |yh| <= 1, we have |uh| <= 1 and |ul| <= 2^-53. */
-  ul = __builtin_fma (2.0 * yh, yl, ul);
+  ul = zmath_fma (2.0 * yh, yl, ul);
   /* uh+ul approximates (yh+yl)^2, with absolute error bounded by
      ulp(ul) + yl^2, where ulp(ul) is the maximal rounding error in
      the FMA, and yl^2 is the neglected term.
@@ -881,8 +882,8 @@ erfc_asympt_fast (double *h, double *l, double x)
   /* evaluate p(uh+ul) */
   double zh, zl;
   zh = p[12];                         // degree 23
-  zh = __builtin_fma (zh, uh, p[11]); // degree 21
-  zh = __builtin_fma (zh, uh, p[10]); // degree 19
+  zh = zmath_fma (zh, uh, p[11]); // degree 21
+  zh = zmath_fma (zh, uh, p[10]); // degree 19
   /* degree 17: zh*(uh+ul)+p[i] */
   s_mul (h, l, zh, uh, ul);
   fast_two_sum (&zh, &zl, p[9], *h);
@@ -1040,7 +1041,7 @@ erfc_asympt_accurate (double x)
   /* exception which subnormal output which cannot be put in the above table */
   if (x == 0x1.a8f7bfbd15495p+4)
   {
-    return __builtin_fma (0x1p-1074, -0.25, 0x1.99ef5883f656cp-1024);
+    return zmath_fma (0x1p-1074, -0.25, 0x1.99ef5883f656cp-1024);
   }
 
   double h, l;
@@ -1055,7 +1056,7 @@ erfc_asympt_accurate (double x)
   double yh, yl;
   yh = 1.0 / x;
   /* Newton's iteration for 1/x is y -> y + y*(1-x*y) */
-  yl = yh * __builtin_fma (-x, yh, 1.0);
+  yl = yh * zmath_fma (-x, yh, 1.0);
   // yh+yl approximates 1/x
   static const double threshold[] = { 0x1.45p-4, 0x1.e0p-4, 0x1.3fp-3,
   0x1.95p-3, 0x1.f5p-3, 0x1.31p-2, 0x1.71p-2, 0x1.bcp-2, 0x1.0bp-1, 0x1.3p-1 };
@@ -1065,7 +1066,7 @@ erfc_asympt_accurate (double x)
   const double *p = Tacc[i];
   /* now evaluate p(yh + yl) */
   a_mul (&uh, &ul, yh, yh);
-  ul = __builtin_fma (2.0 * yh, yl, ul);
+  ul = zmath_fma (2.0 * yh, yl, ul);
   /* uh+ul approximates 1/x^2 */
   double zh, zl;
   /* the polynomial p has degree 29+2i, and its coefficient of largest
@@ -1076,8 +1077,8 @@ erfc_asympt_accurate (double x)
   {
     /* degree j: (zh+zl)*(uh+ul)+p[(j-1)/2+6]] */
     a_mul (&h, &l, zh, uh);
-    l = __builtin_fma (zh, ul, l);
-    l = __builtin_fma (zl, uh, l);
+    l = zmath_fma (zh, ul, l);
+    l = zmath_fma (zl, uh, l);
     two_sum (&zh, &zl, p[(j-1)/2+6], h);
     zl += l;
   }
@@ -1085,22 +1086,22 @@ erfc_asympt_accurate (double x)
     /* degree j: (zh+zl)*(uh+ul)+p[j-1]+p[j] */
   {
     a_mul (&h, &l, zh, uh);
-    l = __builtin_fma (zh, ul, l);
-    l = __builtin_fma (zl, uh, l);
+    l = zmath_fma (zh, ul, l);
+    l = zmath_fma (zl, uh, l);
     two_sum (&zh, &zl, p[j-1], h);
     zl += l + p[j];
   }
   /* multiply by yh+yl */
   a_mul (&uh, &ul, zh, yh);
-  ul = __builtin_fma (zh, yl, ul);
-  ul = __builtin_fma (zl, yh, ul);
+  ul = zmath_fma (zh, yl, ul);
+  ul = zmath_fma (zl, yh, ul);
   /* now uh+ul approximates p(1/x), i.e., erfc(x)*exp(x^2) */
   /* now multiply (uh+ul)*(eh+el), after normalizing uh+ul to reduce the
      number of exceptional cases */
   fast_two_sum (&uh, &ul, uh, ul);
   a_mul (&h, &l, uh, eh);
-  l = __builtin_fma (uh, el, l);
-  l = __builtin_fma (ul, eh, l);
+  l = zmath_fma (uh, el, l);
+  l = zmath_fma (ul, eh, l);
   /* multiply by 2^e */
   double res = cm_ldexp(h + l, e);
   if (res < 0x1p-1022)

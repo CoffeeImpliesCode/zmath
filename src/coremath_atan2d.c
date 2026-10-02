@@ -31,10 +31,17 @@ SOFTWARE.
 
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #endif
+
+/* Exported by src/scalar_div.zig: the correctly rounded binary64 quotient of
+   finite operands with a nonzero divisor.  The wide quadrant below needs it
+   because a soft-float binary64 divide flushes a subnormal quotient to zero. */
+extern uint64_t zmath_core_finite_div64_bits(uint64_t a_bits, uint64_t b_bits);
 
 typedef union { double f; uint64_t u; } d64u64;
 
@@ -481,7 +488,7 @@ tint_tod (const tint_t *a, uint64_t err, int *resolved)
   }
   static const double S[2] = {1.0, -1.0};
   double s = S[a->sgn];
-  h = __builtin_fma (l, s, s * h);
+  h = zmath_fma (l, s, s * h);
   h *= 0x1p-52;
   // now -1021 <= ex <= 1024, thus 2^(ex-1) does not underflow/overflow
   return h * as_ldexp(1.0, ex - 1);
@@ -669,6 +676,11 @@ zmath_core_atan2d_wide(double y0, double x0, uint64_t aiy, uint64_t aix,
 
     d64u64 ay = {.u = aiy}, ax = {.u = aix};
     d64u64 quotient = {.f = ay.f / ax.f};
+    /* A divide rounds a normal quotient correctly on every target, but a
+       soft-float divide drops a subnormal one to zero, so that range, and an
+       exact zero, is repacked from the exact ratio.  Both paths round once. */
+    if ((quotient.u & ~0x8000000000000000ull) < 0x0010000000000000ull)
+      quotient.u = zmath_core_finite_div64_bits(aiy, aix);
     if (zmath_core_atan2d_ratio_is_lower_midpoint(aiy, aix, quotient.u))
       quotient.u--;
     *out = cr_copysign(quotient.f, y0);
@@ -845,7 +857,7 @@ atan2_accurate (double y, double x, double *out)
     *out = (y > 0) ? PI_H + PI_L : -PI_H - PI_L;
     return 1;
   }
-  double corr = __builtin_fma (t, x, -y);
+  double corr = zmath_fma (t, x, -y);
   if (corr == 0 && x > 0) // t is exact
     if (cr_fabs (t) <= 0x1.d12ed0af1a27fp-27)
     {
@@ -854,14 +866,14 @@ atan2_accurate (double y, double x, double *out)
          and t*x ~ y, the lower bit of t*x is >= 2^-1074, thus there is no
          underflow in t*x-y. */
       if (cr_fabs (y) >= 0x1p-915) {
-        *out = __builtin_fma (t, -0x1p-54, t);
+        *out = zmath_fma (t, -0x1p-54, t);
         return 1;
       }
       /* Now |y| < 2^-969, since x >= 2^-1074, then t <= 2^105, thus we can
          scale y and t by 2^105, which will ensure t*x-y does not underflow. */
-      corr = __builtin_fma (t * 0x1p105, x, -y * 0x1p105);
+      corr = zmath_fma (t * 0x1p105, x, -y * 0x1p105);
       if (corr == 0) {
-        *out = __builtin_fma (t, -0x1p-54, t);
+        *out = zmath_fma (t, -0x1p-54, t);
         return 1;
       }
     }
@@ -1170,7 +1182,7 @@ int zmath_core_atan2d_checked(double y0, double x0, double *out){
     }
   }
   double t0 = T2[jt];
-  double zn = __builtin_fma(-t0,x,y), zd = __builtin_fma(t0,y,x);
+  double zn = zmath_fma(-t0,x,y), zd = zmath_fma(t0,y,x);
   double z = zn/zd;
   static const double b[] = {-0x1.55555555554d2p-2, 0x1.999999860e1cap-3, -0x1.248ad469844a1p-3};
   double z2 = z*z;
@@ -1183,7 +1195,7 @@ int zmath_core_atan2d_checked(double y0, double x0, double *out){
   double rl = (fl + dz) + z;
   double lb = rh + (rl - eps), ub = rh + (rl + eps);
   if(lb!=ub){
-    double dh = y*t0, dl = __builtin_fma(y,t0,-dh), e, rdh;
+    double dh = y*t0, dl = zmath_fma(y,t0,-dh), e, rdh;
     dh = fasttwosum(x, dh, &e);
     // avoid spurious underflow in 1/dh
     if (__builtin_expect (cr_fabs (dh) <= 0x1p1022, 1))
@@ -1191,7 +1203,7 @@ int zmath_core_atan2d_checked(double y0, double x0, double *out){
     else
       rdh = 1/dh;
     dl += e;
-    double nh = x*t0, nl = __builtin_fma(x,t0,-nh);
+    double nh = x*t0, nl = zmath_fma(x,t0,-nh);
     double dt = y-nh, y1 = dt+nh;
     if( __builtin_expect(y1 == y, 1)){
       nh = fasttwosum(dt, -nl, &nl);
@@ -1200,7 +1212,7 @@ int zmath_core_atan2d_checked(double y0, double x0, double *out){
     }
     double zh = nh * rdh;
     z2 = zh*zh;
-    double zl = rdh * (__builtin_fma(dh, -zh, nh) + (nl - (nh*rdh)*dl));
+    double zl = rdh * (zmath_fma(dh, -zh, nh) + (nl - (nh*rdh)*dl));
     static const double b2[] =
       {-0x1.5555555555555p-2, 0x1.999999999755ep-3, -0x1.24924883596f8p-3, 0x1.c6f7d73531bc2p-4};
     zl += zh*z2*((b2[0] + z2*b2[1]) + (z2*z2)*(b2[2] + z2*b2[3]));

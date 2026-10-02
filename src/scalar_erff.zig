@@ -24,10 +24,17 @@
 //! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 //! SOFTWARE.
 
-fn myCopysign(x: f64, y: f64) f64 {
-    const x_bits: u64 = @bitCast(x);
-    const y_bits: u64 = @bitCast(y);
-    return @bitCast((x_bits & 0x7fff_ffff_ffff_ffff) | (y_bits & 0x8000_0000_0000_0000));
+/// The reduced polynomial is a magnitude, so the result is that magnitude with
+/// the sign of the argument. Taking it in binary32 keeps the accepted bits: the
+/// polynomial is positive on this branch, `|c0|` and `-c0` are exact, and the
+/// sign comes from the argument bits. Keeping a binary64 sign mask out of the
+/// graph matters because big-endian ARM lowers `(bits & 0x7fff...) | (sign &
+/// 0x8000...)` on a binary64 with a lane byte swap that discards the sign bit,
+/// which turns erf into an even function there.
+inline fn withArgumentSign(magnitude_f64: f64, input_bits: u32) f32 {
+    const magnitude: f32 = @abs(@as(f32, @floatCast(magnitude_f64)));
+    if ((input_bits & 0x8000_0000) != 0) return -magnitude;
+    return magnitude;
 }
 
 /// Computes the correctly rounded error function for a binary32 value.
@@ -683,5 +690,5 @@ pub fn erff(arg_x: f32) f32 {
     c0 += z2 * c2;
     c4 += z2 * c6;
     c0 += z4 * c4;
-    return @floatCast(myCopysign(c0, s));
+    return withArgumentSign(c0, input_bits);
 }

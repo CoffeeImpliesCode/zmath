@@ -31,6 +31,7 @@ SOFTWARE.
 #ifdef CORE_MATH_SUPPORT_ERRNO
 #include <errno.h>
 #endif
+#include "coremath_fma.h"
 
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
@@ -167,7 +168,7 @@ float zmath_core_lgammaf(float x, int *sign_out){
            or x = 0x1.895f1cp+121 and rounding to nearest or away,
            and does not overflow for x = 0x1.895f1cp+121 and rounding
            towards zero */
-        float r = __builtin_fmaf (x, 0x1.4d3398p+6f, 0x1.10f35ep+103f);
+        float r = zmath_fmaf (x, 0x1.4d3398p+6f, 0x1.10f35ep+103f);
 #ifdef CORE_MATH_SUPPORT_ERRNO
 	if (x > 0x1.895f1cp+121f || (x == 0x1.895f1cp+121f &&
                                      x * 5.0f >= 0x1.ebb6e4p+123))

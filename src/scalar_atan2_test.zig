@@ -194,6 +194,14 @@ test "Atan2 binary16 axis-adjacent and magnitude boundaries" {
     try expectAtan2hBits(0x7bff, 0x7bff, 0x3a48);
 }
 
+test "Atan2 binary16 rounds once from binary64" {
+    // For y,x = 0x1.8p+0,-0x1.c4p-18 the kernel result lies just above the
+    // binary16 midpoint 0x1.ffcp-1. Narrowing through binary32 first rounds
+    // that midpoint exactly and then breaks the tie towards even, which would
+    // return 0x3e48; narrowing once from binary64 returns 0x3e49.
+    try expectAtan2hBits(0x3e00, 0x8071, 0x3e49);
+}
+
 test "Atan2 binary32 axis-adjacent and magnitude boundaries" {
     try expectAtan2fBits(0x0000_0001, 0x3f80_0000, 0x0000_0001);
     try expectAtan2fBits(0x8000_0001, 0x3f80_0000, 0x8000_0001);
@@ -208,6 +216,13 @@ test "Atan2 binary64 axis-adjacent and magnitude boundaries" {
     try expectAtan2dBits(0x3ff0_0000_0000_0000, 0x0000_0000_0000_0001, 0x3ff9_21fb_5444_2d18);
     try expectAtan2dBits(0x0000_0000_0000_0001, 0x7fef_ffff_ffff_ffff, 0x0000_0000_0000_0000);
     try expectAtan2dBits(0x7fef_ffff_ffff_ffff, 0x7fef_ffff_ffff_ffff, 0x3fe9_21fb_5444_2d18);
+    // A wide exponent gap drives the quadrant's quotient into the subnormal
+    // range: 1/2^1023 is exactly 2^51 ulps, 1/(2^1022+2^970) is 2^52-1 ulps
+    // plus a fraction too small to round up, and 1/DBL_MAX is 2^50 ulps.
+    try expectAtan2dBits(0x3ff0_0000_0000_0000, 0x7fe0_0000_0000_0000, 0x0008_0000_0000_0000);
+    try expectAtan2dBits(0xbff0_0000_0000_0000, 0x7fe0_0000_0000_0000, 0x8008_0000_0000_0000);
+    try expectAtan2dBits(0x3ff0_0000_0000_0000, 0x7fd0_0000_0000_0001, 0x000f_ffff_ffff_ffff);
+    try expectAtan2dBits(0x3ff0_0000_0000_0000, 0x7fef_ffff_ffff_ffff, 0x0004_0000_0000_0000);
 }
 
 test "Atan2 binary64 wide quotient honors subnormal midpoint" {

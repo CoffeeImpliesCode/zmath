@@ -424,6 +424,19 @@ test "binary64 power fast paths reciprocal degree minus one keeps range edges" {
     // The largest finite value is (2 - 2^-52) * 2^1023, and its
     // reciprocal is above the subnormal 2^-1024 but rounds to it.
     try expectPownD(0x7fef_ffff_ffff_ffff, -1, 0x0004_0000_0000_0000);
+    // 2^1022 is the largest base whose reciprocal is still normal, and it
+    // lands exactly on the minimum normal.  The next base above it has the
+    // largest subnormal reciprocal, since 2^104/(2^52+1) is 2^52-1 plus a
+    // fraction too small to round up, and 2^1023 gives the exact 2^51 ulps.
+    try expectPownD(0x7fd0_0000_0000_0000, -1, 0x0010_0000_0000_0000);
+    try expectPownD(0x7fd0_0000_0000_0001, -1, 0x000f_ffff_ffff_ffff);
+    try expectPownD(0x7fe0_0000_0000_0000, -1, 0x0008_0000_0000_0000);
+    try expectRootD(0x7fd0_0000_0000_0000, -1, 0x0010_0000_0000_0000);
+    try expectRootD(0x7fd0_0000_0000_0001, -1, 0x000f_ffff_ffff_ffff);
+    try expectRootD(0x7fe0_0000_0000_0000, -1, 0x0008_0000_0000_0000);
+    // The sign follows the base, and the negative base takes the same path.
+    try expectPownD(0xffef_ffff_ffff_ffff, -1, 0x8004_0000_0000_0000);
+    try expectRootD(0xffef_ffff_ffff_ffff, -1, 0x8004_0000_0000_0000);
 
     // Zero and infinity take their magnitude from the degree and their
     // sign from the base sign and the degree parity.

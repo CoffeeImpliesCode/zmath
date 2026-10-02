@@ -4,12 +4,15 @@
 // pown, rootn, and compoundn values in the accepted degree range are delegated
 // to scalar_power_exact, which retains input dyadics as fixed-limb integers
 // and rounds only once.  Binary64 single-operation identities use strict IEEE
-// arithmetic directly.
+// arithmetic directly, with a binary64 reciprocal routed through
+// scalar_div.div64 so the subnormal range survives a software-float divide
+// that drops it.
 
 const common = @import("scalar_c23_common.zig");
 const c23 = @import("scalar_c23_types.zig");
 const direct_pow = @import("scalar_pow.zig");
 const exact = @import("scalar_power_exact.zig");
+const scalar_div = @import("scalar_div.zig");
 
 fn signBits(comptime Format: type) Format.Bits {
     const negative_zero: Format.Float = -0.0;
@@ -119,8 +122,8 @@ fn pownCore(
     }
     // IEEE multiplication rounds the exact product once in the destination format.
     if (exponent == 2) return success(Format, base * base);
-    // IEEE division rounds the exact reciprocal once.
-    if (Format == common.D and exponent == -1) return success(Format, 1.0 / base);
+    // IEEE division rounds the exact reciprocal once; div64 rebuilds the
+    if (Format == common.D and exponent == -1) return success(Format, scalar_div.div64(1.0, base));
 
     const magnitude_result = exact.pownFinite(Format, absoluteValue(Format, base), exponent);
     return success(
@@ -190,7 +193,7 @@ fn rootnCore(
     if ((value_bits & ~signBits(Format)) == oneBits(Format)) return success(Format, value);
     if (Format == common.D) {
         // Each identity rounds once; degree -2 still needs exact comparisons.
-        if (exponent == -1) return success(Format, 1.0 / value);
+        if (exponent == -1) return success(Format, scalar_div.div64(1.0, value));
         if (exponent == 2) return success(Format, @sqrt(value));
     }
     const magnitude_result = exact.rootFinite(Format, absoluteValue(Format, value), exponent);

@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const sign_mask_f: u32 = 0x8000_0000;
 const magnitude_mask_f: u32 = 0x7fff_ffff;
 const infinity_bits_f: u32 = 0x7f80_0000;
@@ -225,7 +227,7 @@ pub fn cbrtd(value: f64) f64 {
     scaled_normalized_bits |= (bits >> 63) << 63;
     const scaled_normalized: f64 = @bitCast(scaled_normalized_bits);
 
-    var scale_bits: u64 = @bitCast(escale[exponent_remainder]);
+    var scale_bits: u64 = @bitCast(escale[@intCast(exponent_remainder)]);
     scale_bits |= (bits >> 63) << 63;
     const scale: f64 = @bitCast(scale_bits);
 
@@ -247,9 +249,13 @@ pub fn cbrtd(value: f64) f64 {
     approximation *= scale;
 
     var approximation_squared_high = approximation * approximation;
-    const approximation_squared_low = @mulAdd(f64, approximation, approximation, -approximation_squared_high);
+    const approximation_squared_low = fma_impl.fma64(approximation, approximation, -approximation_squared_high);
     const approximation_cubed_high = approximation_squared_high * approximation;
-    const approximation_cubed_low = @mulAdd(f64, approximation, approximation_squared_high, -approximation_cubed_high) +
+    const approximation_cubed_low = fma_impl.fma64(
+        approximation,
+        approximation_squared_high,
+        -approximation_cubed_high,
+    ) +
         approximation * approximation_squared_low;
     error_value = ((approximation_cubed_high - scaled_normalized) + approximation_cubed_low) *
         reciprocal_scaled;
@@ -262,9 +268,9 @@ pub fn cbrtd(value: f64) f64 {
 
     if (adjustment_zero < 0x1p-75 or adjustment_one < 0x1p-75) {
         approximation_squared_high = rounded * rounded;
-        const rounded_squared_low = @mulAdd(f64, rounded, rounded, -approximation_squared_high);
+        const rounded_squared_low = fma_impl.fma64(rounded, rounded, -approximation_squared_high);
         const rounded_cubed_high = approximation_squared_high * rounded;
-        const rounded_cubed_low = @mulAdd(f64, rounded, approximation_squared_high, -rounded_cubed_high) +
+        const rounded_cubed_low = fma_impl.fma64(rounded, approximation_squared_high, -rounded_cubed_high) +
             rounded * rounded_squared_low;
         error_value = ((rounded_cubed_high - scaled_normalized) + rounded_cubed_low) *
             reciprocal_scaled;

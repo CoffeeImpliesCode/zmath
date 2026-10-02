@@ -29,13 +29,15 @@ SOFTWARE.
 #include <errno.h>
 #endif
 
+#include "coremath_fma.h"
+#include "coremath_half.h"
+
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #endif
 
 
-typedef union {_Float16 f; uint16_t u;} b16u16_u;
 typedef union {float f; uint32_t u;} b32u32_u;
 
 /* For 0 <= i < 224, R[i] stores {r,logr} where r approximates 1/x
@@ -160,13 +162,14 @@ static const float R[224][2] = {
 
 // approximates log10(1+x) for x small
 static inline float log10p1_small (float x) {
-  float c3 = __builtin_fmaf (x, -0x1p-2f, 0x1.555556p-2f);
-  float c2 = __builtin_fmaf (x, c3, -0.5f);
-  float res = __builtin_fmaf (x, x * c2, x);
+  float c3 = zmath_fmaf (x, -0x1p-2f, 0x1.555556p-2f);
+  float c2 = zmath_fmaf (x, c3, -0.5f);
+  float res = zmath_fmaf (x, x * c2, x);
   return res * INV_LOG10;
 }
 
-_Float16 cr_log10p1f16(_Float16 x){
+uint16_t zmath_core_log10p1h_bits(uint16_t x_bits){
+  float x = zmath_half_to_float_bits(x_bits);
   b32u32_u v = {.f = x};
   uint32_t u = v.u, au = u & 0x7fffffff;
 
@@ -175,16 +178,16 @@ _Float16 cr_log10p1f16(_Float16 x){
 #ifdef CORE_MATH_SUPPORT_ERRNO
       errno = ERANGE; // overflow
 #endif
-      return -1.0f / 0.0f;
+      return 0xfc00;
     }
 #ifdef CORE_MATH_SUPPORT_ERRNO
     errno = EDOM;
 #endif
-    return 0.0f / 0.0f;
+    return ZMATH_HALF_CANONICAL_NAN_BITS;
   }
 
   if (__builtin_expect ((au >> 23) == 0xff, 0)) // NaN or +Inf
-    return x + x;
+    return au == 0x7f800000u ? x_bits : zmath_half_nan_bits(x_bits);
 
   // now x > -1
 
@@ -203,18 +206,18 @@ _Float16 cr_log10p1f16(_Float16 x){
 #endif
 
     // deal with exceptional cases
-    if (u == 0xbba10000u) return -0x1.185ffep-9f;  // x = -0x1.42p-8
-    if (u == 0xb93b8000u) return -0x1.45bffep-14f; // x = -0x1.77p-13
-    if (u == 0x3c278000u) return 0x1.217ffep-8f;   // x = 0x1.4fp-7
-    if (u == 0x39700000u) return 0x1.a0dffep-14f;  // x = 0x1.ep-13
+    if (u == 0xbba10000u) return zmath_half_from_double_bits((double)-0x1.185ffep-9f);  // x = -0x1.42p-8
+    if (u == 0xb93b8000u) return zmath_half_from_double_bits((double)-0x1.45bffep-14f); // x = -0x1.77p-13
+    if (u == 0x3c278000u) return zmath_half_from_double_bits((double)0x1.217ffep-8f);   // x = 0x1.4fp-7
+    if (u == 0x39700000u) return zmath_half_from_double_bits((double)0x1.a0dffep-14f);  // x = 0x1.ep-13
 
-    return (au == 0) ? x : res;
+    return zmath_half_from_double_bits((double)((au == 0) ? x : res));
   }
 
   // deal with exact cases
-  if (u == 0x41100000u) return 1.0f16; // x = 9
-  if (u == 0x42c60000u) return 2.0f16; // x = 99
-  if (u == 0x4479c000u) return 3.0f16; // x = 999
+  if (u == 0x41100000u) return 0x3c00; // x = 9
+  if (u == 0x42c60000u) return 0x4000; // x = 99
+  if (u == 0x4479c000u) return 0x4200; // x = 999
   // note: 9999 is not representable in binary16
 
   v.f += 1.0f; // exact
@@ -223,7 +226,7 @@ _Float16 cr_log10p1f16(_Float16 x){
      v.f = 0x1.ffc2p+15. */
   int i = v.u >> 20; // 928 <= i <= 1143
   i -= 928;
-  float z = __builtin_fmaf (R[i][0], v.f, -1.0f); // exact
-  return R[i][1] + log10p1_small (z);
+  float z = zmath_fmaf (R[i][0], v.f, -1.0f); // exact
+  return zmath_half_from_double_bits((double)(R[i][1] + log10p1_small (z)));
 }
 

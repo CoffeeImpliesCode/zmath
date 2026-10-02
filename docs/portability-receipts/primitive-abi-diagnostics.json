@@ -1,0 +1,187 @@
+{
+  "purpose": "Focused fixed correctness/ABI diagnostic, no profiling or corpus replay. Direct and C calls isolate ABI from arithmetic.",
+  "zig_source": "const std = @import(\"std\");\nconst fma = @import(\"src/scalar_fma.zig\");\ncomptime { _ = fma; }\nextern fn probe_fma32(a: u32, b: u32, c: u32) callconv(.c) u32;\nextern fn probe_fma64(a: u64, b: u64, c: u64) callconv(.c) u64;\nextern fn probe_constant_nan() callconv(.c) u64;\nexport fn probe_zig_nan() callconv(.c) f64 { return @bitCast(@as(u64, 0x7ff8_0000_0000_0000)); }\nexport fn probe_zig_div(a: f64, b: f64) callconv(.c) f64 { return a / b; }\n\npub fn main(init: std.process.Init) !void {\n    var cases = [_][3]u32{\n        .{ 0x3f800800, 0x3f800800, 0x0d800000 },\n        .{ 0x3f000000, 0x40000000, 0xbf800000 },\n        .{ 0x3f400000, 0x3e800000, 0xbe800000 },\n        .{ 0x80000001, 0x3f000000, 0x00000001 },\n    };\n    var wide = [_][3]u64{\n        .{ 0x7fefffffffffffff, 0x4000000000000000, 0xffefffffffffffff },\n        .{ 0x3ff0000002000000, 0x3ff0000004000000, 1 },\n        .{ 0x3ff0000000000001, 0x3feffffffffffffe, 0xbff0000000000000 },\n    };\n    var max: f64 = @bitCast(@as(u64, 0x7fefffffffffffff));\n    std.mem.doNotOptimizeAway(&cases);\n    std.mem.doNotOptimizeAway(&wide);\n    std.mem.doNotOptimizeAway(&max);\n    var buffer: [1024]u8 = undefined;\n    var stdout: std.Io.File.Writer = .init(.stdout(), init.io, &buffer);\n    for (cases, 0..) |args, i| {\n        const direct: u32 = @bitCast(fma.fma(@bitCast(args[0]), @bitCast(args[1]), @bitCast(args[2])));\n        try stdout.interface.print(\"f32 case {d}: Zig=0x{x}, C=0x{x}\\n\", .{ i, direct, probe_fma32(args[0], args[1], args[2]) });\n    }\n    for (wide, 0..) |args, i| {\n        const direct: u64 = @bitCast(fma.fma64(@bitCast(args[0]), @bitCast(args[1]), @bitCast(args[2])));\n        try stdout.interface.print(\"f64 case {d}: Zig=0x{x}, C=0x{x}\\n\", .{ i, direct, probe_fma64(args[0], args[1], args[2]) });\n    }\n    const quotient_bits: u64 = @bitCast(probe_zig_div(1.0, max));\n    try stdout.interface.print(\"constant NaN through C=0x{x}; reciprocal max=0x{x}\\n\", .{ probe_constant_nan(), quotient_bits });\n    try stdout.interface.flush();\n}\n",
+  "c_source": "#include <stdint.h>\nextern float zmath_core_fmaf_soft(float, float, float);\nextern double zmath_core_fma_soft(double, double, double);\nextern double probe_zig_nan(void);\nuint32_t probe_fma32(uint32_t a, uint32_t b, uint32_t c) {\n  union { uint32_t u; float f; } aa = {.u=a}, bb = {.u=b}, cc = {.u=c}, result;\n  result.f = zmath_core_fmaf_soft(aa.f, bb.f, cc.f);\n  return result.u;\n}\nuint64_t probe_fma64(uint64_t a, uint64_t b, uint64_t c) {\n  union { uint64_t u; double f; } aa = {.u=a}, bb = {.u=b}, cc = {.u=c}, result;\n  result.f = zmath_core_fma_soft(aa.f, bb.f, cc.f);\n  return result.u;\n}\nuint64_t probe_constant_nan(void) {\n  union { uint64_t u; double f; } result = {.f=probe_zig_nan()};\n  return result.u;\n}\n",
+  "results": [
+    {
+      "target": "arm-linux-musleabi",
+      "mode": "Debug",
+      "build_command": [
+        "zig",
+        "build-exe",
+        ".portability-primitives.zig",
+        "-cflags",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "--",
+        "zig-out/portability-probes/primitives-abi.c",
+        "-target",
+        "arm-linux-musleabi",
+        "-mcpu=baseline",
+        "-ODebug",
+        "-femit-bin=./zig-out/portability-probes/primitives-arm-linux-musleabi-Debug"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "run_command": [
+        "qemu-arm",
+        "./zig-out/portability-probes/primitives-arm-linux-musleabi-Debug"
+      ],
+      "run_exit": 0,
+      "run_stdout": "f32 case 0: Zig=0x3f801001, C=0x3f801001\nf32 case 1: Zig=0x0, C=0x0\nf32 case 2: Zig=0xbd800000, C=0xbd800000\nf32 case 3: Zig=0x0, C=0x0\nf64 case 0: Zig=0x7fefffffffffffff, C=0x7fefffffffffffff\nf64 case 1: Zig=0x3ff0000006000001, C=0x3ff0000006000001\nf64 case 2: Zig=0xb970000000000000, C=0xb970000000000000\nconstant NaN through C=0x7ff8000000000000; reciprocal max=0x0\n",
+      "run_stderr": ""
+    },
+    {
+      "target": "arm-linux-musleabi",
+      "mode": "ReleaseSafe",
+      "build_command": [
+        "zig",
+        "build-exe",
+        ".portability-primitives.zig",
+        "-cflags",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "--",
+        "zig-out/portability-probes/primitives-abi.c",
+        "-target",
+        "arm-linux-musleabi",
+        "-mcpu=baseline",
+        "-OReleaseSafe",
+        "-femit-bin=./zig-out/portability-probes/primitives-arm-linux-musleabi-ReleaseSafe"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "run_command": [
+        "qemu-arm",
+        "./zig-out/portability-probes/primitives-arm-linux-musleabi-ReleaseSafe"
+      ],
+      "run_exit": 0,
+      "run_stdout": "f32 case 0: Zig=0x3f801001, C=0x3f801001\nf32 case 1: Zig=0x0, C=0x0\nf32 case 2: Zig=0xbd800000, C=0xbd800000\nf32 case 3: Zig=0x0, C=0x0\nf64 case 0: Zig=0x7fefffffffffffff, C=0x7fefffffffffffff\nf64 case 1: Zig=0x3ff0000006000001, C=0x3ff0000006000001\nf64 case 2: Zig=0xb970000000000000, C=0xb970000000000000\nconstant NaN through C=0x7ff8000000000000; reciprocal max=0x0\n",
+      "run_stderr": ""
+    },
+    {
+      "target": "hexagon-linux-musl",
+      "mode": "Debug",
+      "build_command": [
+        "zig",
+        "build-exe",
+        ".portability-primitives.zig",
+        "-cflags",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "--",
+        "zig-out/portability-probes/primitives-abi.c",
+        "-target",
+        "hexagon-linux-musl",
+        "-mcpu=baseline",
+        "-ODebug",
+        "-femit-bin=./zig-out/portability-probes/primitives-hexagon-linux-musl-Debug"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "run_command": [
+        "qemu-hexagon",
+        "./zig-out/portability-probes/primitives-hexagon-linux-musl-Debug"
+      ],
+      "run_exit": 0,
+      "run_stdout": "f32 case 0: Zig=0x3f801001, C=0x3f801001\nf32 case 1: Zig=0x0, C=0x0\nf32 case 2: Zig=0xbd800000, C=0xbd800000\nf32 case 3: Zig=0x0, C=0x0\nf64 case 0: Zig=0x7fefffffffffffff, C=0x7fefffffffffffff\nf64 case 1: Zig=0x3ff0000006000001, C=0x3ff0000006000001\nf64 case 2: Zig=0xb970000000000000, C=0xb970000000000000\nconstant NaN through C=0x7ff8000000000000; reciprocal max=0x4000000000000\n",
+      "run_stderr": ""
+    },
+    {
+      "target": "hexagon-linux-musl",
+      "mode": "ReleaseSafe",
+      "build_command": [
+        "zig",
+        "build-exe",
+        ".portability-primitives.zig",
+        "-cflags",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "--",
+        "zig-out/portability-probes/primitives-abi.c",
+        "-target",
+        "hexagon-linux-musl",
+        "-mcpu=baseline",
+        "-OReleaseSafe",
+        "-femit-bin=./zig-out/portability-probes/primitives-hexagon-linux-musl-ReleaseSafe"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "run_command": [
+        "qemu-hexagon",
+        "./zig-out/portability-probes/primitives-hexagon-linux-musl-ReleaseSafe"
+      ],
+      "run_exit": 0,
+      "run_stdout": "f32 case 0: Zig=0x3f801001, C=0x3f801001\nf32 case 1: Zig=0x0, C=0x0\nf32 case 2: Zig=0xbd800000, C=0xbd800000\nf32 case 3: Zig=0x0, C=0x0\nf64 case 0: Zig=0x7fefffffffffffff, C=0x7fefffffffffffff\nf64 case 1: Zig=0x3ff0000006000001, C=0x3ff0000006000001\nf64 case 2: Zig=0xb970000000000000, C=0xb970000000000000\nconstant NaN through C=0x7ff8000000000000; reciprocal max=0x4000000000000\n",
+      "run_stderr": ""
+    },
+    {
+      "target": "mips-linux-musl",
+      "mode": "Debug",
+      "build_command": [
+        "zig",
+        "build-exe",
+        ".portability-primitives.zig",
+        "-cflags",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "--",
+        "zig-out/portability-probes/primitives-abi.c",
+        "-target",
+        "mips-linux-musl",
+        "-mcpu=baseline",
+        "-ODebug",
+        "-femit-bin=./zig-out/portability-probes/primitives-mips-linux-musl-Debug"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "run_command": [
+        "qemu-mips",
+        "./zig-out/portability-probes/primitives-mips-linux-musl-Debug"
+      ],
+      "run_exit": 0,
+      "run_stdout": "f32 case 0: Zig=0x3f801001, C=0x3f801001\nf32 case 1: Zig=0x0, C=0x0\nf32 case 2: Zig=0xbd800000, C=0xbd800000\nf32 case 3: Zig=0x0, C=0x0\nf64 case 0: Zig=0x7fefffffffffffff, C=0x7fefffffffffffff\nf64 case 1: Zig=0x3ff0000006000001, C=0x3ff0000006000001\nf64 case 2: Zig=0xb970000000000000, C=0xb970000000000000\nconstant NaN through C=0x7ff8000000000000; reciprocal max=0x4000000000000\n",
+      "run_stderr": ""
+    },
+    {
+      "target": "mips64-linux-musl",
+      "mode": "Debug",
+      "build_command": [
+        "zig",
+        "build-exe",
+        ".portability-primitives.zig",
+        "-cflags",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "--",
+        "zig-out/portability-probes/primitives-abi.c",
+        "-target",
+        "mips64-linux-musl",
+        "-mcpu=baseline",
+        "-ODebug",
+        "-femit-bin=./zig-out/portability-probes/primitives-mips64-linux-musl-Debug"
+      ],
+      "build_exit": 0,
+      "build_stdout": "",
+      "build_stderr": "",
+      "run_command": [
+        "qemu-mips64",
+        "./zig-out/portability-probes/primitives-mips64-linux-musl-Debug"
+      ],
+      "run_exit": 0,
+      "run_stdout": "f32 case 0: Zig=0x3f801001, C=0x3f801001\nf32 case 1: Zig=0x0, C=0x0\nf32 case 2: Zig=0xbd800000, C=0xbd800000\nf32 case 3: Zig=0x0, C=0x0\nf64 case 0: Zig=0x7fefffffffffffff, C=0x7fefffffffffffff\nf64 case 1: Zig=0x3ff0000006000001, C=0x3ff0000006000001\nf64 case 2: Zig=0xb970000000000000, C=0xb970000000000000\nconstant NaN through C=0x7ff8000000000000; reciprocal max=0x4000000000000\n",
+      "run_stderr": ""
+    }
+  ]
+}

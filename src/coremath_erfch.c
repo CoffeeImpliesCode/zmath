@@ -25,13 +25,17 @@ SOFTWARE.
 */
 
 /* This code is based on the binary32 code erfcf.c:
-   at input we convert the inputs to _Float16 (exactly),
+   the kernel receives binary16 bit patterns and decodes them to binary32
+   (exactly),
    we then use the same code than for erfcf,
-   and at output we round to _Float16.
+   and at output we round once, directly to binary16.
    The changes with respect to erfcf.c are marked with a comment
    "specific erfcf16". */
 
 #include <stdint.h>
+
+#include "coremath_fma.h"
+#include "coremath_half.h"
 
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
@@ -76,9 +80,9 @@ static const double E[] =
    0x1.ecf482d8e67f1p+0, 0x1.efa1bee615a27p+0, 0x1.f252b376bba97p+0, 0x1.f50765b6e454p+0,
    0x1.f7bfdad9cbe14p+0, 0x1.fa7c1819e90d8p+0, 0x1.fd3c22b8f71f1p+0};
 
-// specific erfcf16: input renamed to xf16
-_Float16 cr_erfcf16 (_Float16 xf16){
-  float x = xf16;
+// specific erfcf16: the input is the binary16 bit pattern of x
+uint16_t zmath_core_erfch_bits(uint16_t x_bits){
+  float x = zmath_half_to_float_bits(x_bits);
   float ax = __builtin_fabsf(x);
   double axd = ax, x2 = axd*axd;
   b32u32_u t = {.f = x};
@@ -87,41 +91,41 @@ _Float16 cr_erfcf16 (_Float16 xf16){
   /* for x < -0x1.ea8f94p+1, erfc(x) rounds to 2 (to nearest) */
   if(__builtin_expect(t.u > 0xc07547ca, 0)){    // x < -0x1.ea8f94p+1
     if(__builtin_expect(t.u >= 0xff800000, 0)){ // -Inf or NaN
-      if(t.u == 0xff800000) return 2.0f;        // -Inf
-      return x + x;                             // NaN
+      if(t.u == 0xff800000) return 0x4000;          // -Inf
+      return zmath_half_nan_bits(x_bits);           // NaN
     }
-    return 2.0f - 0x1p-25f;                     // rounds to 2 or nextbelow(2)
+    return zmath_half_from_double_bits((double)(2.0f - 0x1p-25f)); // rounds to 2 or nextbelow(2)
   }
   /* at is the absolute value of x
      for x >= 0x1.41bbf8p+3, erfc(x) < 2^-150, thus rounds to 0 or to 2^-149
      depending on the rounding mode */
   if(__builtin_expect(at >= 0x4120ddfcu, 0)){   // |x| >= 0x1.41bbf8p+3
     if(__builtin_expect(at >= 0x7f800000u, 0)){ // +Inf or NaN
-      if(at == 0x7f800000u) return 0.0f;        // +Inf
-      return x + x;                             // NaN
+      if(at == 0x7f800000u) return 0x0000;          // +Inf
+      return zmath_half_nan_bits(x_bits);           // NaN
     }
     // 0x1p-149f * 0.25f rounds to 0 or 2^-149 depending on rounding
-    return 0x1p-149f * 0.25f;
+    return zmath_half_from_double_bits((double)(0x1p-149f * 0.25f));
   }
   if(__builtin_expect(at <= 0x3db80000u, 0)){ // |x| <= 0x1.7p-4
     if(__builtin_expect(t.u == 0xb76c9f62u, 0)) // x = -0x1.d93ec4p-17
-      return 0x1.00010ap+0f + 0x1p-25f; // exceptional case
+      return zmath_half_from_double_bits((double)(0x1.00010ap+0f + 0x1p-25f)); // exceptional case
     /* for |x| <= 0x1.c5bf88p-26. erfc(x) rounds to 1 (to nearest) */
     if(__builtin_expect(at <= 0x32e2dfc4, 0)){ // |x| <= 0x1.c5bf88p-26
-      if(__builtin_expect(at == 0, 0)) return 1.0f;
+      if(__builtin_expect(at == 0, 0)) return 0x3c00;
       static const float d[] = {-0x1p-26, 0x1p-25};
-      return 1.0f + d[sgn];
+      return zmath_half_from_double_bits((double)(1.0f + d[sgn]));
     }
     /* around 0, erfc(x) behaves as 1 - (odd polynomial) */
     static const double c[] =
       {0x1.20dd750429b6dp+0, -0x1.812746b03610bp-2, 0x1.ce2f218831d2fp-4, -0x1.b82c609607dcbp-6, 0x1.553af09b8008ep-8};
     double f0 = (double) x*(c[0] + x2*(c[1] + x2*(c[2] + x2*(c[3] + x2*(c[4])))));
-    return 1.0 - f0;
+    return zmath_half_from_double_bits(1.0 - f0);
   }
 
   /* now -0x1.ea8f94p+1 <= x <= 0x1.41bbf8p+3, with |x| > 0x1.7p-4 */
   const double iln2 = 0x1.71547652b82fep+0, ln2h = 0x1.62e42fefap-8, ln2l = 0x1.cf79abd6f5dc8p-47;
-  b64u64_u jt = {.f = __builtin_fma(x2, iln2, -(1024+0x1p-8))};
+  b64u64_u jt = {.f = zmath_fma(x2, iln2, -(1024+0x1p-8))};
   int64_t j = (int64_t)(jt.u<<12)>>48;
   b64u64_u S = {.u = (uint64_t)((j>>7)+(0x3ff|sgn<<11))<<52};
   static const double ch[] = {-0x1.ffffffffff333p-2, 0x1.5555555556a14p-3, -0x1.55556666659b4p-5, 0x1.1111074cc7b22p-7};
@@ -144,6 +148,6 @@ _Float16 cr_erfcf16 (_Float16 xf16){
   static const double off[] = {0, 2};
   double r = (S.f*(e0 - f*e0))*s;
   double y = off[sgn] + r;
-  return y;
+  return zmath_half_from_double_bits(y);
 }
 

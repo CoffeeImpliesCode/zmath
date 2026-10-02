@@ -5,7 +5,7 @@
 // Exceptional paths construct results from target-format bits so that NaN
 // payloads, signs, and poles do not depend on host library conventions.
 
-extern fn cr_tgammaf16(value: f16) callconv(.c) f16;
+extern fn zmath_core_tgammah_bits(value: u16) callconv(.c) u16;
 extern fn cr_tgammaf(value: f32) callconv(.c) f32;
 extern fn cr_tgamma_finite(value: f64) callconv(.c) f64;
 
@@ -57,7 +57,7 @@ pub fn tgammah(value: f16) f16 {
         return @bitCast(result_bits);
     }
     if (isNegativeIntegerH(bits)) return @bitCast(canonical_nan_bits_h);
-    return cr_tgammaf16(value);
+    return @bitCast(zmath_core_tgammah_bits(bits));
 }
 
 /// Computes the true gamma function of a binary32 value.

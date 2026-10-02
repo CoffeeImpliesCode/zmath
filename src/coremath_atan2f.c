@@ -28,6 +28,8 @@ SOFTWARE.
 
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
@@ -37,7 +39,7 @@ typedef union {float f; uint32_t u;} b32u32_u;
 typedef union {double f; uint64_t u;} b64u64_u;
 
 static inline double muldd(double xh, double xl, double ch, double cl, double *l){
-  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += alhh + ahlh;
   ch = ahhh + ahhl;
   *l = (ahhh - ch) + ahhl;
@@ -63,7 +65,7 @@ cr_atan2f_tiny (float y, float x)
 {
   double dy = y, dx = x;
   double z = dy / dx;
-  double e = __builtin_fma (-z, x, y);
+  double e = zmath_fma (-z, x, y);
   /* z * x + e = y thus y/x = z + e/x */
   static const double c = -0x1.5555555555555p-2; /* -1/3 rounded to nearest */
   double zz = z * z;
@@ -137,10 +139,10 @@ float zmath_core_atan2f_finite(float y, float x){
     double zh,zl;
     if(!gt){
       zh = zy/zx;
-      zl = __builtin_fma(zh,-zx,zy)/zx;
+      zl = zmath_fma(zh,-zx,zy)/zx;
     } else {
       zh = zx/zy;
-      zl = __builtin_fma(zh,-zy,zx)/zy;
+      zl = zmath_fma(zh,-zy,zx)/zy;
     }
     double z2l, z2h = muldd(zh,zl,zh,zl,&z2l);
     static const double c[32][2] =

@@ -27,6 +27,8 @@ SOFTWARE.
 
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
@@ -45,13 +47,13 @@ static inline double fasttwosum(double x, double y, double *e){
 }
 
 static inline double muldd_acc(double xh, double xl, double ch, double cl, double *l){
-  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += alhh + ahlh;
   return fasttwosum (ahhh, ahhl, l);
 }
 
 static inline double mulddd(double xh, double xl, double ch, double *l){
-  double ahlh = ch*xl, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += ahlh;
   ch = ahhh + ahhl;
   *l = (ahhh - ch) + ahhl;
@@ -72,7 +74,7 @@ static inline double polydd(double xh, double xl, int n, const double c[][2], do
 }
 
 static double as_cospi_zero(double x){
-  double x2 = x*x, dx2 = __builtin_fma(x,x,-x2);
+  double x2 = x*x, dx2 = zmath_fma(x,x,-x2);
   static const double ch[][2] = {
     {-0x1.3bd3cc9be45dep+2, -0x1.692b71366cc04p-52}, {0x1.03c1f081b5ac4p+2, -0x1.32b33fda9113cp-52}};
   static const double cl[3] = {-0x1.55d3c7e3cbff9p+0, 0x1.e1f50604fa0ffp-3};
@@ -94,7 +96,7 @@ static double as_cospi_zero(double x){
 }
 
 static double as_sinpi_refine(int iq, double z){
-  double x = z*0x1p-63, x2 = x*x, dx2 = __builtin_fma(x,x,-x2);
+  double x = z*0x1p-63, x2 = x*x, dx2 = zmath_fma(x,x,-x2);
   static const double sh[][2] = {
     {0x1.921fb54442d18p+1, 0x1.1a62633145c06p-53}, {-0x1.4abbce625be53p-22, 0x1.05511cbc65743p-76},
     {0x1.466bc6775aae1p-47, -0x1.9c3c168d990ap-114}};

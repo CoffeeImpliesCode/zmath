@@ -24,6 +24,7 @@
 // SOFTWARE.
 
 const data = @import("scalar_sinpih_data.zig");
+const fma_impl = @import("scalar_fma.zig");
 
 const sign_mask: u16 = 0x8000;
 const magnitude_mask: u16 = 0x7fff;
@@ -67,8 +68,7 @@ pub fn sinpih(value: f16) f16 {
 
     const table1_index: usize = bits >> 5;
     const table2_index: usize = ((bits >> 10) << 5) | (bits & 0x1f);
-    const result = @mulAdd(
-        f32,
+    const result = fma_impl.fma(
         data.s1[table1_index],
         data.c2[table2_index],
         data.c1[table1_index] * data.s2[table2_index],

@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_exp10d_data.zig");
 
 const sign_mask: u64 = 0x8000_0000_0000_0000;
@@ -75,7 +77,7 @@ fn multiplyDoubleDouble(
 
     const high = second_high * first_high;
     const low = second_low * first_high + second_high * first_low +
-        @mulAdd(f64, second_high, first_high, -high);
+        fma_impl.fma64(second_high, first_high, -high);
     return .{ .high = high, .low = low };
 }
 
@@ -173,7 +175,7 @@ noinline fn accurate(value: f64) f64 {
     const low_2: f64 = -0x1.ac0b7c917826bp-101;
     const high_delta = value - low_0 * scaled;
     const low_delta = low_1 * scaled;
-    const tail_delta = low_2 * scaled + @mulAdd(f64, low_1, scaled, -low_delta);
+    const tail_delta = low_2 * scaled + fma_impl.fma64(low_1, scaled, -low_delta);
     const reduced_sum = high_delta + low_delta;
     const reduced_high = reduced_sum;
     const reduced_low = ((high_delta - reduced_sum) + low_delta) + tail_delta;

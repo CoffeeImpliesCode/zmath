@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const atanhh_data = @import("scalar_atanhh_data.zig");
 
 const sign_mask_h: u16 = 0x8000;
@@ -693,7 +695,7 @@ fn mulDoubleDoubleAcc(x_high: f64, x_low: f64, c_high: f64, c_low: f64, low: *f6
     const high_low = c_high * x_low;
     const low_high = c_low * x_high;
     const high_high = c_high * x_high;
-    const high_error = @mulAdd(f64, c_high, x_high, -high_high);
+    const high_error = fma_impl.fma64(c_high, x_high, -high_high);
     const middle = high_error + (low_high + high_low);
     return fastTwoSum(high_high, middle, low);
 }
@@ -702,14 +704,14 @@ fn mulDoubleDouble(x_high: f64, x_low: f64, c_high: f64, c_low: f64, low: *f64) 
     const high_low = c_high * x_low;
     const low_high = c_low * x_high;
     const high_high = c_high * x_high;
-    const high_error = @mulAdd(f64, c_high, x_high, -high_high);
+    const high_error = fma_impl.fma64(c_high, x_high, -high_high);
     low.* = high_error + (low_high + high_low);
     return high_high;
 }
 
 fn mulDoubleDoubleD(x_high: f64, x_low: f64, c: f64, low: *f64) f64 {
     const high = x_high * c;
-    low.* = @mulAdd(f64, c, x_high, -high) + x_low * c;
+    low.* = fma_impl.fma64(c, x_high, -high) + x_low * c;
     return high;
 }
 
@@ -733,7 +735,7 @@ fn polyDd(comptime n: usize, x_high: f64, x_low: f64, coefficients: *const [n][2
 
 fn asAtanhZero(value: f64) f64 {
     const x_squared = value * value;
-    const x_squared_low = @mulAdd(f64, value, value, -x_squared);
+    const x_squared_low = fma_impl.fma64(value, value, -x_squared);
     const y2 = x_squared * (atanhd_cl_zero[0] + x_squared * (atanhd_cl_zero[1] + x_squared *
         (atanhd_cl_zero[2] + x_squared * (atanhd_cl_zero[3] + x_squared * atanhd_cl_zero[4]))));
     var y2_work = y2;
@@ -791,11 +793,11 @@ fn asAtanhRefine(value: f64, zh: f64, zl: f64, a: f64) f64 {
     const t34 = atanhd_t3[idx3] * atanhd_t4[idx4];
     var product_low: f64 = undefined;
     const th = t12 * t34;
-    product_low = @mulAdd(f64, t12, t34, -th);
+    product_low = fma_impl.fma64(t12, t34, -th);
     const dh = th * normalized;
-    const dl = @mulAdd(f64, th, normalized, -dh);
+    const dl = fma_impl.fma64(th, normalized, -dh);
     var sh = product_low * normalized;
-    var sl = @mulAdd(f64, product_low, normalized, -sh);
+    var sl = fma_impl.fma64(product_low, normalized, -sh);
     var xl: f64 = undefined;
     var xh = fastTwoSum(dh - 1.0, dl, &xl);
     var zl_bits: u64 = @bitCast(zl);
@@ -858,13 +860,13 @@ pub fn atanhd(value: f64) f64 {
         const x4 = x_squared * x_squared;
         const x3 = x_squared * value;
         const x8 = x4 * x4;
-        const dx2 = @mulAdd(f64, value, value, -x_squared);
-        const dx3 = @mulAdd(f64, x_squared, value, -x3) + dx2 * value;
+        const dx2 = fma_impl.fma64(value, value, -x_squared);
+        const dx3 = fma_impl.fma64(x_squared, value, -x3) + dx2 * value;
         const p = (atanhd_c_small[0] + x_squared * atanhd_c_small[1]) +
             x4 * (atanhd_c_small[2] + x_squared * atanhd_c_small[3]) +
             x8 * ((atanhd_c_small[4] + x_squared * atanhd_c_small[5]) +
                 x4 * (atanhd_c_small[6] + x_squared * atanhd_c_small[7]) + x8 * atanhd_c_small[8]);
-        const t = @mulAdd(f64, x_squared, p, 0x1.5555555555555p-56);
+        const t = fma_impl.fma64(x_squared, p, 0x1.5555555555555p-56);
         var pl: f64 = undefined;
         var ph = fastTwoSum(0x1.5555555555555p-2, t, &pl);
         ph = mulDoubleDouble(ph, pl, x3, dx3, &pl);
@@ -885,7 +887,7 @@ pub fn atanhd(value: f64) f64 {
     const qh = fastTwoSub(1.0, absolute, &ql);
     const iqh = 1.0 / qh;
     const th = ph * iqh;
-    const reduction_low = @mulAdd(f64, ph, iqh, -th) + (pl + ph * (@mulAdd(f64, -qh, iqh, 1.0) - ql * iqh)) * iqh;
+    const reduction_low = fma_impl.fma64(ph, iqh, -th) + (pl + ph * (fma_impl.fma64(-qh, iqh, 1.0) - ql * iqh)) * iqh;
 
     const th_bits: u64 = @bitCast(th);
     const exponent_bits = th_bits >> 52;
@@ -910,10 +912,10 @@ pub fn atanhd(value: f64) f64 {
     const idx2_main: usize = @intCast(j & 0x1f);
     const normalized_main: f64 = @bitCast(normalized_th_bits | (@as(u64, 0x3ff) << 52));
     const r = (0.5 * atanhd_r1[idx1_main]) * atanhd_r2[idx2_main];
-    const dx = @mulAdd(f64, r, normalized_main, -0.5);
+    const dx = fma_impl.fma64(r, normalized_main, -0.5);
     const dx2 = dx * dx;
     const rx = r * normalized_main;
-    const dx_low = @mulAdd(f64, r, normalized_main, -rx);
+    const dx_low = fma_impl.fma64(r, normalized_main, -rx);
     const f = dx2 * ((atanhd_main_c[0] + dx * atanhd_main_c[1]) +
         dx2 * (atanhd_main_c[2] + dx * atanhd_main_c[3] + dx2 * atanhd_main_c[4]));
     const l2h = 0x1.62e42fefa3ap-2;
@@ -963,10 +965,10 @@ pub fn atanhh(value: f16) f16 {
     const widened: f32 = @floatCast(value);
     const squared = widened * widened;
     const fourth = squared * squared;
-    const c9 = @mulAdd(f32, 0x1.43b244p-3, squared, 0x1.871ffp-4);
-    const c5 = @mulAdd(f32, 0x1.2785fcp-3, squared, 0x1.997ceep-3);
-    const c1 = @mulAdd(f32, 0x1.55558ep-2, squared, 0x1.000004p+0);
-    const c5_combined = @mulAdd(f32, c9, fourth, c5);
-    const c1_combined = @mulAdd(f32, c5_combined, fourth, c1);
+    const c9 = fma_impl.fma(0x1.43b244p-3, squared, 0x1.871ffp-4);
+    const c5 = fma_impl.fma(0x1.2785fcp-3, squared, 0x1.997ceep-3);
+    const c1 = fma_impl.fma(0x1.55558ep-2, squared, 0x1.000004p+0);
+    const c5_combined = fma_impl.fma(c9, fourth, c5);
+    const c1_combined = fma_impl.fma(c5_combined, fourth, c1);
     return @floatCast(widened * c1_combined);
 }

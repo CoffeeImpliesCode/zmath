@@ -24,6 +24,8 @@
 //
 // The caller must keep IEEE round-to-nearest, ties-to-even active.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_asinhd_data.zig");
 
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
@@ -52,7 +54,7 @@ fn mulDdAcc(x_high: f64, x_low: f64, c_high: f64, c_low: f64, error_value: *f64)
     const high_low = c_high * x_low;
     const low_high = c_low * x_high;
     const high_high = c_high * x_high;
-    var high_low_error = @mulAdd(f64, c_high, x_high, -high_high);
+    var high_low_error = fma_impl.fma64(c_high, x_high, -high_high);
     high_low_error += low_high + high_low;
     const result_high = high_high + high_low_error;
     error_value.* = (high_high - result_high) + high_low_error;
@@ -62,7 +64,7 @@ fn mulDdAcc(x_high: f64, x_low: f64, c_high: f64, c_low: f64, error_value: *f64)
 fn mulDdD(x_high: f64, x_low: f64, c: f64, error_value: *f64) f64 {
     @setFloatMode(.strict);
     const high = c * x_high;
-    const low = @mulAdd(f64, c, x_high, -high) + c * x_low;
+    const low = fma_impl.fma64(c, x_high, -high) + c * x_low;
     const result_high = high + low;
     error_value.* = (high - result_high) + low;
     return result_high;
@@ -177,11 +179,11 @@ fn asAsinhRefine(x: f64, z_high: f64, z_low: f64, a: f64) f64 {
     const product_12 = t1[index_1] * t2[index_2];
     const product_34 = t3[index_3] * t4[index_4];
     const product_high = product_12 * product_34;
-    const product_low = @mulAdd(f64, product_12, product_34, -product_high);
+    const product_low = fma_impl.fma64(product_12, product_34, -product_high);
     const delta_high = product_high * normalized;
-    const delta_low = @mulAdd(f64, product_high, normalized, -delta_high);
+    const delta_low = fma_impl.fma64(product_high, normalized, -delta_high);
     const scaled_high = product_low * normalized;
-    const scaled_low = @mulAdd(f64, product_low, normalized, -scaled_high);
+    const scaled_low = fma_impl.fma64(product_low, normalized, -scaled_high);
     var x_low: f64 = undefined;
     var x_high = fastTwoSum(delta_high - 1.0, delta_low, &x_low);
     if (z_low != 0.0) {
@@ -234,7 +236,7 @@ pub fn asinhd(value: f64) f64 {
             return value;
         }
         const square_high = value * value;
-        const square_low = @mulAdd(f64, value, value, -square_high);
+        const square_low = fma_impl.fma64(value, value, -square_high);
         const cube_high = square_high * value;
         var correction: f64 = undefined;
         if (magnitude < 0x3f93_0000_0000_0000) {
@@ -272,7 +274,7 @@ pub fn asinhd(value: f64) f64 {
     var offset: i64 = 0x3ff;
     if (magnitude < 0x4190_0000_0000_0000) {
         square_high = value * value;
-        square_low = @mulAdd(f64, value, value, -square_high);
+        square_low = fma_impl.fma64(value, value, -square_high);
         var sum_high: f64 = undefined;
         var sum_low: f64 = undefined;
         if (magnitude < 0x3ff0_0000_0000_0000) {
@@ -283,7 +285,8 @@ pub fn asinhd(value: f64) f64 {
         sum_low += square_low;
         absolute_high = @sqrt(sum_high);
         const reciprocal = 0.5 / sum_high;
-        absolute_low = (sum_low - @mulAdd(f64, absolute_high, absolute_high, -sum_high)) * (reciprocal * absolute_high);
+        absolute_low = (sum_low - fma_impl.fma64(absolute_high, absolute_high, -sum_high)) *
+            (reciprocal * absolute_high);
         absolute_high = fastTwoSum(absolute_high, absolute_value, &sum_low);
         absolute_low += sum_low;
     } else if (magnitude < 0x4330_0000_0000_0000) {
@@ -310,7 +313,7 @@ pub fn asinhd(value: f64) f64 {
     const index_1: usize = @intCast(table_index >> 5);
     const index_2: usize = @intCast(table_index & 0x1f);
     const reciprocal = data.r1[index_1] * data.r2[index_2];
-    const delta = @mulAdd(f64, reciprocal, normalized_value, -1.0);
+    const delta = fma_impl.fma64(reciprocal, normalized_value, -1.0);
     const delta_squared = delta * delta;
     const polynomial = delta_squared * ((data.c[0] + delta * data.c[1]) +
         delta_squared * ((data.c[2] + delta * data.c[3]) + delta_squared * data.c[4]));

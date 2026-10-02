@@ -1,6 +1,9 @@
 /* Direct correctly-rounded inverse-pi kernels for binary16. */
 #include <stdint.h>
 
+#include "coremath_fma.h"
+#include "coremath_half.h"
+
 /* Pinned CORE-MATH source: revision 3bafed75e3c22399531857d63a3fa0e24bfb42fa, src/binary16/asinpi/asinpif16.c. */
 /* Correctly-rounded half-revolution arc-sine for binary16 value.
 
@@ -56,18 +59,19 @@ static const float zmath_pi_asinpih_p1[] = {0x1.000002p+0f, 0x1.55a7ep-3f, 0x1.2
 #define ZMATH_PI_ASINPIH_HALF 0.5f
 #define ZMATH_PI_ASINPIH_INV_PI 0x1.45f306p-2f
 
-_Float16 zmath_core_asinpih (_Float16 x)
+uint16_t zmath_core_asinpih_bits(uint16_t x_bits)
 {
+  float x = zmath_half_to_float_bits(x_bits);
   zmath_pi_asinpih_b32u32_u v = {.f = x};
   uint32_t u = v.u;
   uint32_t au = u & 0x7fffffffu;
 
   if (au >= 0x3f800000u) { // NaN, Inf, or |x| >= 1
     if (au == 0x3f800000u) // |x| = 1
-      return (u == 0x3f800000u) ? ZMATH_PI_ASINPIH_HALF : -ZMATH_PI_ASINPIH_HALF;
+      return (u == 0x3f800000u) ? 0x3800 : 0xb800; // +/-ZMATH_PI_ASINPIH_HALF
     if ((au >> 23) == 0x3ff && ((au & 0x7fffff) != 0)) // qNaN or sNaN
-      return x + x;
-    return 0.0f / 0.0f; // will signal invalid and return sNaN
+      return zmath_half_nan_bits(x_bits);
+    return ZMATH_HALF_CANONICAL_NAN_BITS; // will signal invalid and return sNaN
   }
 
   float t = v.f, tt, c1, c3, c5, y;
@@ -78,11 +82,11 @@ _Float16 zmath_core_asinpih (_Float16 x)
   int reduce = au >= 0x3f000000u; // |x| >= 0.5
   if (reduce) {
     if (au == 0x3f10a000u) // |x|=0x1.214p-1
-      return (au == u) ? 0x1.876016p-3f : -0x1.876016p-3f;
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.876016p-3f : (double)-0x1.876016p-3f);
     if (au == 0x3f208000u) // |x|=0x1.41p-1
-      return (au == u) ? 0x1.b9c002p-3f : -0x1.b9c002p-3f;
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.b9c002p-3f : (double)-0x1.b9c002p-3f);
     if (au == 0x3f3ca000u) // |x|=0x1.794p-1
-      return (au == u) ? 0x1.0dfffap-2f : -0x1.0dfffap-2f;
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.0dfffap-2f : (double)-0x1.0dfffap-2f);
     if (u >> 31) // x < 0
       t = -t;
     // argument reduction: asin(x) = pi/2 - 2*asin(sqrt((1-x)/2))
@@ -99,22 +103,22 @@ _Float16 zmath_core_asinpih (_Float16 x)
        with RNDU and x=-0x1.92p-13 with RNDD. */
     if (au <= 0x39490000u) {
       // ZMATH_PI_ASINPIH_INV_PI is smaller than 1/pi
-      return __builtin_fmaf (t, ZMATH_PI_ASINPIH_INV_PI, 0x1p-25f * t);
+      return zmath_half_from_double_bits((double)zmath_fmaf (t, ZMATH_PI_ASINPIH_INV_PI, 0x1p-25f * t));
     }
     if (au == 0x3e002000) // |x| = 0x1.004p-3
-      return (au == u) ? 0x1.472002p-5f : -0x1.472002p-5f;
-    c5 = __builtin_fmaf (zmath_pi_asinpih_p0[3], tt, zmath_pi_asinpih_p0[2]); // degree 5
-    c3 = __builtin_fmaf (c5, tt, zmath_pi_asinpih_p0[1]);    // degree 3
-    y = __builtin_fmaf (c3, tt * t, t);
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.472002p-5f : (double)-0x1.472002p-5f);
+    c5 = zmath_fmaf (zmath_pi_asinpih_p0[3], tt, zmath_pi_asinpih_p0[2]); // degree 5
+    c3 = zmath_fmaf (c5, tt, zmath_pi_asinpih_p0[1]);    // degree 3
+    y = zmath_fmaf (c3, tt * t, t);
   }
   else { // 0.25 <= t <= 0.5
     if (au == 0x3eb7a000u) // |x|=0x1.6f4p-2
-      return (au == u) ? 0x1.de400ep-4f : -0x1.de400ep-4f;
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.de400ep-4f : (double)-0x1.de400ep-4f);
     if (au == 0x3ec4c000u) // |x|=0x1.898p-2
-      return (au == u) ? 0x1.012006p-3f : -0x1.012006p-3f;
-    c5 = __builtin_fmaf (zmath_pi_asinpih_p1[3], tt, zmath_pi_asinpih_p1[2]);
-    c1 = __builtin_fmaf (zmath_pi_asinpih_p1[1], tt, zmath_pi_asinpih_p1[0]);
-    y = __builtin_fmaf (c5, tt * tt, c1);
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.012006p-3f : (double)-0x1.012006p-3f);
+    c5 = zmath_fmaf (zmath_pi_asinpih_p1[3], tt, zmath_pi_asinpih_p1[2]);
+    c1 = zmath_fmaf (zmath_pi_asinpih_p1[1], tt, zmath_pi_asinpih_p1[0]);
+    y = zmath_fmaf (c5, tt * tt, c1);
     y = t * y;
   }
 
@@ -127,7 +131,7 @@ _Float16 zmath_core_asinpih (_Float16 x)
 
   /* now y approximates asin(x), we divide by pi */
 
-  return y * ZMATH_PI_ASINPIH_INV_PI;
+  return zmath_half_from_double_bits((double)(y * ZMATH_PI_ASINPIH_INV_PI));
 }
 
 /* Pinned CORE-MATH source: revision 3bafed75e3c22399531857d63a3fa0e24bfb42fa, src/binary16/acospi/acospif16.c. */
@@ -185,18 +189,19 @@ static const float zmath_pi_acospih_p1[] = {0x1.91b67p0f, -0x1.f515cap-1f, -0x1.
 static const float zmath_pi_acospih_p2[] = {0x1.91fa1cp0f, -0x1.ae5c5ep-3f, 0x1.31640cp-4f,
                            -0x1.98038p-6f, 0x1.251b5p-8f};
 
-_Float16 zmath_core_acospih (_Float16 x)
+uint16_t zmath_core_acospih_bits(uint16_t x_bits)
 {
+  float x = zmath_half_to_float_bits(x_bits);
   zmath_pi_acospih_b32u32_u v = {.f = x};
   uint32_t u = v.u;
   uint32_t au = u & 0x7fffffffu;
 
   if (au >= 0x3f800000u) { // NaN, Inf, or |x| >= 1
     if (au == 0x3f800000u)
-      return (u == 0x3f800000u) ? 0.0f16 : 1.0f;
+      return (u == 0x3f800000u) ? 0x0000 : 0x3c00;
     if ((au >> 23) == 0x3ff && ((au & 0x7fffff) != 0)) // qNaN or sNaN
-      return x;
-    return 0.0f / 0.0f; // will signal invalid and return sNaN
+      return zmath_half_nan_bits(x_bits);
+    return ZMATH_HALF_CANONICAL_NAN_BITS; // will signal invalid and return sNaN
   }
 
   float t = v.f, tt = t * t, c1, c3, y;
@@ -207,46 +212,46 @@ _Float16 zmath_core_acospih (_Float16 x)
 #define ZMATH_PI_ACOSPIH_INV_PI 0x1.45f306p-2f
 
   if (au < 0x3e800000u) { // |x| < 0.25
-    if (au == 0) return 0.5f; // would be inexact with the code below
+    if (au == 0) return 0x3800; // would be inexact with the code below
     if (au == 0x3c55a000u) // |x| = 0x1.ab4p-7
-      return (au == u) ? 0x1.fbbffcp-2f : 0x1.022002p-1f;
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.fbbffcp-2f : (double)0x1.022002p-1f);
     if (au == 0x3d8a2000u) // |x| = 0x1.144p-4
-      return (au == u) ? 0x1.ea0002p-2f : 0x1.0afffep-1f;
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.ea0002p-2f : (double)0x1.0afffep-1f);
     if (u == 0x3d21c000u) // x = 0x1.438p-5
-      return 0x1.f31ffep-2f;
+      return zmath_half_from_double_bits((double)0x1.f31ffep-2f);
     if (u == 0x3db3a000u) // x = 0x1.674p-4
-      return 0x1.e36002p-2f;
-    c1 = __builtin_fmaf (zmath_pi_acospih_p0[2], t, zmath_pi_acospih_p0[1]);
-    c3 = __builtin_fmaf (zmath_pi_acospih_p0[4], t, zmath_pi_acospih_p0[3]);
-    y = __builtin_fmaf (c3, tt, c1);
-    y = __builtin_fmaf (y, t, zmath_pi_acospih_p0[0]);
+      return zmath_half_from_double_bits((double)0x1.e36002p-2f);
+    c1 = zmath_fmaf (zmath_pi_acospih_p0[2], t, zmath_pi_acospih_p0[1]);
+    c3 = zmath_fmaf (zmath_pi_acospih_p0[4], t, zmath_pi_acospih_p0[3]);
+    y = zmath_fmaf (c3, tt, c1);
+    y = zmath_fmaf (y, t, zmath_pi_acospih_p0[0]);
     y = y * ZMATH_PI_ACOSPIH_INV_PI;
     if (u >> 31) // x < 0
       y = 1.0f - y;
   }
   else if (au < 0x3f000000u) { // 0.25 <= |x| < 0.5
-    c1 = __builtin_fmaf (zmath_pi_acospih_p1[2], t, zmath_pi_acospih_p1[1]);
-    c3 = __builtin_fmaf (zmath_pi_acospih_p1[4], t, zmath_pi_acospih_p1[3]);
-    y = __builtin_fmaf (c3, tt, c1);
-    y = __builtin_fmaf (y, t, zmath_pi_acospih_p1[0]);
+    c1 = zmath_fmaf (zmath_pi_acospih_p1[2], t, zmath_pi_acospih_p1[1]);
+    c3 = zmath_fmaf (zmath_pi_acospih_p1[4], t, zmath_pi_acospih_p1[3]);
+    y = zmath_fmaf (c3, tt, c1);
+    y = zmath_fmaf (y, t, zmath_pi_acospih_p1[0]);
     y = y * ZMATH_PI_ACOSPIH_INV_PI;
     if (u >> 31) // x < 0
       y = 1.0f - y;
   }
   else { // 0.5 <= |x| <= 1
     if (au == 0x3f3ca000u) // |x| = 0x1.794p-1
-      return (au == u) ? 0x1.e4000ap-3f : 0x1.86fffep-1f;
-    c1 = __builtin_fmaf (zmath_pi_acospih_p2[2], t, zmath_pi_acospih_p2[1]);
-    c3 = __builtin_fmaf (zmath_pi_acospih_p2[4], t, zmath_pi_acospih_p2[3]);
-    y = __builtin_fmaf (c3, tt, c1);
-    y = __builtin_fmaf (y, t, zmath_pi_acospih_p2[0]);
+      return zmath_half_from_double_bits((au == u) ? (double)0x1.e4000ap-3f : (double)0x1.86fffep-1f);
+    c1 = zmath_fmaf (zmath_pi_acospih_p2[2], t, zmath_pi_acospih_p2[1]);
+    c3 = zmath_fmaf (zmath_pi_acospih_p2[4], t, zmath_pi_acospih_p2[3]);
+    y = zmath_fmaf (c3, tt, c1);
+    y = zmath_fmaf (y, t, zmath_pi_acospih_p2[0]);
     y = __builtin_sqrtf (1.0f - t) * y;
     y = y * ZMATH_PI_ACOSPIH_INV_PI;
     if (u >> 31) // x < 0
       y = 1.0f - y;
   }
 
-  return y;
+  return zmath_half_from_double_bits((double)y);
 }
 
 /* Pinned CORE-MATH source: revision 3bafed75e3c22399531857d63a3fa0e24bfb42fa, src/binary16/atanpi/atanpif16.c. */
@@ -309,8 +314,9 @@ static const float zmath_pi_atanpih_p2[] = {-0x1.95964cp-8, 0x1.0bad74p+0, -0x1.
 static const float zmath_pi_atanpih_p3[] = {-0x1.f75b26p-6, 0x1.2d3d1cp+0, -0x1.882376p-2,
                            0x1.d18c84p-13, 0x1.6aa26p-6};
 
-_Float16 zmath_core_atanpih (_Float16 x)
+uint16_t zmath_core_atanpih_bits(uint16_t x_bits)
 {
+  float x = zmath_half_to_float_bits(x_bits);
   zmath_pi_atanpih_b32u32_u v = {.f = x};
   uint32_t u = v.u;
   uint32_t au = u & 0x7fffffffu;
@@ -320,8 +326,8 @@ _Float16 zmath_core_atanpih (_Float16 x)
 
   if (au >= 0x7f800000u) { // NaN or Inf
     if (au == 0x7f800000u) // +/-Inf
-      return (u == 0x7f800000u) ? 0.5f : -0.5f;
-    return x + x; // will signal invalid for sNaN and return qNaN
+      return (u == 0x7f800000u) ? 0x3800 : 0xb800;
+    return zmath_half_nan_bits(x_bits); // will signal invalid for sNaN and return qNaN
   }
   
   float t = v.f;
@@ -340,10 +346,10 @@ _Float16 zmath_core_atanpih (_Float16 x)
   int reduce = au > 0x3f800000u;
   if (reduce) {
     // deal with exceptional cases
-    if (au == 0x3fd24000u) return s * 0x1.4dbffep-2f; // |x| = 0x1.a48p+0
-    if (au == 0x42ba4000u) return s * 0x1.fc8002p-2f; // |x| = 0x1.748p+6
-    if (au == 0x412ca000u) return s * 0x1.e1dffep-2f;  // |x| = 0x1.594p+3
-    if (au == 0x41fb4000u) return s * 0x1.f5a002p-2f; // |x| = 0x1.f68p+4
+    if (au == 0x3fd24000u) return zmath_half_from_double_bits((double)(s * 0x1.4dbffep-2f)); // |x| = 0x1.a48p+0
+    if (au == 0x42ba4000u) return zmath_half_from_double_bits((double)(s * 0x1.fc8002p-2f)); // |x| = 0x1.748p+6
+    if (au == 0x412ca000u) return zmath_half_from_double_bits((double)(s * 0x1.e1dffep-2f));  // |x| = 0x1.594p+3
+    if (au == 0x41fb4000u) return zmath_half_from_double_bits((double)(s * 0x1.f5a002p-2f)); // |x| = 0x1.f68p+4
     t = 1.0f / t;
     v.f = t;
     au = v.u;
@@ -357,20 +363,20 @@ _Float16 zmath_core_atanpih (_Float16 x)
     if (!reduce && au < 0x3a800000u) { // t < 0x1p-10
       // use direct degree-1 polynomial for atanpi (cf atanpi.sollya)
       // deal with exceptional cases
-      if (au == 0x3a052000u) return s * 0x1.52ffep-13f;  // |x| = 0x1.0a4p-11
-      if (au == 0x3a318000u) return s * 0x1.c3fffep-13f; // |x| = 0x1.63p-11
-      return s * t * __builtin_fmaf (-0x1.cb4bcep-14f, t, 0x1.45f30ap-2f);
+      if (au == 0x3a052000u) return zmath_half_from_double_bits((double)(s * 0x1.52ffep-13f));  // |x| = 0x1.0a4p-11
+      if (au == 0x3a318000u) return zmath_half_from_double_bits((double)(s * 0x1.c3fffep-13f)); // |x| = 0x1.63p-11
+      return zmath_half_from_double_bits((double)(s * t * zmath_fmaf (-0x1.cb4bcep-14f, t, 0x1.45f30ap-2f)));
     }
     // deal with exceptional cases 
-    if (au == 0x3af4c000u) return s * 0x1.37a002p-11f; // |x| = 0x1.e98p-10
-    if (au == 0x3be78000u) return s * 0x1.26c004p-9f;  // |x| = 0x1.cfp-8
-    if (au == 0x3b92a000u) return s * 0x1.756002p-10f; // |x| = 0x1.254p-8
-    if (au == 0x3e1ea000u) return s * 0x1.90c002p-5f;  // |x| = 0x1.3d4p-3
-    if (au == 0x3e4b2000u) return s * 0x1.fea002p-5f;  // |x| = 0x1.964p-3
+    if (au == 0x3af4c000u) return zmath_half_from_double_bits((double)(s * 0x1.37a002p-11f)); // |x| = 0x1.e98p-10
+    if (au == 0x3be78000u) return zmath_half_from_double_bits((double)(s * 0x1.26c004p-9f));  // |x| = 0x1.cfp-8
+    if (au == 0x3b92a000u) return zmath_half_from_double_bits((double)(s * 0x1.756002p-10f)); // |x| = 0x1.254p-8
+    if (au == 0x3e1ea000u) return zmath_half_from_double_bits((double)(s * 0x1.90c002p-5f));  // |x| = 0x1.3d4p-3
+    if (au == 0x3e4b2000u) return zmath_half_from_double_bits((double)(s * 0x1.fea002p-5f));  // |x| = 0x1.964p-3
     p = zmath_pi_atanpih_p0;
-    c5 = __builtin_fmaf (p[3], tt, p[2]);
-    c1 = __builtin_fmaf (p[1], tt, p[0]);
-    c1 = __builtin_fmaf (c5, tt * tt, c1);
+    c5 = zmath_fmaf (p[3], tt, p[2]);
+    c1 = zmath_fmaf (p[1], tt, p[0]);
+    c1 = zmath_fmaf (c5, tt * tt, c1);
     y = t * c1;
   }
   else {
@@ -383,13 +389,13 @@ _Float16 zmath_core_atanpih (_Float16 x)
     {
       p = zmath_pi_atanpih_p3;
       // deal with exceptional cases
-      if (au == 0x3f800000u) return s * 0x1p-2f;        // |x| = 1
-      if (au == 0x3f712000u) return s * 0x1.ec7feap-3f; // |x| = 0x1.e24p-1
+      if (au == 0x3f800000u) return zmath_half_from_double_bits((double)(s * 0x1p-2f));        // |x| = 1
+      if (au == 0x3f712000u) return zmath_half_from_double_bits((double)(s * 0x1.ec7feap-3f)); // |x| = 0x1.e24p-1
     }
-    c3 = __builtin_fmaf (p[4], t, p[3]);
-    c2 = __builtin_fmaf (c3, t, p[2]);
-    y = __builtin_fmaf (p[1], t, p[0]);
-    y = __builtin_fmaf (c2, tt, y);
+    c3 = zmath_fmaf (p[4], t, p[3]);
+    c2 = zmath_fmaf (c3, t, p[2]);
+    y = zmath_fmaf (p[1], t, p[0]);
+    y = zmath_fmaf (c2, tt, y);
   }
 
   if (reduce) y = ZMATH_PI_ATANPIH_HALF_PI - y; // argument reconstruction
@@ -397,7 +403,7 @@ _Float16 zmath_core_atanpih (_Float16 x)
   if (neg) y = -y;
 
   // divide by pi
-  return y * ZMATH_PI_ATANPIH_INV_PI;
+  return zmath_half_from_double_bits((double)(y * ZMATH_PI_ATANPIH_INV_PI));
 }
 
 /* Pinned CORE-MATH source: revision 3bafed75e3c22399531857d63a3fa0e24bfb42fa, src/binary16/atan2pi/atan2pif16.c. */
@@ -429,9 +435,10 @@ SOFTWARE.
 */
 
 /* This code is based on the binary32 code atan2pif.c:
-   at input we convert the inputs to _Float16 (exactly),
+   the kernel receives binary16 bit patterns and decodes them to binary32
+   (exactly),
    we then use the same code than for atan2pif,
-   and at output we round to _Float16.
+   and at output we round once, directly to binary16.
    The changes with respect to atan2pif.c are marked with a comment
    "specific atan2pif16". */
 
@@ -446,7 +453,7 @@ typedef union {float f; uint32_t u;} zmath_pi_atan2pih_b32u32_u;
 typedef union {double f; uint64_t u;} zmath_pi_atan2pih_b64u64_u;
 
 static inline double zmath_pi_atan2pih_muldd(double xh, double xl, double ch, double cl, double *l){
-  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += alhh + ahlh;
   ch = ahhh + ahhl;
   *l = (ahhh - ch) + ahhl;
@@ -466,9 +473,10 @@ static double zmath_pi_atan2pih_polydd(double xh, double xl, int n, const double
   return ch;
 }
 
-// specific atan2pif16: inputs name changed from y,x to yf16,xf16
-_Float16 zmath_core_atan2pih(_Float16 yf16, _Float16 xf16){
-  float y = yf16, x = xf16; // specific atan2pif16
+// specific atan2pif16: the inputs are the binary16 bit patterns of y and x
+uint16_t zmath_core_atan2pih_bits(uint16_t y_bits, uint16_t x_bits){
+  float y = zmath_half_to_float_bits(y_bits),
+        x = zmath_half_to_float_bits(x_bits); // specific atan2pif16
   static const double cn[] =
     {0x1.45f306dc9c883p-2, 0x1.988d83a142adap-1, 0x1.747bebf492057p-1, 0x1.2cc5645094ff3p-2,
      0x1.a0521c711ab66p-5, 0x1.881b8058b9a0dp-9, 0x1.b16ff514a0afp-16};
@@ -482,36 +490,36 @@ _Float16 zmath_core_atan2pih(_Float16 yf16, _Float16 xf16){
   zmath_pi_atan2pih_b32u32_u tx = {.f = x}, ty = {.f = y};
   uint32_t ux = tx.u, uy = ty.u, ax = ux&(~0u>>1), ay = uy&(~0u>>1);
   if(__builtin_expect(ay >= (0xff<<23)||ax >= (0xff<<23), 0)){
-    if(ay > (0xff<<23)) return x + y; // nan
-    if(ax > (0xff<<23)) return x + y; // nan
+    if(ay > (0xff<<23)) return zmath_half_nan_bits(y_bits); // nan
+    if(ax > (0xff<<23)) return zmath_half_nan_bits(x_bits); // nan
     uint32_t yinf = ay==(0xff<<23), xinf = ax==(0xff<<23);
     if(yinf&xinf){
       if(ux>>31)
-	return 0.75f*sgnf[uy>>31];
+	return zmath_half_from_double_bits((double)(0.75f*sgnf[uy>>31]));
       else
-	return 0.25f*sgnf[uy>>31];
+	return zmath_half_from_double_bits((double)(0.25f*sgnf[uy>>31]));
     }
     if(xinf){
       if(ux>>31)
-	return sgnf[uy>>31];
+	return zmath_half_from_double_bits((double)sgnf[uy>>31]);
       else
-	return 0.0f*sgnf[uy>>31];
+	return zmath_half_from_double_bits((double)(0.0f*sgnf[uy>>31]));
     }
     if(yinf){
-      return 0.5f*sgnf[uy>>31];
+      return zmath_half_from_double_bits((double)(0.5f*sgnf[uy>>31]));
     }
   }
   if(__builtin_expect(ay==0, 0)){
     if(__builtin_expect(!(ay|ax),0)){
       uint32_t i = (uy>>31)*4 + (ux>>31)*2;
-      return off[i];
+      return zmath_half_from_double_bits(off[i]);
     }
-    if(!(ux>>31)) return 0.0f*sgnf[uy>>31];
+    if(!(ux>>31)) return zmath_half_from_double_bits((double)(0.0f*sgnf[uy>>31]));
   }
   if(__builtin_expect(ax==ay, 0)){
     static const float s[] = {0.25,0.75,-0.25,-0.75};
     uint32_t i = (uy>>31)*2 + (ux>>31);
-    return s[i];
+    return zmath_half_from_double_bits((double)s[i]);
   }
   uint32_t gt = ay>ax, i = (uy>>31)*4 + (ux>>31)*2 + gt;
   
@@ -549,10 +557,10 @@ _Float16 zmath_core_atan2pih(_Float16 yf16, _Float16 xf16){
       double zh,zl;
       if(!gt){
 	zh = zy/zx;
-	zl = __builtin_fma(zh,-zx,zy)/zx;
+	zl = zmath_fma(zh,-zx,zy)/zx;
       } else {
 	zh = zx/zy;
-	zl = __builtin_fma(zh,-zy,zx)/zy;
+	zl = zmath_fma(zh,-zy,zx)/zy;
       }
       double z2l, z2h = zmath_pi_atan2pih_muldd(zh,zl,zh,zl,&z2l);
       static const double c[][2] =
@@ -588,6 +596,5 @@ _Float16 zmath_core_atan2pih(_Float16 yf16, _Float16 xf16){
       }
     }
   }
-  _Float16 rf = r; // specific atan2pif16
-  return rf;
+  return zmath_half_from_double_bits(r); // specific atan2pif16
 }

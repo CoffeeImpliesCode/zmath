@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const sign_mask: u32 = 0x8000_0000;
 const magnitude_mask: u32 = 0x7fff_ffff;
 const infinity_bits: u32 = 0x7f80_0000;
@@ -115,7 +117,7 @@ pub fn tanf(value: f32) f32 {
         if (exponent < 115) {
             if (exponent < 102) return value;
             const square = value * value;
-            return @mulAdd(f32, value, 0x1.555556p-2 * square, value);
+            return fma_impl.fma(value, 0x1.555556p-2 * square, value);
         }
         reduced = reduceSmall(value, &quotient);
     } else {

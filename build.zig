@@ -1,4 +1,5 @@
 const std = @import("std");
+const fma_target = @import("src/scalar_fma_target.zig");
 
 // Although this function looks imperative, it does not perform the build
 // directly and instead it mutates the build graph (`b`) that will be then
@@ -15,17 +16,13 @@ fn requireCKernelTarget(target: std.Build.ResolvedTarget) void {
                 );
             }
         },
-        .aarch64 => {},
-        else => @panic(
-            "zmath C kernels support only x86/x86_64 with +fma and little-endian aarch64",
-        ),
+        else => {},
     }
 }
 
 pub fn build(b: *std.Build) void {
-    // The C kernels have target-specific ABI and FMA assumptions. Reject an
-    // unsupported target before constructing artifacts so every build step
-    // uses the same deterministic policy.
+    // Keep the x86 FMA floor; the generated C guard checks the arithmetic
+    // representation requirements on every architecture.
     const target = b.standardTargetOptions(.{});
     requireCKernelTarget(target);
     // Standard optimization options allow the person running `zig build` to select
@@ -61,112 +58,119 @@ pub fn build(b: *std.Build) void {
         "-ffreestanding",
         "-fno-math-errno",
         "-ffp-contract=off",
+        b.fmt("-DZMATH_FMA_NATIVE={d}", .{@intFromBool(fma_target.hasNativeFma32(target.result.cpu))}),
+        b.fmt("-DZMATH_FMA64_NATIVE={d}", .{@intFromBool(fma_target.hasNativeFma64(target.result.cpu))}),
     };
     const c_kernel_abi_guard = b.addWriteFiles().add("c_kernel_abi_guard.c",
         \\#include <stdint.h>
-        \\#if !defined(__FLT16_MANT_DIG__)
-        \\#error "zmath C kernels require compiler support for _Float16"
-        \\#else
-        \\_Static_assert(sizeof(_Float16) == 2, "zmath C kernels require 16-bit _Float16");
-        \\_Static_assert(__FLT16_MANT_DIG__ == 11, "zmath C kernels require IEEE-754 binary16 precision");
-        \\_Static_assert(__FLT16_MAX_EXP__ == 16, "zmath C kernels require IEEE-754 binary16 exponent range");
-        \\#endif
+        \\_Static_assert(sizeof(uint16_t) == 2, "zmath half C ABI requires 16-bit storage");
+        \\_Static_assert(sizeof(float) == 4 && __FLT_MANT_DIG__ == 24 && __FLT_MAX_EXP__ == 128,
+        \\               "zmath C kernels require IEEE-754 binary32");
+        \\_Static_assert(sizeof(double) == 8 && __DBL_MANT_DIG__ == 53 && __DBL_MAX_EXP__ == 1024,
+        \\               "zmath C kernels require IEEE-754 binary64");
         \\
-        \\#if !defined(__SIZEOF_INT128__)
-        \\#error "zmath C kernels require compiler support for 128-bit integers"
+        \\#if defined(__BITINT_MAXWIDTH__) && __BITINT_MAXWIDTH__ >= 128
+        \\typedef _BitInt(128) zmath_c_i128;
+        \\typedef unsigned _BitInt(128) zmath_c_u128;
+        \\#elif defined(__SIZEOF_INT128__)
+        \\typedef __int128 zmath_c_i128;
+        \\typedef unsigned __int128 zmath_c_u128;
         \\#else
-        \\_Static_assert(sizeof(__int128) == 16, "zmath C kernels require signed 128-bit integers");
-        \\_Static_assert(sizeof(unsigned __int128) == 16, "zmath C kernels require unsigned 128-bit integers");
+        \\#error "zmath C kernels require _BitInt(128) or __int128 support"
         \\#endif
+        \\_Static_assert(sizeof(zmath_c_i128) == 16, "zmath C kernels require signed 128-bit integers");
+        \\_Static_assert(sizeof(zmath_c_u128) == 16, "zmath C kernels require unsigned 128-bit integers");
         \\
-        \\#if !defined(__BYTE_ORDER__) || !defined(__ORDER_LITTLE_ENDIAN__)
+        \\#if !defined(__BYTE_ORDER__) || !defined(__ORDER_LITTLE_ENDIAN__) || !defined(__ORDER_BIG_ENDIAN__)
         \\#error "zmath C kernels require compiler byte-order macros"
         \\#else
-        \\_Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__, "zmath C kernels require little-endian targets");
+        \\_Static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__ ||
+        \\               __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__,
+        \\               "zmath C kernels require a supported byte order");
         \\#endif
         \\
-        \\extern _Float16 cr_atan2f16(_Float16, _Float16);
+        \\extern uint16_t zmath_core_atan2h_bits(uint16_t, uint16_t);
         \\extern float zmath_core_atan2f_finite(float, float);
         \\extern int zmath_core_atan2d_checked(double, double, double *);
         \\extern int zmath_core_atan2d_forced_ambiguity(double, double, double *);
         \\extern void zmath_core_atan2d_test_subtract_two_limbs(uint64_t *, uint64_t *, uint64_t *);
-        \\extern _Float16 cr_cospif16(_Float16);
+        \\extern uint16_t zmath_core_cospih_bits(uint16_t);
         \\extern float cr_cospif(float);
         \\extern double cr_cospi(double);
-        \\extern _Float16 cr_erfcf16(_Float16);
+        \\extern uint16_t zmath_core_erfch_bits(uint16_t);
         \\extern float cr_erfcf(float);
         \\extern double zmath_core_erfcd_negative(double);
         \\extern double zmath_core_erfcd_positive(double);
-        \\extern _Float16 zmath_core_lgammah(_Float16, int *);
+        \\extern uint16_t zmath_core_lgammah_bits(uint16_t, int *);
         \\extern float zmath_core_lgammaf(float, int *);
         \\extern double zmath_core_lgammad(double, int *);
-        \\extern _Float16 cr_log10p1f16(_Float16);
+        \\extern uint16_t zmath_core_log10p1h_bits(uint16_t);
         \\extern float zmath_core_log10p1f_finite(float);
         \\extern double zmath_core_log10p1_finite(double);
-        \\extern _Float16 cr_log2p1f16(_Float16);
+        \\extern uint16_t zmath_core_log2p1h_bits(uint16_t);
         \\extern float zmath_core_log2p1f_finite(float);
         \\extern double zmath_core_log2p1_finite(double);
-        \\extern _Float16 zmath_core_asinpih(_Float16);
+        \\extern uint16_t zmath_core_asinpih_bits(uint16_t);
         \\extern float zmath_core_asinpif(float);
         \\extern double zmath_core_asinpid_finite_bits(double, uint64_t);
-        \\extern _Float16 zmath_core_acospih(_Float16);
+        \\extern uint16_t zmath_core_acospih_bits(uint16_t);
         \\extern float zmath_core_acospif(float);
         \\extern double zmath_core_acospid(double);
-        \\extern _Float16 zmath_core_atanpih(_Float16);
+        \\extern uint16_t zmath_core_atanpih_bits(uint16_t);
         \\extern float zmath_core_atanpif(float);
         \\extern double zmath_core_atanpid(double);
-        \\extern _Float16 zmath_core_atan2pih(_Float16, _Float16);
+        \\extern uint16_t zmath_core_atan2pih_bits(uint16_t, uint16_t);
         \\extern float zmath_core_atan2pif(float, float);
         \\extern double zmath_core_atan2pid_finite_bits(double, double, uint64_t, uint64_t);
         \\extern int zmath_core_atan2pid_forced_ambiguity(double, double, double *);
-        \\extern _Float16 cr_powf16(_Float16, _Float16);
+        \\extern uint16_t zmath_core_powh_bits(uint16_t, uint16_t);
         \\extern float cr_powfFiniteBits(uint32_t, float);
         \\extern double cr_powFinite(double, double);
-        \\extern _Float16 cr_tgammaf16(_Float16);
+        \\extern uint16_t zmath_core_tgammah_bits(uint16_t);
         \\extern float cr_tgammaf(float);
         \\extern double cr_tgamma_finite(double);
         \\
         \\typedef void (*zmath_c_kernel_symbol)(void);
         \\__attribute__((used, retain))
         \\static zmath_c_kernel_symbol const zmath_c_kernel_symbols[] = {
-        \\    (zmath_c_kernel_symbol)cr_atan2f16,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2h_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2f_finite,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2d_checked,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2d_forced_ambiguity,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2d_test_subtract_two_limbs,
-        \\    (zmath_c_kernel_symbol)cr_cospif16,
+        \\    (zmath_c_kernel_symbol)zmath_core_cospih_bits,
         \\    (zmath_c_kernel_symbol)cr_cospif,
         \\    (zmath_c_kernel_symbol)cr_cospi,
-        \\    (zmath_c_kernel_symbol)cr_erfcf16,
+        \\    (zmath_c_kernel_symbol)zmath_core_erfch_bits,
         \\    (zmath_c_kernel_symbol)cr_erfcf,
         \\    (zmath_c_kernel_symbol)zmath_core_erfcd_negative,
         \\    (zmath_c_kernel_symbol)zmath_core_erfcd_positive,
-        \\    (zmath_c_kernel_symbol)zmath_core_lgammah,
+        \\    (zmath_c_kernel_symbol)zmath_core_lgammah_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_lgammaf,
         \\    (zmath_c_kernel_symbol)zmath_core_lgammad,
-        \\    (zmath_c_kernel_symbol)cr_log10p1f16,
+        \\    (zmath_c_kernel_symbol)zmath_core_log10p1h_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_log10p1f_finite,
         \\    (zmath_c_kernel_symbol)zmath_core_log10p1_finite,
-        \\    (zmath_c_kernel_symbol)cr_log2p1f16,
+        \\    (zmath_c_kernel_symbol)zmath_core_log2p1h_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_log2p1f_finite,
         \\    (zmath_c_kernel_symbol)zmath_core_log2p1_finite,
-        \\    (zmath_c_kernel_symbol)zmath_core_asinpih,
+        \\    (zmath_c_kernel_symbol)zmath_core_asinpih_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_asinpif,
         \\    (zmath_c_kernel_symbol)zmath_core_asinpid_finite_bits,
-        \\    (zmath_c_kernel_symbol)zmath_core_acospih,
+        \\    (zmath_c_kernel_symbol)zmath_core_acospih_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_acospif,
         \\    (zmath_c_kernel_symbol)zmath_core_acospid,
-        \\    (zmath_c_kernel_symbol)zmath_core_atanpih,
+        \\    (zmath_c_kernel_symbol)zmath_core_atanpih_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_atanpif,
         \\    (zmath_c_kernel_symbol)zmath_core_atanpid,
-        \\    (zmath_c_kernel_symbol)zmath_core_atan2pih,
+        \\    (zmath_c_kernel_symbol)zmath_core_atan2pih_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2pif,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2pid_finite_bits,
         \\    (zmath_c_kernel_symbol)zmath_core_atan2pid_forced_ambiguity,
-        \\    (zmath_c_kernel_symbol)cr_powf16,
+        \\    (zmath_c_kernel_symbol)zmath_core_powh_bits,
         \\    (zmath_c_kernel_symbol)cr_powfFiniteBits,
         \\    (zmath_c_kernel_symbol)cr_powFinite,
-        \\    (zmath_c_kernel_symbol)cr_tgammaf16,
+        \\    (zmath_c_kernel_symbol)zmath_core_tgammah_bits,
         \\    (zmath_c_kernel_symbol)cr_tgammaf,
         \\    (zmath_c_kernel_symbol)cr_tgamma_finite,
         \\};
@@ -365,6 +369,7 @@ pub fn build(b: *std.Build) void {
     // Here `mod` needs to define a target, which is why earlier we made sure to
     // set the releative field.
     const mod_tests = b.addTest(.{
+        .name = "zmath-test",
         .root_module = mod,
     });
 
@@ -374,6 +379,12 @@ pub fn build(b: *std.Build) void {
     // The demonstration has no tests. Run the library's numerical suites.
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
+
+    // Let cross-test build the same suite without asking Zig to execute it.
+    const install_tests = b.addInstallArtifact(mod_tests, .{});
+    const test_build_step = b.step("test-build", "Install tests without running them");
+    test_build_step.dependOn(&install_tests.step);
+
     const install_docs = b.addInstallDirectory(.{
         .source_dir = exe.getEmittedDocs(),
         .install_dir = .prefix,

@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_sind_data.zig");
 const Dint = data.Dint;
 
@@ -70,10 +72,10 @@ pub fn sind(value: f64) f64 {
         const square = value * value;
         const cubic = value * square;
         var polynomial: f64 = -0x1.ae64567f544e4p-26;
-        polynomial = @mulAdd(f64, polynomial, square, 0x1.71de3a556c734p-19);
-        polynomial = @mulAdd(f64, polynomial, square, -0x1.a01a01a01a01ap-13);
-        polynomial = @mulAdd(f64, polynomial, square, 0x1.1111111111111p-7);
-        polynomial = @mulAdd(f64, polynomial, square, -0x1.5555555555555p-3);
+        polynomial = fma_impl.fma64(polynomial, square, 0x1.71de3a556c734p-19);
+        polynomial = fma_impl.fma64(polynomial, square, -0x1.a01a01a01a01ap-13);
+        polynomial = fma_impl.fma64(polynomial, square, 0x1.1111111111111p-7);
+        polynomial = fma_impl.fma64(polynomial, square, -0x1.5555555555555p-3);
         const approximation = fastTwoSum(value, cubic * polynomial);
         const error_bound = @abs(cubic) * 0x1p-53;
         const left = approximation.high + (approximation.low - error_bound);
@@ -182,33 +184,62 @@ fn addDint(result: *Dint, a_input: *const Dint, b_input: *const Dint) void {
     setDintBits(result, result_bits);
 }
 
+fn mulHigh64(a: u64, b: u64) u64 {
+    // The Hexagon backend duplicates the low word when a u128 value is shifted
+    // right by 64, so the 64x64->128 high word stays in 32-bit halves with
+    // u64 wrapping arithmetic and explicit carries. All shifts are 32 bits or
+    // less and no u128 shift appears.
+    const mask32: u64 = 0xffff_ffff;
+    const a_lo = a & mask32;
+    const a_hi = a >> 32;
+    const b_lo = b & mask32;
+    const b_hi = b >> 32;
+    const low: u64 = a_lo * b_lo;
+    const middle_sum = (a_lo * b_hi) +% (a_hi * b_lo);
+    const middle_carry: u64 = @intFromBool(middle_sum < a_lo * b_hi);
+    const low_plus_middle: u64 = low +% ((middle_sum & mask32) << 32);
+    const low_carry: u64 = @intFromBool(low_plus_middle < low);
+    return (a_hi * b_hi) +% (middle_sum >> 32) +% (middle_carry << 32) +% low_carry;
+}
+
 fn mulDint(result: *Dint, a_input: *const Dint, b_input: *const Dint) void {
     const a = a_input.*;
     const b = b_input.*;
-    const middle_1 = @as(u128, a.hi) * b.lo;
-    const middle_2 = @as(u128, a.lo) * b.hi;
     var result_bits = @as(u128, a.hi) * b.hi;
-    result_bits +%= (middle_1 >> 64) + (middle_2 >> 64);
+    result_bits +%= mulHigh64(a.hi, b.lo);
+    result_bits +%= mulHigh64(a.lo, b.hi);
 
-    const exponent_carry: u1 = @truncate(result_bits >> 127);
-    result_bits <<= @as(u1, 1 - exponent_carry);
-    result.ex = a.ex + b.ex + exponent_carry - 1;
+    // Select the normalization shift in a branch so both shifts are constant.
+    // A u128 shift by a runtime amount is what Hexagon mis-lowers here: when
+    // the amount is zero the high limb is replaced by a copy of the low limb,
+    // which is why only the arguments whose exact product sets bit 127
+    // returned a duplicated limb. The two branches below are bit-identical to
+    // the shift-and-carry form they replace.
+    if ((result_bits >> 127) != 0) {
+        result.ex = a.ex + b.ex;
+        setDintBits(result, result_bits);
+    } else {
+        result.ex = a.ex + b.ex - 1;
+        setDintBits(result, result_bits << 1);
+    }
     result.sgn = a.sgn ^ b.sgn;
-    setDintBits(result, result_bits);
 }
 
 fn mulDint21(result: *Dint, a_input: *const Dint, b_input: *const Dint) void {
     const a = a_input.*;
     const b = b_input.*;
-    const high_product = @as(u128, a.hi) * b.hi;
-    const low_product = @as(u128, a.lo) * b.hi;
-    var result_bits = high_product +% (low_product >> 64);
+    var result_bits = @as(u128, a.hi) * b.hi;
+    result_bits +%= mulHigh64(a.lo, b.hi);
 
-    const exponent_carry: u1 = @truncate(result_bits >> 127);
-    result_bits <<= @as(u1, 1 - exponent_carry);
-    result.ex = a.ex + b.ex + exponent_carry - 1;
+    // Constant shifts only, for the same reason as mulDint.
+    if ((result_bits >> 127) != 0) {
+        result.ex = a.ex + b.ex;
+        setDintBits(result, result_bits);
+    } else {
+        result.ex = a.ex + b.ex - 1;
+        setDintBits(result, result_bits << 1);
+    }
     result.sgn = a.sgn ^ b.sgn;
-    setDintBits(result, result_bits);
 }
 
 fn dintFromDouble(value: f64) Dint {
@@ -447,14 +478,12 @@ inline fn reduceFast(
         var product_low: f64 = undefined;
         if (tangent_precision) {
             index = reductionIndex(product_high);
-            product_low = @mulAdd(
-                f64,
+            product_low = fma_impl.fma64(
                 0x1.45f306dc9c883p-3,
                 value,
                 -product_high,
             );
-            high.* = @mulAdd(
-                f64,
+            high.* = fma_impl.fma64(
                 @as(f64, @floatFromInt(index)),
                 -0x1p-11,
                 product_high,
@@ -474,14 +503,13 @@ inline fn reduceFast(
             index = @truncate(grid_units & 0x7ff);
             const grid_high: f64 = @bitCast(grid_prefix << fraction_bit_count);
             high.* = product_high - grid_high;
-            product_low = @mulAdd(
-                f64,
+            product_low = fma_impl.fma64(
                 0x1.45f306dc9c883p-3,
                 value,
                 -product_high,
             );
         }
-        low.* = @mulAdd(f64, -0x1.6b01ec5417056p-57, value, product_low);
+        low.* = fma_impl.fma64(-0x1.6b01ec5417056p-57, value, product_low);
         // The reducer error is in turns. Since |d sin(2*pi*x)/dx| and
         // |d cos(2*pi*x)/dx| are below 2*pi < 8, scale it to an output
         // bound for the sine and cosine callers.
@@ -521,14 +549,12 @@ inline fn reduceFast(
             grid_high = @bitCast(grid_prefix << fraction_bit_count);
         }
         const provisional_high = product_high - grid_high;
-        const product_low = @mulAdd(
-            f64,
+        const product_low = fma_impl.fma64(
             0x1.45f306dc9c883p-3,
             value,
             -product_high,
         );
-        const fractional_low = @mulAdd(
-            f64,
+        const fractional_low = fma_impl.fma64(
             -0x1.6b01ec5417056p-57,
             value,
             product_low,
@@ -628,14 +654,14 @@ inline fn reduceFast(
     }
 
     const index = reductionIndex(high.*);
-    high.* = @mulAdd(f64, @as(f64, @floatFromInt(index)), -0x1p-11, high.*);
+    high.* = fma_impl.fma64(@as(f64, @floatFromInt(index)), -0x1p-11, high.*);
     return index;
 }
 
 fn aMul(a: f64, b: f64) DoubleDouble {
     @setFloatMode(.strict);
     const high = a * b;
-    return .{ .high = high, .low = @mulAdd(f64, a, b, -high) };
+    return .{ .high = high, .low = fma_impl.fma64(a, b, -high) };
 }
 
 fn sMul(a: f64, b_high: f64, b_low: f64) DoubleDouble {
@@ -643,17 +669,17 @@ fn sMul(a: f64, b_high: f64, b_low: f64) DoubleDouble {
     const product = aMul(a, b_high);
     return .{
         .high = product.high,
-        .low = @mulAdd(f64, a, b_low, product.low),
+        .low = fma_impl.fma64(a, b_low, product.low),
     };
 }
 
 fn dMul(a_high: f64, a_low: f64, b_high: f64, b_low: f64) DoubleDouble {
     @setFloatMode(.strict);
     const high_product = aMul(a_high, b_high);
-    const middle = @mulAdd(f64, a_low, b_high, high_product.low);
+    const middle = fma_impl.fma64(a_low, b_high, high_product.low);
     return .{
         .high = high_product.high,
-        .low = @mulAdd(f64, a_high, b_low, middle),
+        .low = fma_impl.fma64(a_high, b_low, middle),
     };
 }
 
@@ -677,18 +703,17 @@ inline fn evalTailFast(high: f64, low: f64) FastTail {
     const square = high * high;
     const cubic = square * high;
     const cross = high * low;
-    var sine = cubic * @mulAdd(f64, 0x1.466bc6775aae2p+6, square, -0x1.4abbce625be53p+5);
-    sine = @mulAdd(f64, -0x1.f019b59389d7cp+6, high * cross, sine);
-    var cosine = square * @mulAdd(
-        f64,
-        @mulAdd(f64, -0x1.55d3c7e3cbffap+6, square, 0x1.03c1f081b5ac4p+6),
+    var sine = cubic * fma_impl.fma64(0x1.466bc6775aae2p+6, square, -0x1.4abbce625be53p+5);
+    sine = fma_impl.fma64(-0x1.f019b59389d7cp+6, high * cross, sine);
+    var cosine = square * fma_impl.fma64(
+        fma_impl.fma64(-0x1.55d3c7e3cbffap+6, square, 0x1.03c1f081b5ac4p+6),
         square,
         -0x1.3bd3cc9be45dep+4,
     );
-    cosine = @mulAdd(f64, -0x1.3bd3cc9be45dep+5, cross, cosine);
+    cosine = fma_impl.fma64(-0x1.3bd3cc9be45dep+5, cross, cosine);
     var linear = aMul(0x1.921fb54442d18p+2, high);
-    linear.low = @mulAdd(f64, 0x1.1a62633145c07p-52, high, linear.low);
-    linear.low = @mulAdd(f64, 0x1.921fb54442d18p+2, low, linear.low);
+    linear.low = fma_impl.fma64(0x1.1a62633145c07p-52, high, linear.low);
+    linear.low = fma_impl.fma64(0x1.921fb54442d18p+2, low, linear.low);
     return .{ .linear = linear, .sine = sine, .cosine = cosine };
 }
 
@@ -701,8 +726,8 @@ inline fn combineTailFast(
 ) FastResult {
     @setFloatMode(.strict);
     const scaled = aMul(sine_coefficient, tail.linear.high);
-    var correction = @mulAdd(f64, sine_coefficient, tail.linear.low + tail.sine, scaled.low);
-    correction = @mulAdd(f64, cosine_coefficient, tail.cosine, correction);
+    var correction = fma_impl.fma64(sine_coefficient, tail.linear.low + tail.sine, scaled.low);
+    correction = fma_impl.fma64(cosine_coefficient, tail.cosine, correction);
     const sum = fastTwoSum(cosine_coefficient, scaled.high);
     // The degree-five sine and degree-six cosine tails, coefficient
     // errors, table errors and compensated evaluation fit within 2^-65.
@@ -984,11 +1009,11 @@ inline fn cosSmall(value: f64) f64 {
     const square = aMul(value, value);
     const fourth = square.high * square.high;
     var polynomial: f64 = 0x1.1eed8eff8d898p-29;
-    polynomial = @mulAdd(f64, polynomial, square.high, -0x1.27e4fb7789f5cp-22);
-    polynomial = @mulAdd(f64, polynomial, square.high, 0x1.a01a01a01a01ap-16);
-    polynomial = @mulAdd(f64, polynomial, square.high, -0x1.6c16c16c16c17p-10);
-    polynomial = @mulAdd(f64, polynomial, square.high, 0x1.5555555555555p-5);
-    const correction = @mulAdd(f64, fourth, polynomial, -0.5 * square.low);
+    polynomial = fma_impl.fma64(polynomial, square.high, -0x1.27e4fb7789f5cp-22);
+    polynomial = fma_impl.fma64(polynomial, square.high, 0x1.a01a01a01a01ap-16);
+    polynomial = fma_impl.fma64(polynomial, square.high, -0x1.6c16c16c16c17p-10);
+    polynomial = fma_impl.fma64(polynomial, square.high, 0x1.5555555555555p-5);
+    const correction = fma_impl.fma64(fourth, polynomial, -0.5 * square.low);
     const sum = fastTwoSum(1.0, -0.5 * square.high);
     const low = sum.low + correction;
     const error_bound = (@abs(sum.low) + fourth) * 0x1p-52;
@@ -1010,12 +1035,12 @@ fn tangentRatio(
     const argument = high + low;
     const square = argument * argument;
     const cubic = square * argument;
-    var polynomial = @mulAdd(f64, 0x1.45fff9b48e95ep+14, square, 0x1.466bc6775aae2p+10);
-    polynomial = @mulAdd(f64, polynomial, square, 0x1.4abbce625be53p+6);
+    var polynomial = fma_impl.fma64(0x1.45fff9b48e95ep+14, square, 0x1.466bc6775aae2p+10);
+    polynomial = fma_impl.fma64(polynomial, square, 0x1.4abbce625be53p+6);
     const nonlinear = cubic * polynomial;
     var linear = aMul(0x1.921fb54442d18p+2, high);
-    linear.low = @mulAdd(f64, 0x1.1a62633145c07p-52, high, linear.low);
-    linear.low = @mulAdd(f64, 0x1.921fb54442d18p+2, low, linear.low);
+    linear.low = fma_impl.fma64(0x1.1a62633145c07p-52, high, linear.low);
+    linear.low = fma_impl.fma64(0x1.921fb54442d18p+2, low, linear.low);
     const tail = fastTwoSum(linear.high, linear.low + nonlinear);
 
     // tan(a+b) = (tan(a)+tan(b))/(1-tan(a)*tan(b)).
@@ -1041,8 +1066,8 @@ fn fastDiv(
     @setFloatMode(.strict);
     const reciprocal = 1.0 / denominator_high;
     const high = numerator_high * reciprocal;
-    const residual_high = @mulAdd(f64, denominator_high, -high, numerator_high);
-    const residual_low = @mulAdd(f64, denominator_low, -high, numerator_low);
+    const residual_high = fma_impl.fma64(denominator_high, -high, numerator_high);
+    const residual_low = fma_impl.fma64(denominator_low, -high, numerator_low);
     return .{
         .high = high,
         .low = reciprocal * (residual_high + residual_low),
@@ -1229,3 +1254,4 @@ test "sine preserves rounding after a reflected medium reduction" {
         @as(u64, @bitCast(sind(input))),
     );
 }
+

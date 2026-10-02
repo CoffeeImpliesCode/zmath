@@ -73,11 +73,11 @@ SOFTWARE.
 static inline void q_1 (double *qh, double *ql, double z) {
   double q, h0, h1, l1;
 
-  q = __builtin_fma (0x1.5555555849d8dp-5, z, 0x1.5555555997996p-3);
+  q = zmath_fma (0x1.5555555849d8dp-5, z, 0x1.5555555997996p-3);
 
-  q = __builtin_fma (q, z, 0x1p-1);
+  q = zmath_fma (q, z, 0x1p-1);
 
-  h0 = __builtin_fma (q, z, 0x1p0);
+  h0 = zmath_fma (q, z, 0x1p0);
 
   a_mul (&h1, &l1, z, h0);
 
@@ -280,14 +280,14 @@ static inline void q_3 (qint64_t *r, qint64_t *y) {
 static inline void p_1 (double *ph, double *pl, double z) {
   double wh, wl;
   a_mul (&wh, &wl, z, z);
-  double t = __builtin_fma (-0x1.0001f0c80e8cep-3, z, 0x1.2494526fd4a06p-3);
-  double u = __builtin_fma (-0x1.55555553d1eb4p-3, z, 0x1.999999981f535p-3);
-  double v = __builtin_fma (-0x1.0000000000003p-2, z, 0x1.5555555555558p-2);
-  u = __builtin_fma (t, wh, u);
-  v = __builtin_fma (u, wh, v);
+  double t = zmath_fma (-0x1.0001f0c80e8cep-3, z, 0x1.2494526fd4a06p-3);
+  double u = zmath_fma (-0x1.55555553d1eb4p-3, z, 0x1.999999981f535p-3);
+  double v = zmath_fma (-0x1.0000000000003p-2, z, 0x1.5555555555558p-2);
+  u = zmath_fma (t, wh, u);
+  v = zmath_fma (u, wh, v);
   u = v * wh;
   *ph = -0.5 * wh;
-  *pl = __builtin_fma (u, z, -0.5 * wl);
+  *pl = zmath_fma (u, z, -0.5 * wl);
 }
 
 // Approximation for the second iteration
@@ -581,14 +581,14 @@ static inline int log_1 (double *h, double *l, double x) {
   double l1 = _LOG_INV[i-181][0];
   double l2 = _LOG_INV[i-181][1];
 
-  double z = __builtin_fma (r, t, -1.0);
+  double z = zmath_fma (r, t, -1.0);
 
 #define LOG2_H 0x1.62e42fefa38p-1
 #define LOG2_L 0x1.ef35793c7673p-45
 
   double th, tl;
-  th = __builtin_fma (E, LOG2_H, l1);
-  tl = __builtin_fma (E, LOG2_L, l2);
+  th = zmath_fma (E, LOG2_H, l1);
+  tl = zmath_fma (E, LOG2_L, l2);
 
   fast_sum (h, l, th, z, tl);
   double ph, pl;
@@ -979,16 +979,16 @@ exp_1 (double *eh, double *el, double rh, double rl, double s) {
      (on an i7-8700) by replacing the computation of k by the following
      classical trick:
      const double magic = 0x1.8p+52;
-     double k = __builtin_fma (rh, INVLOG2, magic) - magic;
+     double k = zmath_fma (rh, INVLOG2, magic) - magic;
   */
-  double k = roundeven_finite (rh * INVLOG2);
+  double k = zmath_roundeven_finite (rh * INVLOG2);
 
 #define LOG2H 0x1.62e42fefa39efp-13
 #define LOG2L 0x1.abc9e3b39803fp-68
 
   double zh, zl;
-  zh = __builtin_fma (LOG2H, -k, rh);
-  zl = __builtin_fma (LOG2L, -k, rl);
+  zh = zmath_fma (LOG2H, -k, rh);
+  zl = zmath_fma (LOG2L, -k, rl);
 
   int64_t K = k; /* Note: k is an integer, this is just a conversion. */
   int64_t M = (K >> 12) + 0x3ff;
@@ -1347,8 +1347,8 @@ double cr_powFinite (double x, double y) {
      phase_1 from reference [5]. */
   double err = cancel ? 0x1.57p-58 : 0x1.27p-64;
   double res_min, res_max;
-  res_min = res_h + __builtin_fma (err, -res_h, res_l);
-  res_max = res_h + __builtin_fma (err, res_h, res_l);
+  res_min = res_h + zmath_fma (err, -res_h, res_l);
+  res_max = res_h + zmath_fma (err, res_h, res_l);
   /* if res_h < 0, we have res_max < res_min, but since we only check
      equality between res_min and res_max, it does not matter */
 

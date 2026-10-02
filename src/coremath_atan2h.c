@@ -26,13 +26,17 @@ SOFTWARE.
 */
 
 /* This code is based on the binary32 code atan2f.c:
-   at input we convert the inputs to _Float16 (exactly),
+   the kernel receives binary16 bit patterns and decodes them to binary32
+   (exactly),
    we then use the same code than for atan2f,
-   and at output we round to _Float16.
+   and at output we round once, directly to binary16.
    The changes with respect to atan2f.c are marked with a comment
    "specific atan2f16". */
 
 #include <stdint.h>
+
+#include "coremath_fma.h"
+#include "coremath_half.h"
 
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
@@ -43,7 +47,7 @@ typedef union {float f; uint32_t u;} b32u32_u;
 typedef union {double f; uint64_t u;} b64u64_u;
 
 static inline double muldd(double xh, double xl, double ch, double cl, double *l){
-  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += alhh + ahlh;
   ch = ahhh + ahhl;
   *l = (ahhh - ch) + ahhl;
@@ -64,12 +68,14 @@ static double polydd(double xh, double xl, int n, const double c[][2], double *l
 }
 
 /* for y/x tiny, use Taylor approximation z - z^3/3 where z=y/x */
-static _Float16 // specific atan2f16: changed return type to _Float16
+// specific atan2f16: the kernel takes and returns binary16 bit patterns and
+// narrows once, directly from binary64
+static uint16_t
 cr_atan2f_tiny (float y, float x)
 {
   double dy = y, dx = x;
   double z = dy / dx;
-  double e = __builtin_fma (-z, x, y);
+  double e = zmath_fma (-z, x, y);
   /* z * x + e = y thus y/x = z + e/x */
   static const double c = -0x1.5555555555555p-2; /* -1/3 rounded to nearest */
   double zz = z * z;
@@ -86,13 +92,14 @@ cr_atan2f_tiny (float y, float x)
     else
       t.u -= 1;
   }
-  _Float16 res = t.f; // specific atan2f16
-  return res;
+  return zmath_half_from_double_bits(t.f); // specific atan2f16
 }
 
-// specific atan2f16: inputs name changed from y,x to yf16,xf16
-_Float16 cr_atan2f16(_Float16 yf16, _Float16 xf16){
-  float y = yf16, x = xf16; // specific atan2f16
+// specific atan2f16: inputs are the binary16 bit patterns of y and x
+uint16_t zmath_core_atan2h_bits(uint16_t y_bits, uint16_t x_bits){
+  float y = zmath_half_to_float_bits(y_bits),
+        x = zmath_half_to_float_bits(x_bits); // specific atan2f16
+
   static const double cn[] =
     {0x1p+0, 0x1.40e0698f94c35p+1, 0x1.248c5da347f0dp+1, 0x1.d873386572976p-1, 0x1.46fa40b20f1dp-3,
      0x1.33f5e041eed0fp-7, 0x1.546bbf28667c5p-14};
@@ -111,34 +118,34 @@ _Float16 cr_atan2f16(_Float16 yf16, _Float16 xf16){
   if(__builtin_expect(ay >= (0xff<<23)||ax >= (0xff<<23), 0)){ // x or y is nan or inf
     /* we use x+y below so that the invalid exception is set
        for (x,y) = (qnan,snan) or (snan,qnan) */
-    if(ay > (0xff<<23)) return x + y; // case y nan
-    if(ax > (0xff<<23)) return x + y; // case x nan
+    if(ay > (0xff<<23)) return zmath_half_nan_bits(y_bits); // case y nan
+    if(ax > (0xff<<23)) return zmath_half_nan_bits(x_bits); // case x nan
     uint32_t yinf = ay==(0xff<<23), xinf = ax==(0xff<<23);
     if(yinf&xinf){
       if(ux>>31)
-	return 0x1.2d97c7f3321d2p+1*sgn[uy>>31]; // +/-3pi/4
+	return zmath_half_from_double_bits(0x1.2d97c7f3321d2p+1*sgn[uy>>31]); // +/-3pi/4
       else
-	return 0x1.921fb54442d18p-1*sgn[uy>>31]; // +/-pi/4
+	return zmath_half_from_double_bits(0x1.921fb54442d18p-1*sgn[uy>>31]); // +/-pi/4
     }
     if(xinf){
       if(ux>>31)
-	return pi*sgn[uy>>31];
+	return zmath_half_from_double_bits(pi*sgn[uy>>31]);
       else
-	return 0.0*sgn[uy>>31];
+	return zmath_half_from_double_bits(0.0*sgn[uy>>31]);
     }
     if(yinf){
-      return pi2*sgn[uy>>31];
+      return zmath_half_from_double_bits(pi2*sgn[uy>>31]);
     }
   }
   if(__builtin_expect(ay==0, 0)){
     if(__builtin_expect(!ax,0)){
       uint32_t i = (uy>>31)*4 + (ux>>31)*2;
       if(ux>>31)
-	return off[i] + offl[i];
+	return zmath_half_from_double_bits(off[i] + offl[i]);
       else
-	return off[i];
+	return zmath_half_from_double_bits(off[i]);
     }
-    if(!(ux>>31)) return 0.0*sgn[uy>>31];
+    if(!(ux>>31)) return zmath_half_from_double_bits(0.0*sgn[uy>>31]);
   }
   uint32_t gt = ay>ax, i = (uy>>31)*4 + (ux>>31)*2 + gt;
 
@@ -180,10 +187,10 @@ _Float16 cr_atan2f16(_Float16 yf16, _Float16 xf16){
     double zh,zl;
     if(!gt){
       zh = zy/zx;
-      zl = __builtin_fma(zh,-zx,zy)/zx;
+      zl = zmath_fma(zh,-zx,zy)/zx;
     } else {
       zh = zx/zy;
-      zl = __builtin_fma(zh,-zy,zx)/zy;
+      zl = zmath_fma(zh,-zy,zx)/zy;
     }
     double z2l, z2h = muldd(zh,zl,zh,zl,&z2l);
     static const double c[32][2] =
@@ -221,12 +228,11 @@ _Float16 cr_atan2f16(_Float16 yf16, _Float16 xf16){
     }
     r = th + tm;
   }
-  _Float16 rf = r; /* specific atan2f16: we round to _Float16 directly to
-                      avoid a double-rounding issue. For example for
-                      y,x=0x1.8p+0,-0x1.c4p-18 and rndn, we have
-                      r=0x1.922000999826dp+0: if we first round to float,
-                      we get rf=0x1.922p+0, which is incorrectly rounded
-                      to 0x1.92p+0 instead of the correct result 0x1.924p+0 */
-  return rf;
+  return zmath_half_from_double_bits(r); /* specific atan2f16: we round to binary16 directly to
+                                         avoid a double-rounding issue. For example for
+                                         y,x=0x1.8p+0,-0x1.c4p-18 and rndn, we have
+                                         r=0x1.922000999826dp+0: if we first round to float,
+                                         we get rf=0x1.922p+0, which is incorrectly rounded
+                                         to 0x1.92p+0 instead of the correct result 0x1.924p+0 */
 }
 

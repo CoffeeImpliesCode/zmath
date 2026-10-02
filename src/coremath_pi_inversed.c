@@ -1,6 +1,8 @@
 /* Direct correctly-rounded inverse-pi kernels for binary64. */
 #include <stdint.h>
 
+#include "coremath_fma.h"
+
 /* Pinned CORE-MATH source: revision 3bafed75e3c22399531857d63a3fa0e24bfb42fa, src/binary64/asinpi/asinpi.c. */
 /* Correctly-rounded binary64 asinpi function.
 
@@ -171,7 +173,7 @@ static double zmath_pi_asinpid_acc(double x){
     fi.a = Sm + zmath_pi_asinpid_muU(sm>>1, zmath_pi_asinpid_pasin(sm2.a));
     se += 0x3ff;
   } else {
-    double xx = __builtin_fma(x,-x,1.0);
+    double xx = zmath_fma(x,-x,1.0);
     zmath_pi_asinpid_b64u64_u ixx = {.f = 1.0/xx}, c = {.f = __builtin_sqrt(xx)};
     ixx.f *= c.f;
     double x2 = x*x;
@@ -275,45 +277,45 @@ static double zmath_pi_asinpid_tiny (double x)
     l = 0x1.fffffffffffffp-110;
     t.f = (x > 0) ? 1.0 : -1.0;
     t.u -= (uint64_t) (0x3c9 - e) << 52;
-    return __builtin_fma (l, t.f, h * t.f);
+    return zmath_fma (l, t.f, h * t.f);
   }
 
   /* exceptional case +/-0x1.5cba89af1f855p-1020 */
   if (au == 0x35cba89af1f855llu)
     return (x > 0)
-      ? __builtin_fma (0x1p-600, -0x1p-600, 0x1.bc03df34e902cp-1022)
-      : __builtin_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1022);
+      ? zmath_fma (0x1p-600, -0x1p-600, 0x1.bc03df34e902cp-1022)
+      : zmath_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1022);
 
   /* exceptional case +/-0x1.5cba89af1f855p-1022 */
   if (au == 0x15cba89af1f855llu) {
     return (x > 0)
-      ? __builtin_fma (-0x1p-600, 0x1p-600, 0x1.bc03df34e902cp-1024)
-      : __builtin_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1024);
+      ? zmath_fma (-0x1p-600, 0x1p-600, 0x1.bc03df34e902cp-1024)
+      : zmath_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1024);
   }
 
   /* exceptional case +/-0x1.68e6482549db1p-1022 */
   if (au == 0x168e6482549db1llu) {
     return (x > 0)
-      ? __builtin_fma (0x1p-600, 0x1p-600, 0x1.cb82f5da3a6b4p-1024)
-      : __builtin_fma (-0x1p-600, 0x1p-600, -0x1.cb82f5da3a6b4p-1024);
+      ? zmath_fma (0x1p-600, 0x1p-600, 0x1.cb82f5da3a6b4p-1024)
+      : zmath_fma (-0x1p-600, 0x1p-600, -0x1.cb82f5da3a6b4p-1024);
   }
 
   /* exceptional case 0x1.5cba89af1f855p-1021 */
   if (au == 0x25cba89af1f855llu) {
     return (x > 0)
-      ? __builtin_fma (-0x1p-600, 0x1p-600, 0x1.bc03df34e902cp-1023)
-      : __builtin_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1023);
+      ? zmath_fma (-0x1p-600, 0x1p-600, 0x1.bc03df34e902cp-1023)
+      : zmath_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1023);
   }
 
   /* we compute h before scaling, so that h is exactly representable */
   h = x * ZMATH_PI_ASINPID_ONE_OVER_PIH;
   double sx  = x * 0x1p106; /* scale x */
-  l = __builtin_fma (sx, ZMATH_PI_ASINPID_ONE_OVER_PIH, -h * 0x1p106);
-  l = __builtin_fma (sx, ZMATH_PI_ASINPID_ONE_OVER_PIL, l);
+  l = zmath_fma (sx, ZMATH_PI_ASINPID_ONE_OVER_PIH, -h * 0x1p106);
+  l = zmath_fma (sx, ZMATH_PI_ASINPID_ONE_OVER_PIL, l);
   /* scale back */
   /* for RNDN/RNDU, asinpi(x) underflows for 0 < x <= 0x1.921fb54442d17p-1021,
      for RNDZ for |x| <= 0x1.921fb54442d18p-1021, in which case |res| < 2^-1022 */
-  double res = __builtin_fma (l, 0x1p-106, h);
+  double res = zmath_fma (l, 0x1p-106, h);
   return res;
 }
 
@@ -355,13 +357,13 @@ static double zmath_pi_asinpid_small (double x)
      on [2^-53, 2^-26] */
   static double c1h = 0x1.45f306dc9c883p-2, c1l = -0x1.6b01ec5417057p-56;
   static double c3 = 0x1.b2995e7b7b606p-5;
-  double h = c1h, l = __builtin_fma (c3, x * x, c1l);
+  double h = c1h, l = zmath_fma (c3, x * x, c1l);
   /* multiply h+l by x */
   double hh, ll;
   hh = h * x;
-  ll = __builtin_fma (h, x, -hh);
+  ll = zmath_fma (h, x, -hh);
   /* hh+ll = h*x */
-  ll = __builtin_fma (l, x, ll);
+  ll = zmath_fma (l, x, ll);
   return hh + ll;
 }
 
@@ -512,7 +514,7 @@ double zmath_core_asinpid_finite_bits(double x, uint64_t bits){
     }
     e += 0x3ff;
   } else { /* case |x| >= 2^-6 */
-    double xx = __builtin_fma(x,-x,1.0); /* xx = 1-x^2 */
+    double xx = zmath_fma(x,-x,1.0); /* xx = 1-x^2 */
     zmath_pi_asinpid_b64u64_u ixx = {.f = 1.0/xx}, c = {.f = __builtin_sqrt (xx)};
     /* we have xx = (1-x^2)*(1+theta1) with |theta1| < 2^-52
        thus c = sqrt(1-x^2)*sqrt(1+theta1)*(1+theta2) with |theta2| < 2^-52
@@ -540,7 +542,7 @@ double zmath_core_asinpid_finite_bits(double x, uint64_t bits){
     c0 += x2*c2;
     /* The pinned source marks this pair for FMA: the exact real expression
        is unchanged, while one rounding replaces the old multiply and add. */
-    c0 = __builtin_fma (c0, c.f, 64.0);
+    c0 = zmath_fma (c0, c.f, 64.0);
     zmath_pi_asinpid_b64u64_u ic = {.f = c0};
     int indx = ((ic.u&(~0ull>>12)) + (1ll<<(52-7))) >> (52-6);
     /* indx = round(c0)-64. We have indx < 64 since c0 is decreasing with
@@ -745,15 +747,15 @@ SOFTWARE.
 // Multiply exactly a and b, such that *hi + *lo = a * b.
 static inline void zmath_pi_acospid_a_mul(double *hi, double *lo, double a, double b) {
   *hi = a * b;
-  *lo = __builtin_fma (a, b, -*hi);
+  *lo = zmath_fma (a, b, -*hi);
 }
 
 // Returns (ah + al) * (bh + bl) - (al * bl)
 static inline void zmath_pi_acospid_d_mul(double *hi, double *lo, double ah, double al,
                          double bh, double bl) {
   zmath_pi_acospid_a_mul (hi, lo, ah, bh);
-  *lo = __builtin_fma (ah, bl, *lo);
-  *lo = __builtin_fma (al, bh, *lo);
+  *lo = zmath_fma (ah, bl, *lo);
+  *lo = zmath_fma (al, bh, *lo);
 }
 
 /****************** end of code copied from pow.[ch] *************************/
@@ -775,7 +777,7 @@ zmath_pi_acospid_sqrt_dbl_dbl (double x, double *l)
   double h = __builtin_sqrt (x);
   /* h = sqrt(x) * (1 + e1) with |e1| < 2^-52
      thus h^2 = x * (1 + e2) with |e2| < 2^-50.999 */
-  double e = -__builtin_fma (h, h, -x); // exact
+  double e = -zmath_fma (h, h, -x); // exact
   /* e = x - h^2 */
   *l = e / (h + h);
   /* If there is no rounding error in l = e/(2h),
@@ -1541,7 +1543,7 @@ zmath_pi_acospid_accurate_path (double x)
     }
     // for |x| <= 0x1.921fb54442d18p-54, acospi(x) rounds to 0.5 to nearest
     if (absx <= 0x1.921fb54442d18p-54)
-      return __builtin_fma (x, -0.125, 0.5);
+      return zmath_fma (x, -0.125, 0.5);
     // end_acospi
 
     p = zmath_pi_acospid_T2[i];
@@ -1652,14 +1654,14 @@ zmath_core_acospid (double x)
     double yy = y * y;
     /* evaluate in parallel p[1] + p[2] * y and p[3] + p[4] * y, and
        p[5] + p[6] * y using Estrin's scheme */
-    double p56 = __builtin_fma (p[6], y, p[5]);
-    double p34 = __builtin_fma (p[4], y, p[3]);
-    zh = __builtin_fma (p56, yy, p34);
-    zh = __builtin_fma (zh, y, p[2]);
+    double p56 = zmath_fma (p[6], y, p[5]);
+    double p34 = zmath_fma (p[4], y, p[3]);
+    zh = zmath_fma (p56, yy, p34);
+    zh = zmath_fma (zh, y, p[2]);
     zmath_pi_acospid_fast_two_sum (&zh, &zl, p[1], y * zh);
     double du, dv;
     zmath_pi_acospid_fast_two_sum (&du, &dv, p[0], zh * y);
-    dv = __builtin_fma (zl, y, dv);
+    dv = zmath_fma (zl, y, dv);
     /* Special case for i=0, since we are obliged to use xmid=0 (so that
        x-xmid is exact) thus we can't use Gal's trick.  This costs about
        0.5 cycle in the average time (for both branches).  */
@@ -1683,8 +1685,8 @@ zmath_core_acospid (double x)
          we conjecture |v| < 2^-50. Then |v*ONE_OVER_PIL| < 2^-105
        * the rounding error in d_mul. The d_mul call decomposes into:
          a_mul (u, lo1, u_in, ONE_OVER_PIH)
-         lo2 = __builtin_fma (u_in, ONE_OVER_PIL, lo1)
-         v = __builtin_fma (v_in, ONE_OVER_PIH, lo2)
+         lo2 = zmath_fma (u_in, ONE_OVER_PIL, lo1)
+         v = zmath_fma (v_in, ONE_OVER_PIH, lo2)
          Since |u| <= acos(-0.75)/pi < 0.8 we have |lo1| <= ulp(0.8) <= 2^-53.
          Then since |u_in| <= 2.42, |lo2| <= |2.42*ONE_OVER_PIL|+2^-53
                                           < 2^-52.485
@@ -1721,10 +1723,10 @@ zmath_core_acospid (double x)
     double zh, zl;
     /* use Estrin's scheme to evaluate p2 + p3*y + p4*y^2 + p5*y^3 */
     double yy = y * y;
-    double p45 = __builtin_fma (p[5], y, p[4]);
-    double p23 = __builtin_fma (p[3], y, p[2]);
-    zh = __builtin_fma (p45, yy, p23);
-    zh = __builtin_fma (zh, y, p[1]);
+    double p45 = zmath_fma (p[5], y, p[4]);
+    double p23 = zmath_fma (p[3], y, p[2]);
+    zh = zmath_fma (p45, yy, p23);
+    zh = zmath_fma (zh, y, p[1]);
     zmath_pi_acospid_fast_two_sum (&zh, &zl, p[0], zh * y);
     double l1zh = l1 * zh; /* compute earlier */
     double h1zl = h1 * zl;
@@ -1751,8 +1753,8 @@ zmath_core_acospid (double x)
          we conjecture |v| < 2^-50. Then |v*ONE_OVER_PIL| < 2^-105
        * the rounding error in d_mul. The d_mul call decomposes into:
          a_mul (u, lo1, u_in, ONE_OVER_PIH)
-         lo2 = __builtin_fma (u_in, ONE_OVER_PIL, lo1)
-         v = __builtin_fma (v_in, ONE_OVER_PIH, lo2)
+         lo2 = zmath_fma (u_in, ONE_OVER_PIL, lo1)
+         v = zmath_fma (v_in, ONE_OVER_PIH, lo2)
          Since |u| <= acospi(-1) < 1 we have |lo1| <= ulp(1-) <= 2^-53.
          Then since |u_in| <= pi, |lo2| <= |pi*ONE_OVER_PIL|+2^-53
                                           < 2^-52.361.
@@ -1848,7 +1850,7 @@ static inline double zmath_pi_atanpid_adddd(double xh, double xl, double ch, dou
 }
 
 static inline double zmath_pi_atanpid_muldd_acc(double xh, double xl, double ch, double cl, double *l){
-  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = __builtin_fma(ch, xh, -ahhh);
+  double ahlh = ch*xl, alhh = cl*xh, ahhh = ch*xh, ahhl = zmath_fma(ch, xh, -ahhh);
   ahhl += alhh + ahlh;
   return zmath_pi_atanpid_fasttwosum (ahhh, ahhl, l);
 }
@@ -1957,11 +1959,11 @@ static double zmath_pi_atanpid_asympt (double x)
   double yh, yl;
   yh = 1.0 / x;
   // Newton's iteration for the inverse is y = y + y*(1-x*y)
-  yl = yh * __builtin_fma (yh, -x, 1.0);
+  yl = yh * zmath_fma (yh, -x, 1.0);
   m = zmath_pi_atanpid_muldd_acc (yh, yl, ZMATH_PI_ATANPID_ONE_OVER_PIH, ZMATH_PI_ATANPID_ONE_OVER_PIL, &l);
   // m + l ~ 1/pi * 1/x
   m = -m;
-  l = __builtin_fma (ZMATH_PI_ATANPID_ONE_OVER_3PI * yh, yh * yh, - l);
+  l = zmath_fma (ZMATH_PI_ATANPID_ONE_OVER_3PI * yh, yh * yh, - l);
   // m + l ~ - 1/pi * 1/x + 1/(3pi) * 1/x^3
   h = zmath_pi_atanpid_fasttwosum (h, m, &m);
   m = zmath_pi_atanpid_fasttwosum (m, l, &l);
@@ -1978,9 +1980,9 @@ static double zmath_pi_atanpid_tiny (double x)
 {
   double h, l;
   h = x * ZMATH_PI_ATANPID_ONE_OVER_PIH;
-  l = __builtin_fma (x, ZMATH_PI_ATANPID_ONE_OVER_PIH, -h);
-  l = __builtin_fma (x, ZMATH_PI_ATANPID_ONE_OVER_PIL, l);
-  l = __builtin_fma (-ZMATH_PI_ATANPID_ONE_OVER_3PI * x, x * x,  l);
+  l = zmath_fma (x, ZMATH_PI_ATANPID_ONE_OVER_PIH, -h);
+  l = zmath_fma (x, ZMATH_PI_ATANPID_ONE_OVER_PIL, l);
+  l = zmath_fma (-ZMATH_PI_ATANPID_ONE_OVER_3PI * x, x * x,  l);
 #define ZMATH_PI_ATANPID_EXCEPTIONS 20
   static const double exceptions[ZMATH_PI_ATANPID_EXCEPTIONS][3] = {
    {0x1.9b46cfb0f10cap-37, 0x1.05d3aa746e163p-38, -0x1.94a704a0e798p-149},
@@ -2097,14 +2099,14 @@ static double __attribute__((noinline)) zmath_pi_atanpid_refine2(double x, doubl
   double h,hl;
   if(i==128) {
     h = -1.0/x;
-    hl = __builtin_fma(h,x,1)*h;
+    hl = zmath_fma(h,x,1)*h;
   } else {
     double ta = __builtin_copysign(zmath_pi_atanpid_A[i][0], x);
-    double zta = x*ta, ztal = __builtin_fma(x, ta, -zta), zmta = x - ta;
+    double zta = x*ta, ztal = zmath_fma(x, ta, -zta), zmta = x - ta;
     double v = 1 + zta, d = 1 - v, ev = (d + zta) - ((d + v) - 1) + ztal;
-    double r = 1.0/v, rl = (__builtin_fma(r, -v, 1.0) - ev*r)*r;
+    double r = 1.0/v, rl = (zmath_fma(r, -v, 1.0) - ev*r)*r;
     h = r*zmta;
-    hl = __builtin_fma(r,zmta,-h) + rl*zmta;
+    hl = zmath_fma(r,zmta,-h) + rl*zmta;
   }
   double h2l, h2 = zmath_pi_atanpid_muldd_acc(h, hl, h, hl, &h2l), h4 = h2*h2;
   double h3l, h3 = zmath_pi_atanpid_muldd_acc(h, hl, h2, h2l, &h3l);
@@ -2141,8 +2143,8 @@ zmath_pi_atanpid_small (double x)
     return x;
   if (__builtin_fabs (x) == 0x1.5cba89af1f855p-1022) {
     return (x > 0)
-      ? __builtin_fma (-0x1p-600, 0x1p-600, 0x1.bc03df34e902cp-1024)
-      :__builtin_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1024);
+      ? zmath_fma (-0x1p-600, 0x1p-600, 0x1.bc03df34e902cp-1024)
+      :zmath_fma (0x1p-600, 0x1p-600, -0x1.bc03df34e902cp-1024);
   }
   // generic worst case
   zmath_pi_atanpid_b64u64_u v = {.f = x};
@@ -2152,17 +2154,17 @@ zmath_pi_atanpid_small (double x)
     if ((e & 0x7ff) > 2) {
       v.u = ((e - 2) << 52) | 0xb824198b94a89;
     return (x > 0)
-      ? __builtin_fma (0x1p-600, 0x1p-600, v.f)
-      : __builtin_fma (-0x1p-600, 0x1p-600, v.f);
+      ? zmath_fma (0x1p-600, 0x1p-600, v.f)
+      : zmath_fma (-0x1p-600, 0x1p-600, v.f);
     }
   }
   h = x * ZMATH_PI_ATANPID_ONE_OVER_PIH;
   /* Assuming h = x*ONE_OVER_PIH - e, the correction term is
      e + x * ONE_OVER_PIL, but we need to scale values to avoid underflow. */
-  double corr = __builtin_fma (x * 0x1p106, ZMATH_PI_ATANPID_ONE_OVER_PIH, -h * 0x1p106);
-  corr = __builtin_fma (x * 0x1p106, ZMATH_PI_ATANPID_ONE_OVER_PIL, corr);
+  double corr = zmath_fma (x * 0x1p106, ZMATH_PI_ATANPID_ONE_OVER_PIH, -h * 0x1p106);
+  corr = zmath_fma (x * 0x1p106, ZMATH_PI_ATANPID_ONE_OVER_PIL, corr);
   // now return h + corr * 2^-106
-  double res = __builtin_fma (corr, 0x1p-106, h);
+  double res = zmath_fma (corr, 0x1p-106, h);
   return res;
 }
 
@@ -2191,8 +2193,8 @@ double zmath_core_atanpid (double x){
     /* The rounding error in muldd_acc and the approximation error between
        1/pi and ONE_OVER_PIH + ONE_OVER_PIL are covered by the difference
        between 0x4.8p-52*pi and 0x1.6fp-52, which is > 2^-61.8. */
-    double ub = h + __builtin_fma (0x1.6fp-68, x, l);
-    double lb = h + __builtin_fma (-0x1.6fp-68, x, l);
+    double ub = h + zmath_fma (0x1.6fp-68, x, l);
+    double lb = h + zmath_fma (-0x1.6fp-68, x, l);
     if (__builtin_expect (ub == lb, 1)) return ub;
     // end_atanpi
     ub = (f + f*0x4.8p-52) + x; // atanpi_specific, original value in atan.c
@@ -2231,7 +2233,7 @@ double zmath_core_atanpid (double x){
   }
   double h2 = h*h, h4 = h2*h2;
   double f = (ch[0] + h2*ch[1]) + h4*(ch[2] + h2*ch[3]);
-  al = __builtin_fma(h, f, al);
+  al = zmath_fma(h, f, al);
   // begin_atanpi
   /* Now ah + al approximates atan(x) with error bounded by 0x3.fp-52*h
      (see atan.c), thus by 0x1.41p-52*h after multiplication by 1/pi.
@@ -2322,7 +2324,7 @@ typedef union {
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
     uint64_t m, h, l; // put m before h on little-endian processor
 #else
-    uint64_t h, m, l; // put h before m on little-endian processor
+    uint64_t h, m, l; // put h before m on big-endian processor
 #endif
     int64_t ex;
     uint64_t sgn;
@@ -2699,7 +2701,7 @@ zmath_pi_atan2pid_tint_tod (const zmath_pi_atan2pid_tint_t *a, uint64_t err, dou
   }
   static const double S[2] = {1.0, -1.0};
   double s = S[a->sgn];
-  h = __builtin_fma (l, s, s * h);
+  h = zmath_fma (l, s, s * h);
   h *= 0x1p-52;
   // now -1021 <= ex <= 1024, thus 2^(ex-1) does not underflow/overflow
   return h * zmath_pi_atan2pid_pow2_normal (ex - 1);
@@ -3430,7 +3432,7 @@ static void zmath_pi_atan2pid_fast_div (double *h, double *l, double bh, double 
      Dividing by ah>=1 yields: |bh/ah-z'| < 2^-100.999 too.
      We assume the same bound hold for b,a: |b/a-z'| < 2^-100.999.
   */
-  double eh = __builtin_fma (ah, -*h, bh);
+  double eh = zmath_fma (ah, -*h, bh);
   /* The condition 2^-969 <= |bh| ensures that ah*h, which has at most 106
      significant bits, and approximates bh, does not underflow, thus the
      usual error analysis applies. */
@@ -3473,14 +3475,14 @@ zmath_pi_atan2pid_dd_sum1 (double *h, double *l, double ah, double bh, double bl
 // Multiply exactly a and b, such that *hi + *lo = a * b.
 static inline void zmath_pi_atan2pid_a_mul(double *hi, double *lo, double a, double b) {
   *hi = a * b;
-  *lo = __builtin_fma (a, b, -*hi);
+  *lo = zmath_fma (a, b, -*hi);
 }
 
 // Multiply a double with a double double : a * (bh + bl)
 static inline void zmath_pi_atan2pid_s_mul (double *hi, double *lo, double a, double bh,
                           double bl) {
   zmath_pi_atan2pid_a_mul (hi, lo, a, bh); /* exact */
-  *lo = __builtin_fma (a, bl, *lo);
+  *lo = zmath_fma (a, bl, *lo);
 }
 
 // Returns (ah + al) * (bh + bl) - (al * bl)
@@ -3490,8 +3492,8 @@ static inline void zmath_pi_atan2pid_d_mul(double *hi, double *lo, double ah, do
   double s, t;
 
   zmath_pi_atan2pid_a_mul(hi, &s, ah, bh);
-  t = __builtin_fma(al, bh, s);
-  *lo = __builtin_fma(ah, bl, t);
+  t = zmath_fma(al, bh, s);
+  *lo = zmath_fma(ah, bl, t);
 }
 
 /* Requires finite nonzero operands, x > 0, and raw exponent gap <= -97.
@@ -3575,9 +3577,9 @@ zmath_pi_atan2pid_fast(double y, double x,
   zh -= zmath_pi_atan2pid_Xfast[i];
 #define ZMATH_PI_ATAN2PID_P9 0x1.c6e5d41706f0dp-4 // degree-9 coefficient for i=0
   double z = zh + zl, t;
-  h = (i == 0) ? __builtin_fma (ZMATH_PI_ATAN2PID_P9, z * z, p[9]) : p[9];
+  h = (i == 0) ? zmath_fma (ZMATH_PI_ATAN2PID_P9, z * z, p[9]) : p[9];
   for (int j = 6; j >= 2; j--)
-    h = __builtin_fma (h, z, p[2+j]); // degree j
+    h = zmath_fma (h, z, p[2+j]); // degree j
   // degree 1: h + l <- h * (zh + zl) + p[2] + p[3]
   zmath_pi_atan2pid_s_mul (&h, &l, h, zh, zl);
   zmath_pi_atan2pid_fast_two_sum (&h, &t, p[2], h);
@@ -3612,8 +3614,8 @@ zmath_pi_atan2pid_fast(double y, double x,
          thus |h + l - 1| < 2^-70.999 + 2^-103.999 < 2^-70.998.
          The d_mul (h, l, *h, *l, zh, zl) call decomposes into:
            a_mul(h, s, h_in, zh)
-           u = __builtin_fma(l_in, zh, s)
-           l = __builtin_fma(h_in, zl, u)
+           u = zmath_fma(l_in, zh, s)
+           l = zmath_fma(h_in, zl, u)
          with error bounded by:
          |h + l - (h_in+l_in)*(zh+zl)| < ulp(u) + ulp(l) + |l_in|*|zl|
          Since |h_in| <= 1, |zh| < 2^e, we have |h| < 2^e and |s| < 2^(e-53).
@@ -3669,8 +3671,8 @@ zmath_pi_atan2pid_fast(double y, double x,
 
      The d_mul() call decomposes into:
      a_mul(h, s, h_in, ONE_OVER_PI_H)
-     t = __builtin_fma(l_in, ONE_OVER_PI_H, s)
-     l = __builtin_fma(h_in, ONE_OVER_PI_L, t)
+     t = zmath_fma(l_in, ONE_OVER_PI_H, s)
+     l = zmath_fma(h_in, ONE_OVER_PI_L, t)
      The first rounding error is bounded by ulp(t). We have |s| < ulp(h)
      thus |s| < 2^-52*|h|. And |l_in| < 2^-47.699*|h_in| thus
      |l_in*ONE_OVER_PI_H| < 2^-47.699*|h|. This yields
@@ -3759,8 +3761,8 @@ zmath_pi_atan2pid_fast(double y, double x,
   }
   // atan2pi_end
   double err = zmath_pi_atan2pid_err_fast[i];
-  double left = h + __builtin_fma(h, -err, l);
-  double right = h + __builtin_fma(h, +err, l);
+  double left = h + zmath_fma(h, -err, l);
+  double right = h + zmath_fma(h, +err, l);
   if (__builtin_expect(left == right, 1))
     return left;
   return zmath_pi_atan2pid_unresolved();

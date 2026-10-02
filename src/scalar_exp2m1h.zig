@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_exp2m1h_data.zig");
 
 const sign_mask: u16 = 0x8000;
@@ -60,13 +62,13 @@ pub fn exp2m1h(value: f16) f16 {
 
         const value_f32: f32 = value;
         const scaled = 0x1.62e430p-1 * value_f32;
-        const quadratic = @mulAdd(f32, scaled, 0x1.555556p-2 * scaled, scaled);
-        return @floatCast(@mulAdd(f32, quadratic, 0.5 * scaled, scaled));
+        const quadratic = fma_impl.fma(scaled, 0x1.555556p-2 * scaled, scaled);
+        return @floatCast(fma_impl.fma(quadratic, 0.5 * scaled, scaled));
     }
 
     const table_1_index: usize = @intCast(input_bits >> 5);
     const table_2_index: usize = @intCast(((input_bits >> 10) << 5) | (input_bits & 0x1f));
     const first: f32 = @bitCast(data.t1[table_1_index]);
     const second: f32 = @bitCast(data.t2[table_2_index]);
-    return @floatCast(@mulAdd(f32, first, second, -1.0));
+    return @floatCast(fma_impl.fma(first, second, -1.0));
 }

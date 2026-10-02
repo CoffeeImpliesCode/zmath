@@ -1,0 +1,385 @@
+{
+  "source": "#include <stdint.h>\n#if defined(__BITINT_MAXWIDTH__) && __BITINT_MAXWIDTH__ >= 128\ntypedef _BitInt(128) i128;\ntypedef unsigned _BitInt(128) u128;\n#elif defined(__SIZEOF_INT128__)\ntypedef __int128 i128;\ntypedef unsigned __int128 u128;\n#else\n#error \"No signed and unsigned 128-bit integer type\"\n#endif\n_Static_assert(sizeof(i128) == 16 && sizeof(u128) == 16, \"128-bit storage\");\nu128 wide_multiply(u128 a, u128 b) { return a * b; }\nu128 wide_divide(u128 a, u128 b) { return a / b; }\nu128 wide_shift(u128 a, unsigned s) { return a >> (s & 127); }\ni128 signed_shift(i128 a, unsigned s) { return a >> (s & 127); }\nuint64_t wide_low_word(u128 a) { return (uint64_t)a; }\nuint64_t wide_high_word(u128 a) { return (uint64_t)(a >> 64); }\n",
+  "results": [
+    {
+      "architecture": "x86_64",
+      "target": "x86_64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "x86_64-linux",
+        "-mfma",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-x86_64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "aarch64",
+      "target": "aarch64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "aarch64-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-aarch64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "aarch64_be",
+      "target": "aarch64_be-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "aarch64_be-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-aarch64_be.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "arm",
+      "target": "arm-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "arm-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-arm.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "armeb",
+      "target": "armeb-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "armeb-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-armeb.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "hexagon",
+      "target": "hexagon-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "hexagon-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-hexagon.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "loongarch64",
+      "target": "loongarch64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "loongarch64-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-loongarch64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "mips",
+      "target": "mips-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mips-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-mips.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "mipsel",
+      "target": "mipsel-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mipsel-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-mipsel.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "mips64",
+      "target": "mips64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mips64-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-mips64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "zig: warning: ignoring '-fno-PIC' option as it cannot be used with implicit usage of -mabicalls and the N64 ABI [-Woption-ignored]\n"
+    },
+    {
+      "architecture": "mips64el",
+      "target": "mips64el-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mips64el-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-mips64el.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": "zig: warning: ignoring '-fno-PIC' option as it cannot be used with implicit usage of -mabicalls and the N64 ABI [-Woption-ignored]\n"
+    },
+    {
+      "architecture": "powerpc",
+      "target": "powerpc-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "powerpc-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-powerpc.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "powerpc64",
+      "target": "powerpc64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "powerpc64-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-powerpc64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "powerpc64le",
+      "target": "powerpc64le-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "powerpc64le-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-powerpc64le.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "riscv32",
+      "target": "riscv32-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "riscv32-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-riscv32.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "riscv64",
+      "target": "riscv64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "riscv64-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-riscv64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "s390x",
+      "target": "s390x-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "s390x-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-s390x.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "thumb",
+      "target": "thumb-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "thumb-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-thumb.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "thumbeb",
+      "target": "thumbeb-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "thumbeb-linux",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-thumbeb.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "wasm32",
+      "target": "wasm32-wasi",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "wasm32-wasi",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-wasm32.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "x86",
+      "target": "x86-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "x86-linux",
+        "-mfma",
+        "-ffreestanding",
+        "-c",
+        "./zig-out/portability-probes/wide-integer.c",
+        "-o",
+        "./zig-out/portability-probes/wide-x86.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const rsqrth_data = @import("scalar_rsqrth_data.zig");
 
 const sign_mask_h: u16 = 0x8000;
@@ -222,11 +224,11 @@ inline fn rsqrtdFinite(value: f64) f64 {
     const reciprocal = 1.0 / value;
     const estimate = @sqrt(value) * reciprocal;
     const negative_half = -0.5 * value;
-    const sigma = @mulAdd(f64, negative_half, reciprocal, 0.5);
-    const tau = @mulAdd(f64, estimate, estimate, -reciprocal);
-    const nu = @mulAdd(f64, negative_half, tau, sigma);
-    const refined = @mulAdd(f64, estimate, nu, estimate);
-    const correction = @mulAdd(f64, estimate, nu, estimate - refined);
+    const sigma = fma_impl.fma64(negative_half, reciprocal, 0.5);
+    const tau = fma_impl.fma64(estimate, estimate, -reciprocal);
+    const nu = fma_impl.fma64(negative_half, tau, sigma);
+    const refined = fma_impl.fma64(estimate, nu, estimate);
+    const correction = fma_impl.fma64(estimate, nu, estimate - refined);
 
     // With u=2^-53, the seed error is below (3+4u)u and nu approximates
     // (1-value*estimate^2)/2 with absolute error below 8u^2. The Newton
@@ -235,7 +237,7 @@ inline fn rsqrtdFinite(value: f64) f64 {
     // Rounding cells are symmetric except below powers of two. Input
     // spacing excludes a root below a power when refined equals that
     // power, so one outward endpoint certifies both directions.
-    const outside = refined + @mulAdd(f64, refined, 0x1p-100, @abs(correction));
+    const outside = refined + fma_impl.fma64(refined, 0x1p-100, @abs(correction));
     if (outside != refined) {
         @branchHint(.unlikely);
         return rsqrtdRefine(refined, value);

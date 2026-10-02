@@ -6,3 +6,9 @@ graphify-out/
 .jj/
 .direnv/
 codedb.snapshot
+
+# Local-only in-tree files: handoff notes, the root probe scaffold and the
+# src/ dot-file probe scaffolds.
+/HANDOFF-packup.md
+/.portability-primitives.zig
+/src/.*

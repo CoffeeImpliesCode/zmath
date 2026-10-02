@@ -6,39 +6,7 @@
 
 #include <stdint.h>
 
-/* __builtin_roundeven was introduced in gcc 10:
-   https://gcc.gnu.org/gcc-10/changes.html,
-   and in clang 17. */
-#if ((defined(__GNUC__) && __GNUC__ >= 10) || (defined(__clang__) && __clang_major__ >= 17)) && !defined(_MSC_VER) && (defined(__aarch64__) || defined(__x86_64__) || defined(__i386__))
-# define roundeven_finite(x) __builtin_roundeven (x)
-#else
-/* Round x to nearest integer, breaking ties to even. */
-static double
-roundeven_finite (double x)
-{
-  double ix;
-# if (defined(__GNUC__) || defined(__clang__)) && (defined(__AVX__) || defined(__SSE4_1__) || (__ARM_ARCH >= 8))
-#  if defined __AVX__
-  __asm__("vroundsd $0x8,%1,%1,%0":"=x"(ix):"x"(x));
-#  elif __ARM_ARCH >= 8
-  __asm__ ("frintn %d0, %d1":"=w"(ix):"w"(x));
-#  else
-  __asm__("roundsd $0x8,%1,%0":"=x"(ix):"x"(x));
-#  endif
-# else
-  ix = __builtin_round (x);
-  if (__builtin_fabs (ix - x) == 0.5)
-  {
-    union { double f; uint64_t n; } u, v;
-    u.f = ix;
-    v.f = ix - __builtin_copysign (1.0, x);
-    if (__builtin_ctz (v.n) > __builtin_ctz (u.n))
-      ix = v.f;
-  }
-# endif
-  return ix;
-}
-#endif
+#include "coremath_roundeven.h"
 
 typedef union {
   float f;
@@ -141,7 +109,7 @@ float cr_tgammaf(float x)
   };
 
   double m = z - 0x1.7p+1;
-  double i = roundeven_finite(m);
+  double i = zmath_roundeven_finite(m);
   double step = __builtin_copysign(1.0, i);
   double d = m - i, d2 = d * d, d4 = d2 * d2, d8 = d4 * d4;
   double f = (c[0] + d * c[1]) + d2 * (c[2] + d * c[3]) +

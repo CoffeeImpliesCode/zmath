@@ -89,16 +89,3 @@ test "fmah product inf + inf opposite sign -> nan" {
         try std.testing.expectEqual(@as(u16, 0x7e00), @as(u16, @bitCast(result)));
     }
 }
-
-test "fmah normal values" {
-    const a: f16 = 1.0;
-    const b: f16 = 2.0;
-    const c: f16 = 3.0;
-    try std.testing.expectEqual(@mulAdd(f16, a, b, c), scalar.fmah(a, b, c));
-    try std.testing.expectEqual(@mulAdd(f16, -1.0, 2.0, 3.0), scalar.fmah(-1.0, 2.0, 3.0));
-    try std.testing.expectEqual(@mulAdd(f16, 1.0, -2.0, 3.0), scalar.fmah(1.0, -2.0, 3.0));
-    try std.testing.expectEqual(@mulAdd(f16, 1.0, 2.0, -3.0), scalar.fmah(1.0, 2.0, -3.0));
-    try std.testing.expectEqual(@mulAdd(f16, 0.0, 2.0, 3.0), scalar.fmah(0.0, 2.0, 3.0));
-    try std.testing.expectEqual(@mulAdd(f16, 1.0, 0.0, 3.0), scalar.fmah(1.0, 0.0, 3.0));
-    try std.testing.expectEqual(@mulAdd(f16, 1.0, 2.0, 0.0), scalar.fmah(1.0, 2.0, 0.0));
-}

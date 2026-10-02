@@ -28,6 +28,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_exp10m1d_data.zig");
 const tiny_scale = @import("scalar_tiny.zig");
 
@@ -58,19 +60,19 @@ fn roundEvenFinite(value: f64) Rounded {
 fn aMul(a: f64, b: f64) DoubleDouble {
     @setFloatMode(.strict);
     const high = a * b;
-    return .{ .high = high, .low = @mulAdd(f64, a, b, -high) };
+    return .{ .high = high, .low = fma_impl.fma64(a, b, -high) };
 }
 fn sMul(a: f64, bh: f64, bl: f64) DoubleDouble {
     @setFloatMode(.strict);
     var r = aMul(a, bh);
-    r.low = @mulAdd(f64, a, bl, r.low);
+    r.low = fma_impl.fma64(a, bl, r.low);
     return r;
 }
 fn dMul(ah: f64, al: f64, bh: f64, bl: f64) DoubleDouble {
     @setFloatMode(.strict);
     var r = aMul(ah, bh);
-    r.low = @mulAdd(f64, ah, bl, r.low);
-    r.low = @mulAdd(f64, al, bh, r.low);
+    r.low = fma_impl.fma64(ah, bl, r.low);
+    r.low = fma_impl.fma64(al, bh, r.low);
     return r;
 }
 fn fastTwoSum(a: f64, b: f64) DoubleDouble {
@@ -104,17 +106,16 @@ fn exp10m1Fast(x: f64) f64 {
     const reduction = roundEvenFinite(x * 0x1.a934f0979a371p+13);
     const k = reduction.value;
     var base10_residual = fastTwoSum(
-        @mulAdd(f64, -k, 0x1.34413509f79ffp-14, x),
+        fma_impl.fma64(-k, 0x1.34413509f79ffp-14, x),
         -k * -0x1.9dc1da98p-71,
     );
-    base10_residual.low = @mulAdd(
-        f64,
+    base10_residual.low = fma_impl.fma64(
         -k,
         -0x1.4fd20dba1f655p-103,
         base10_residual.low,
     );
     var reduced = sMul(base10_residual.high, ln10_high, ln10_low);
-    reduced.low = @mulAdd(f64, base10_residual.low, ln10_high, reduced.low);
+    reduced.low = fma_impl.fma64(base10_residual.low, ln10_high, reduced.low);
 
     const ki = reduction.integer;
     var exponent = (ki >> 12) + 0x3ff;
@@ -131,11 +132,11 @@ fn exp10m1Fast(x: f64) f64 {
     // relative error before subtracting one.
     const r = reduced.high;
     const square = r * r;
-    const polynomial = @mulAdd(f64, @mulAdd(f64, 0x1.5555555555555p-5, r, 0x1.5555555555555p-3), r, 0.5);
+    const polynomial = fma_impl.fma64(fma_impl.fma64(0x1.5555555555555p-5, r, 0x1.5555555555555p-3), r, 0.5);
     const nonlinear = square * polynomial;
     const linear = aMul(result.high, r);
-    const correction = @mulAdd(f64, result.high, reduced.low + nonlinear, linear.low);
-    const tail = @mulAdd(f64, result.low, r, result.low) + correction;
+    const correction = fma_impl.fma64(result.high, reduced.low + nonlinear, linear.low);
+    const tail = fma_impl.fma64(result.low, r, result.low) + correction;
     const exponential = fastTwoSum(result.high, linear.high);
     result = .{ .high = exponential.high, .low = exponential.low + tail };
     if (exponent == 0x7ff) {
@@ -168,9 +169,9 @@ fn exp10m1Fast(x: f64) f64 {
 fn q2(zh: f64, zl: f64) DoubleDouble {
     @setFloatMode(.strict);
     const z = zh + zl;
-    var q = @mulAdd(f64, data.q2[8], zh, data.q2[7]);
-    q = @mulAdd(f64, q, z, data.q2[6]);
-    q = @mulAdd(f64, q, z, data.q2[5]);
+    var q = fma_impl.fma64(data.q2[8], zh, data.q2[7]);
+    q = fma_impl.fma64(q, z, data.q2[6]);
+    q = fma_impl.fma64(q, z, data.q2[5]);
     var r = aMul(q, z);
     var sum = fastTwoSum(data.q2[3], r.high);
     r.high = sum.high;
@@ -198,13 +199,13 @@ fn exp2(value: f64) DoubleDouble {
         k = 4194303.0;
         ki -= 1;
     }
-    var yh = @mulAdd(f64, -k, 0x1.34413509f79ffp-14, value);
+    var yh = fma_impl.fma64(-k, 0x1.34413509f79ffp-14, value);
     var y = fastTwoSum(yh, -k * -0x1.9dc1da98p-71);
     yh = y.high;
-    y.low = @mulAdd(f64, -k, -0x1.4fd20dba1f655p-103, y.low);
+    y.low = fma_impl.fma64(-k, -0x1.4fd20dba1f655p-103, y.low);
     const e = sMul(yh, ln10_high, ln10_low);
     y.high = e.high;
-    y.low = @mulAdd(f64, y.low, ln10_high, e.low);
+    y.low = fma_impl.fma64(y.low, ln10_high, e.low);
     var m = (ki >> 12) + 0x3ff;
     const table_index_2: usize = @intCast((ki >> 6) & 0x3f);
     const table_index_1: usize = @intCast(ki & 0x3f);
@@ -231,12 +232,12 @@ fn exp10m1FastTiny(x: f64) f64 {
     @setFloatMode(.strict);
     const x2 = x * x;
     const x4 = x2 * x2;
-    var c9 = @mulAdd(f64, data.p_fast[12], x, data.p_fast[11]);
-    const c7 = @mulAdd(f64, data.p_fast[10], x, data.p_fast[9]);
-    var c5 = @mulAdd(f64, data.p_fast[8], x, data.p_fast[7]);
-    c9 = @mulAdd(f64, data.p_fast[13], x2, c9);
-    c5 = @mulAdd(f64, c7, x2, c5);
-    c5 = @mulAdd(f64, c9, x4, c5);
+    var c9 = fma_impl.fma64(data.p_fast[12], x, data.p_fast[11]);
+    const c7 = fma_impl.fma64(data.p_fast[10], x, data.p_fast[9]);
+    var c5 = fma_impl.fma64(data.p_fast[8], x, data.p_fast[7]);
+    c9 = fma_impl.fma64(data.p_fast[13], x2, c9);
+    c5 = fma_impl.fma64(c7, x2, c5);
+    c5 = fma_impl.fma64(c9, x4, c5);
     var result = aMul(c5, x);
     const sum = fastTwoSum(data.p_fast[6], result.high);
     result.high = sum.high;
@@ -271,9 +272,9 @@ fn exp10m1AccurateTiny(x: f64) f64 {
     if (exceptionLookup(data.exceptions_accurate_tiny.len, x, &data.exceptions_accurate_tiny)) |r| return r;
     const x2 = x * x;
     const x4 = x2 * x2;
-    var c15 = @mulAdd(f64, data.q_accurate[23], x, data.q_accurate[22]);
-    const c13 = @mulAdd(f64, data.q_accurate[21], x, data.q_accurate[20]);
-    c15 = @mulAdd(f64, data.q_accurate[24], x2, c15);
+    var c15 = fma_impl.fma64(data.q_accurate[23], x, data.q_accurate[22]);
+    const c13 = fma_impl.fma64(data.q_accurate[21], x, data.q_accurate[20]);
+    c15 = fma_impl.fma64(data.q_accurate[24], x2, c15);
     var r = fastTwoSum(data.q_accurate[18], data.q_accurate[19] * x + c13 * x2 + c15 * x4);
     r = mulAddDd(x, r, data.q_accurate[17], 0.0);
     r = mulAddDd(x, r, data.q_accurate[16], 0.0);
@@ -323,21 +324,21 @@ pub fn exp10m1d(value: f64) f64 {
                 // effective FMA coefficient and 2*exp10m1(x)/x. Their
                 // denominator sum exceeds 2^53, excluding all product
                 // midpoints. The nonlinear coefficient error is < 3*|x|.
-                return @mulAdd(f64, ln10_high, value, ln10_low * value);
+                return fma_impl.fma64(ln10_high, value, ln10_low * value);
             }
             if (ax < tiny_scale.magnitude_limit) return tiny_scale.scale(.ln10, value);
             const sx = value * 0x1p106;
             var v = aMul(ln10_high, sx);
-            v.low = @mulAdd(f64, ln10_low, sx, v.low);
+            v.low = fma_impl.fma64(ln10_low, sx, v.low);
             const h2 = (v.high + v.low) * 0x1p-106;
-            v.high = @mulAdd(f64, -h2, 0x1p106, v.high);
+            v.high = fma_impl.fma64(-h2, 0x1p106, v.high);
             v.high += v.low;
-            return @mulAdd(f64, v.high, 0x1p-106, h2);
+            return fma_impl.fma64(v.high, 0x1p-106, h2);
         }
         if (exceptionLookup(data.exceptions_tiny.len, value, &data.exceptions_tiny)) |r| return r;
         var v = aMul(ln10_high, value);
-        v.low = @mulAdd(f64, ln10_low, value, v.low);
-        v.low = @mulAdd(f64, 0x1.53524c73cea69p+1 * value, value, v.low);
+        v.low = fma_impl.fma64(ln10_low, value, v.low);
+        v.low = fma_impl.fma64(0x1.53524c73cea69p+1 * value, value, v.low);
         return v.high + v.low;
     }
     if (ax <= 0x3fb0_0000_0000_0000) {

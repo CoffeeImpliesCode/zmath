@@ -18,6 +18,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+const fma_impl = @import("scalar_fma.zig");
+
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
 const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
 const quiet_nan_bit: u64 = 0x0008_0000_0000_0000;
@@ -419,7 +421,7 @@ fn mulDdAcc(x_high: f64, x_low: f64, y_high: f64, y_low: f64, low: *f64) f64 {
     const high_high = y_high * x_high;
     const high_low = y_high * x_low;
     const low_high = y_low * x_high;
-    var product_low = @mulAdd(f64, y_high, x_high, -high_high);
+    var product_low = fma_impl.fma64(y_high, x_high, -high_high);
     product_low += low_high + high_low;
     return fastTwoSum(high_high, product_low, low);
 }
@@ -477,11 +479,11 @@ noinline fn log2dRefine(value: f64, approximation: f64) f64 {
     const table_12 = t1[table_1_index] * t2[table_2_index];
     const table_34 = t3[table_3_index] * t4[table_4_index];
     const table_high = table_12 * table_34;
-    const table_low = @mulAdd(f64, table_12, table_34, -table_high);
+    const table_low = fma_impl.fma64(table_12, table_34, -table_high);
     const delta_high = table_high * normalized;
-    const delta_low = @mulAdd(f64, table_high, normalized, -delta_high);
+    const delta_low = fma_impl.fma64(table_high, normalized, -delta_high);
     const product_high = table_low * normalized;
-    const product_low = @mulAdd(f64, table_low, normalized, -product_high);
+    const product_low = fma_impl.fma64(table_low, normalized, -product_high);
 
     var normalized_low: f64 = undefined;
     var normalized_high = fastTwoSum(delta_high - 1.0, delta_low, &normalized_low);
@@ -542,20 +544,19 @@ inline fn log2dFinite(value: f64, input_bits: u64) f64 {
     const reduction = fast_reduction_table[table_index];
     const reciprocal = reduction.reciprocal;
     const product = reciprocal * normalized;
-    const product_low = @mulAdd(f64, reciprocal, normalized, -product);
+    const product_low = fma_impl.fma64(reciprocal, normalized, -product);
     const delta_high = product - logarithm_2_high;
     const delta = delta_high + product_low;
     const delta_squared = delta * delta;
-    const coefficient_01 = @mulAdd(f64, delta, c[1], c[0]);
-    const coefficient_23 = @mulAdd(f64, delta, c[3], c[2]);
+    const coefficient_01 = fma_impl.fma64(delta, c[1], c[0]);
+    const coefficient_23 = fma_impl.fma64(delta, c[3], c[2]);
     const polynomial =
-        delta_squared * @mulAdd(f64, delta_squared, coefficient_23, coefficient_01);
+        delta_squared * fma_impl.fma64(delta_squared, coefficient_23, coefficient_01);
     const exponent_float: f64 = @floatFromInt(exponent);
     const logarithm_tail = reduction.logarithm_high + exponent_float;
     const result_high = logarithm_tail + delta_high;
     var result_low = (logarithm_tail - result_high) + delta_high;
-    result_low += @mulAdd(
-        f64,
+    result_low += fma_impl.fma64(
         delta_high,
         logarithm_2_low,
         reduction.logarithm_low + product_low,

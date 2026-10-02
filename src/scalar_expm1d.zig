@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const sign_mask: u64 = 0x8000_0000_0000_0000;
 const magnitude_mask: u64 = 0x7fff_ffff_ffff_ffff;
 const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
@@ -276,13 +278,13 @@ fn fastSum(x_high: f64, x_low: f64, y_high: f64, y_low: f64) DoubleDouble {
 
 fn multiplyDoubleDouble(x_high: f64, x_low: f64, c_high: f64, c_low: f64) DoubleDouble {
     const high = c_high * x_high;
-    const low = (c_high * x_low + c_low * x_high) + @mulAdd(f64, c_high, x_high, -high);
+    const low = (c_high * x_low + c_low * x_high) + fma_impl.fma64(c_high, x_high, -high);
     return .{ .low = low, .high = high };
 }
 
 fn multiplyDoubleWord(x_high: f64, x_low: f64, c: f64) DoubleDouble {
     const high = c * x_high;
-    const low = c * x_low + @mulAdd(f64, c, x_high, -high);
+    const low = c * x_low + fma_impl.fma64(c, x_high, -high);
     return .{ .low = low, .high = high };
 }
 
@@ -412,7 +414,7 @@ noinline fn accurate(value: f64) f64 {
         low = product.low;
         const half_x = 0.5 * value;
         const x2_high = value * half_x;
-        const x2_low = @mulAdd(f64, value, half_x, -x2_high);
+        const x2_low = fma_impl.fma64(value, half_x, -x2_high);
         const summed = fastSum(x2_high, x2_low, high, low);
         high = summed.high;
         low = summed.low;
@@ -461,7 +463,7 @@ noinline fn accurate(value: f64) f64 {
     const log2_tail = 0x1.9ff0342542fc3p-102;
     const reduced = value - log2_high * reduction;
     var reduced_low = log2_low * reduction;
-    const reduced_tail = log2_tail * reduction + @mulAdd(f64, log2_low, reduction, -reduced_low);
+    const reduced_tail = log2_tail * reduction + fma_impl.fma64(log2_low, reduction, -reduced_low);
     const reduced_high = reduced + reduced_low;
     reduced_low = (reduced - reduced_high) + reduced_low + reduced_tail;
 

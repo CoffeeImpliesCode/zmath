@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const std = @import("std");
 const scalar_tiny = @import("scalar_tiny.zig");
 
@@ -55,7 +57,7 @@ fn mulDdAcc(high: f64, low: f64, coefficient_high: f64, coefficient_low: f64, lo
     const high_low = coefficient_high * low;
     const low_high = coefficient_low * high;
     const high_high = coefficient_high * high;
-    var high_error = @mulAdd(f64, coefficient_high, high, -high_high);
+    var high_error = fma_impl.fma64(coefficient_high, high, -high_high);
     high_error += low_high + high_low;
     return fastTwoSum(high_high, high_error, low_out);
 }
@@ -63,7 +65,7 @@ fn mulDdAcc(high: f64, low: f64, coefficient_high: f64, coefficient_low: f64, lo
 fn mulDdd(high: f64, low: f64, coefficient: f64, low_out: *f64) f64 {
     const high_low = coefficient * low;
     const high_high = coefficient * high;
-    var high_error = @mulAdd(f64, coefficient, high, -high_high);
+    var high_error = fma_impl.fma64(coefficient, high, -high_high);
     high_error += high_low;
     const sum = high_high + high_error;
     low_out.* = (high_high - sum) + high_error;
@@ -351,11 +353,12 @@ pub fn tanpid(value: f64) f64 {
         high = fastSumDdd(high, low, polynomial, &low);
         if (quotient == 32) {
             const inverse = -1.0 / high;
-            low = (@mulAdd(f64, inverse, high, 1.0) + low * inverse) * inverse;
+            low = (fma_impl.fma64(inverse, high, 1.0) + low * inverse) * inverse;
             high = inverse;
         } else {
-            var coefficient_low = correction_table[quotient][0];
-            var coefficient_high = correction_table[quotient][1];
+            const correction_index: usize = @intCast(quotient);
+            var coefficient_low = correction_table[correction_index][0];
+            var coefficient_high = correction_table[correction_index][1];
             const sign: f64 = if (half_sign + 1 == 0) -1.0 else 1.0;
             coefficient_high *= sign;
             coefficient_low *= sign;
@@ -369,9 +372,8 @@ pub fn tanpid(value: f64) f64 {
             coefficient_low += sum_low + low;
             const inverse = 1.0 / product_high;
             high = coefficient_high * inverse;
-            low = @mulAdd(f64, coefficient_high, inverse, -high) +
-                (coefficient_low + coefficient_high * (@mulAdd(
-                    f64,
+            low = fma_impl.fma64(coefficient_high, inverse, -high) +
+                (coefficient_low + coefficient_high * (fma_impl.fma64(
                     -product_high,
                     inverse,
                     1.0,
@@ -382,18 +384,19 @@ pub fn tanpid(value: f64) f64 {
         const upper_bound = high + (low + bound_error);
         if (lower_bound == upper_bound) return lower_bound;
         reduced *= 0x1p-63;
-        const reduced_square_error = @mulAdd(f64, reduced, reduced, -(reduced * reduced));
+        const reduced_square_error = fma_impl.fma64(reduced, reduced, -(reduced * reduced));
         low = reduced * reduced *
             (cl_large[0] + reduced * reduced * (cl_large[1] + reduced * reduced * cl_large[2]));
         high = polyDd(reduced * reduced, reduced_square_error, ch_large[0..], &low);
         high = mulDdd(high, low, reduced, &low);
         if (quotient == 32) {
             const inverse = -1.0 / high;
-            low = (@mulAdd(f64, inverse, high, 1.0) + low * inverse) * inverse;
+            low = (fma_impl.fma64(inverse, high, 1.0) + low * inverse) * inverse;
             high = inverse;
         } else {
-            var coefficient_low = correction_table[quotient][0];
-            var coefficient_high = correction_table[quotient][1];
+            const correction_index: usize = @intCast(quotient);
+            var coefficient_low = correction_table[correction_index][0];
+            var coefficient_high = correction_table[correction_index][1];
             const sign: f64 = if (half_sign + 1 == 0) -1.0 else 1.0;
             coefficient_high *= sign;
             coefficient_low *= sign;
@@ -407,9 +410,8 @@ pub fn tanpid(value: f64) f64 {
             coefficient_low += sum_low + low;
             const inverse = 1.0 / product_high;
             high = coefficient_high * inverse;
-            low = @mulAdd(f64, coefficient_high, inverse, -high) +
-                (coefficient_low + coefficient_high * (@mulAdd(
-                    f64,
+            low = fma_impl.fma64(coefficient_high, inverse, -high) +
+                (coefficient_low + coefficient_high * (fma_impl.fma64(
                     -product_high,
                     inverse,
                     1.0,
@@ -463,9 +465,8 @@ pub fn tanpid(value: f64) f64 {
                 .{ 0x1.45fff9b48e95ep+7, 0x1.a5047910ae0efp-49 },
             };
             const small_cl = [_]f64{ 0x1.45f472e3aed7dp+9, 0x1.45f33be0e9598p+11 };
-            const value_square_error = @mulAdd(f64, value, value, -value_square);
-            const value_cube_error = @mulAdd(
-                f64,
+            const value_square_error = fma_impl.fma64(value, value, -value_square);
+            const value_cube_error = fma_impl.fma64(
                 value_square,
                 value,
                 -value_cube,

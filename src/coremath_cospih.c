@@ -26,13 +26,15 @@ SOFTWARE.
 
 #include <stdint.h>
 
+#include "coremath_fma.h"
+#include "coremath_half.h"
+
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic ignored "-Wunknown-pragmas"
 #endif
 
 
-typedef union {_Float16 f; uint16_t u;} b16u16_u;
 typedef union {float f;    uint32_t u;} b32u32_u;
 
 /* For 0 <= i1 < 2^11, S1[i1] stores the binary32 approximation of y1=sinpi(x1)
@@ -1753,31 +1755,32 @@ static const b32u32_u C2[] = {
  {.u = 0x0}, {.u = 0x0}, {.u = 0x0}, {.u = 0x0}, {.u = 0x0},
 };
 
-_Float16 cr_cospif16(_Float16 x){
-  b16u16_u v = {.f = x};
+uint16_t zmath_core_cospih_bits(uint16_t x_bits){
   /* We decompose x into x1 + x2, and use
      cospi(x1+x2) = cospi(x1)*cospi(x2) - sinpi(x1)*sinpi(x2), where binary32
      approximations of sinpi(x1), cospi(x1), -sinpi(x2) and cospi(x2)
      are tabulated. */
-  uint16_t u = v.u & 0x7fff; // discard sign since cospi(-x) = cospi(x)
-
+  uint16_t u = x_bits & 0x7fff; // discard sign since cospi(-x) = cospi(x)
   if (u >= 0x6000) { // |x| >= 2^9 thus x is either integer of half-integer
     if (u >= 0x7c00) // NaN or Inf
-      return (0x7c00 < u && u < 0x7e00) ? x + x : 0.0f / 0.0f;
+      return (0x7c00 < u && u < 0x7e00) ? zmath_half_nan_bits(x_bits) : ZMATH_HALF_CANONICAL_NAN_BITS;
     return (u < 0x6400) // |x| < 2^10 thus maybe half-integer
-      ? ((u & 1) ? 0.0f : (((u & 3) == 2) ? -1.0f : 1.0f))
-      : (u < 0x6800 && (u & 1)) ? -1.0f // |x| < 2^11 thus x integer and x odd
-      : 1.0f; // |x| even integer
+      ? ((u & 1) ? 0x0000 : (((u & 3) == 2) ? 0xbc00 : 0x3c00))
+      : (u < 0x6800 && (u & 1)) ? 0xbc00 // |x| < 2^11 thus x integer and x odd
+      : 0x3c00; // |x| even integer
   }
 
+
   // around x=0, cospi(x) is 1 - pi^2/2*x^2 + O(x^4)
-  if (u <= 0x1f34) // |x| <= 0x1.cdp-8
-    return __builtin_fmaf (-0x1.3bd3ccp+2f * x, x, 1.0f);
+  if (u <= 0x1f34) { // |x| <= 0x1.cdp-8
+    float x = zmath_half_to_float_bits(x_bits);
+    return zmath_half_from_double_bits((double)zmath_fmaf (-0x1.3bd3ccp+2f * x, x, 1.0f));
+  }
     
   uint16_t i1 = u >> 5;
   uint16_t i2 = ((u >> 10) << 5) | (u & 0x1f);
   // we use a FMA to fix the evaluation order
-  float res = __builtin_fmaf (C1[i1].f, C2[i2].f, S1[i1].f * S2[i2].f);
+  float res = zmath_fmaf (C1[i1].f, C2[i2].f, S1[i1].f * S2[i2].f);
   // adjust the sign bit in case res = 0
-  return (res == 0) ? +0.0f : res;
+  return zmath_half_from_double_bits((res == 0) ? 0.0 : (double)res);
 }

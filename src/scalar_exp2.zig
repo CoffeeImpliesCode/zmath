@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_exp2_data.zig");
 
 const sign_mask_h: u16 = 0x8000;
@@ -115,9 +117,9 @@ fn exp2fFinite(value: f32, bits: u32) f32 {
         0x1.ebfd1b232f475p-3,
         0x1.c6b19384ecd93p-5,
     };
-    var polynomial = @mulAdd(f64, fast_coefficients[3], rounded_value, fast_coefficients[2]);
-    polynomial = @mulAdd(f64, polynomial, rounded_value, fast_coefficients[1]);
-    polynomial = @mulAdd(f64, polynomial, rounded_value, fast_coefficients[0]);
+    var polynomial = fma_impl.fma64(fast_coefficients[3], rounded_value, fast_coefficients[2]);
+    polynomial = fma_impl.fma64(polynomial, rounded_value, fast_coefficients[1]);
+    polynomial = fma_impl.fma64(polynomial, rounded_value, fast_coefficients[0]);
     const result = scale * polynomial;
     // Horner changes the original evaluation by less than 16u, u=2^-53.
     // Its total relative error remains below 2^-32. Every binary32
@@ -182,7 +184,7 @@ fn exp2dMultiplyDoubleDouble(
     c_low: f64,
 ) Exp2dDoubleDouble {
     const high = c_high * x_high;
-    const low = (c_low * x_high + c_high * x_low) + @mulAdd(f64, c_high, x_high, -high);
+    const low = (c_low * x_high + c_high * x_low) + fma_impl.fma64(c_high, x_high, -high);
     return .{ .high = high, .low = low };
 }
 
@@ -192,7 +194,7 @@ fn exp2dMultiplyDouble(
     c_low: f64,
 ) Exp2dDoubleDouble {
     const high = c_high * x_high;
-    const low = c_low * x_high + @mulAdd(f64, c_high, x_high, -high);
+    const low = c_low * x_high + fma_impl.fma64(c_high, x_high, -high);
     return .{ .high = high, .low = low };
 }
 
@@ -286,7 +288,7 @@ noinline fn exp2dAccurate(value: f64) f64 {
 
     if (value_bits <= 0xc08f_f000_0000_0000) {
         if (-0x1.71547652b82fep-54 <= value and value <= 0x1.71547652b82fdp-53) {
-            return @mulAdd(f64, value, 0.5, 1.0);
+            return fma_impl.fma64(value, 0.5, 1.0);
         }
         if ((rounded_integer & 0xfff) == 0) {
             const sum = exp2dFastTwoSum(table_product.high, polynomial.high);
@@ -382,18 +384,17 @@ pub fn exp2d(value: f64) f64 {
     const table_0 = data.exp2d_table_0[table_0_index];
     const table_1 = data.exp2d_table_1[table_1_index];
     const table_high = table_0.high * table_1.high;
-    const table_error = @mulAdd(f64, table_0.high, table_1.high, -table_high);
-    const table_low = @mulAdd(
-        f64,
+    const table_error = fma_impl.fma64(table_0.high, table_1.high, -table_high);
+    const table_low = fma_impl.fma64(
         table_0.low,
         table_1.high,
-        @mulAdd(f64, table_0.high, table_1.low, table_error),
+        fma_impl.fma64(table_0.high, table_1.low, table_error),
     );
     const table_product: Exp2dDoubleDouble = .{ .high = table_high, .low = table_low };
     const reduced_squared = reduced * reduced;
-    const linear = @mulAdd(f64, reduced, 0x1.ebfbdff82c58fp-27, 0x1.62e42fefa39efp-13);
-    const cubic = @mulAdd(f64, reduced, 0x1.3b2ab6fdda001p-55, 0x1.c6b08d73b3e01p-41);
-    const polynomial = @mulAdd(f64, reduced_squared, cubic, linear);
+    const linear = fma_impl.fma64(reduced, 0x1.ebfbdff82c58fp-27, 0x1.62e42fefa39efp-13);
+    const cubic = fma_impl.fma64(reduced, 0x1.3b2ab6fdda001p-55, 0x1.c6b08d73b3e01p-41);
+    const polynomial = fma_impl.fma64(reduced_squared, cubic, linear);
     var high = table_product.high;
     const table_times_reduced = table_product.high * reduced;
     var low = table_product.low + table_times_reduced * polynomial;
@@ -415,7 +416,7 @@ pub fn exp2d(value: f64) f64 {
     low += sum.low;
     // Cover low-part addition and endpoint rounding after the coarse
     // subnormal scale has enlarged the low part.
-    const denormal_error = @mulAdd(f64, @abs(low), 0x1p-51, error_bound);
+    const denormal_error = fma_impl.fma64(@abs(low), 0x1p-51, error_bound);
     const upper = high + (low + denormal_error);
     const lower = high + (low - denormal_error);
     if (upper != lower) return exp2dAccurate(value);

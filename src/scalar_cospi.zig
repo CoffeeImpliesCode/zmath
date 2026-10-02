@@ -5,7 +5,7 @@
 // Exceptional results are constructed from target-format bits so NaN payloads,
 // signs, and infinity behavior do not depend on host library conventions.
 
-extern fn cr_cospif16(value: f16) callconv(.c) f16;
+extern fn zmath_core_cospih_bits(value: u16) callconv(.c) u16;
 extern fn cr_cospif(value: f32) callconv(.c) f32;
 extern fn cr_cospi(value: f64) callconv(.c) f64;
 
@@ -31,7 +31,7 @@ pub fn cospih(value: f16) f16 {
     const magnitude: u16 = bits & magnitude_mask_h;
     if (magnitude > infinity_bits_h) return @bitCast(bits | quiet_nan_bit_h);
     if (magnitude == infinity_bits_h) return @bitCast(canonical_nan_bits_h);
-    return cr_cospif16(value);
+    return @bitCast(zmath_core_cospih_bits(bits));
 }
 
 /// Correctly rounded cos(pi * value) for a binary32 value.

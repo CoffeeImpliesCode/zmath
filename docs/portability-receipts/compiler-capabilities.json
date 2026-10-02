@@ -1,0 +1,427 @@
+{
+  "source": "_Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n_Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\ntypedef unsigned _BitInt(128) u128;\ntypedef _BitInt(128) i128;\n_Static_assert(sizeof(u128) == 16 && sizeof(i128) == 16, \"128-bit storage\");\nu128 wide_multiply(u128 left, u128 right) { return left * right; }\nu128 wide_divide(u128 left, u128 right) { return left / right; }\n_Float16 half_convert(double value) { return (_Float16)value; }\nfloat float_fma(float a, float b, float c) { return __builtin_fmaf(a, b, c); }\ndouble double_fma(double a, double b, double c) { return __builtin_fma(a, b, c); }\n",
+  "results": [
+    {
+      "architecture": "x86_64",
+      "target": "x86_64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "x86_64-linux",
+        "-mfma",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/x86_64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "aarch64",
+      "target": "aarch64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "aarch64-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/aarch64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "aarch64_be",
+      "target": "aarch64_be-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "aarch64_be-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/aarch64_be.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "arm",
+      "target": "arm-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "arm-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/arm.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "armeb",
+      "target": "armeb-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "armeb-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/armeb.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "hexagon",
+      "target": "hexagon-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "hexagon-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/hexagon.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "loongarch64",
+      "target": "loongarch64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "loongarch64-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/loongarch64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "mips",
+      "target": "mips-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mips-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/mips.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "mipsel",
+      "target": "mipsel-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mipsel-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/mipsel.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "mips64",
+      "target": "mips64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mips64-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/mips64.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "zig: warning: ignoring '-fno-PIC' option as it cannot be used with implicit usage of -mabicalls and the N64 ABI [-Woption-ignored]\n./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "mips64el",
+      "target": "mips64el-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "mips64el-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/mips64el.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "zig: warning: ignoring '-fno-PIC' option as it cannot be used with implicit usage of -mabicalls and the N64 ABI [-Woption-ignored]\n./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "powerpc",
+      "target": "powerpc-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "powerpc-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/powerpc.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "powerpc64",
+      "target": "powerpc64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "powerpc64-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/powerpc64.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "powerpc64le",
+      "target": "powerpc64le-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "powerpc64le-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/powerpc64le.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "riscv32",
+      "target": "riscv32-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "riscv32-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/riscv32.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "riscv64",
+      "target": "riscv64-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "riscv64-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/riscv64.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "s390x",
+      "target": "s390x-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "s390x-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/s390x.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "thumb",
+      "target": "thumb-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "thumb-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/thumb.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "thumbeb",
+      "target": "thumbeb-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "thumbeb-linux",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/thumbeb.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    },
+    {
+      "architecture": "wasm32",
+      "target": "wasm32-wasi",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "wasm32-wasi",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/wasm32.o"
+      ],
+      "exit_code": 1,
+      "stdout": "",
+      "stderr": "./zig-out/portability-probes/types.c:1:23: error: _Float16 is not supported on this target\n    1 | _Static_assert(sizeof(_Float16) == 2, \"binary16 storage\");\n      |                       ^\n./zig-out/portability-probes/types.c:2:16: error: use of undeclared identifier '__FLT16_MANT_DIG__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                ^~~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:2:44: error: use of undeclared identifier '__FLT16_MAX_EXP__'\n    2 | _Static_assert(__FLT16_MANT_DIG__ == 11 && __FLT16_MAX_EXP__ == 16, \"IEEE binary16\");\n      |                                            ^~~~~~~~~~~~~~~~~\n./zig-out/portability-probes/types.c:8:1: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      | ^\n./zig-out/portability-probes/types.c:8:47: error: _Float16 is not supported on this target\n    8 | _Float16 half_convert(double value) { return (_Float16)value; }\n      |                                               ^\n5 errors generated.\n"
+    },
+    {
+      "architecture": "x86",
+      "target": "x86-linux",
+      "command": [
+        "<zig-global-cache>/zig",
+        "cc",
+        "-target",
+        "x86-linux",
+        "-mfma",
+        "-ffreestanding",
+        "-fno-math-errno",
+        "-ffp-contract=off",
+        "-c",
+        "./zig-out/portability-probes/types.c",
+        "-o",
+        "./zig-out/portability-probes/x86.o"
+      ],
+      "exit_code": 0,
+      "stdout": "",
+      "stderr": ""
+    }
+  ]
+}

@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_tanpih_data.zig");
 
 const magnitude_mask: u16 = 0x7fff;
@@ -86,7 +88,7 @@ pub fn tanpih(value: f16) f16 {
     const cosine_1: f32 = @bitCast(data.c1[table_1_index]);
     const sine_2: f32 = @bitCast(data.s2[table_2_index]);
     const cosine_2: f32 = @bitCast(data.c2[table_2_index]);
-    const sine = @mulAdd(f32, sine_1, cosine_2, cosine_1 * sine_2);
-    const cosine = @mulAdd(f32, cosine_1, cosine_2, -(sine_1 * sine_2));
+    const sine = fma_impl.fma(sine_1, cosine_2, cosine_1 * sine_2);
+    const cosine = fma_impl.fma(cosine_1, cosine_2, -(sine_1 * sine_2));
     return @floatCast(sine / cosine);
 }

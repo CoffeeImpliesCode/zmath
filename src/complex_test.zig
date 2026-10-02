@@ -19,6 +19,9 @@ const inf_d: f64 = @bitCast(@as(u64, 0x7ff0_0000_0000_0000));
 const neg_inf_f: f32 = @bitCast(@as(u32, 0xff80_0000));
 const neg_inf_d: f64 = @bitCast(@as(u64, 0xfff0_0000_0000_0000));
 
+/// The largest finite binary64, whose reciprocal is a subnormal.
+const maximum_d: f64 = @bitCast(@as(u64, 0x7fef_ffff_ffff_ffff));
+
 /// The positive canonical quiet NaN of each format, per the special-value
 /// table of the specification.
 const nan_f: f32 = @bitCast(@as(u32, 0x7fc0_0000));
@@ -139,8 +142,8 @@ test "conj negates only the imaginary part and is an exact involution" {
     };
     for (samples) |z| {
         const twice = complex.conjf(complex.conjf(z));
-        try expectBitsF(twice.re, @as(u32, @bitCast(z.re)));
-        try expectBitsF(twice.im, @as(u32, @bitCast(z.im)));
+        try expectBitsF(twice.re, @bitCast(z.re));
+        try expectBitsF(twice.im, @bitCast(z.im));
     }
 }
 
@@ -359,7 +362,7 @@ test "div by zero, by an infinity, and zero over zero" {
     try expectBitsD(over_negative_zero.re, 0xfff0_0000_0000_0000);
     try expectCanonicalD(over_negative_zero.im);
     // The imaginary part is the invalid operation infinity minus infinity.
-    try expectCanonicalD(complex.divf(.{ .re = -1, .im = 1 }, .{ .re = 0, .im = 0 }).im);
+    try expectCanonicalF(complex.divf(.{ .re = -1, .im = 1 }, .{ .re = 0, .im = 0 }).im);
 
     // Zero over zero is invalid in both components.
     const indeterminate = complex.divd(.{ .re = 0, .im = -0.0 }, .{ .re = 0, .im = 0 });
@@ -413,7 +416,81 @@ test "div by zero, by an infinity, and zero over zero" {
         .{ .re = 0, .im = neg_nan_d },
         .{ .re = 1, .im = 0 },
     ).re, 0xfff8_0000_0000_0000);
-    try expectCanonicalD(complex.divf(.{ .re = 1, .im = 0 }, .{ .re = nan_f, .im = 0 }).re);
+    try expectCanonicalF(complex.divf(.{ .re = 1, .im = 0 }, .{ .re = nan_f, .im = 0 }).re);
+}
+
+test "div keeps a subnormal quotient that a flushing divide would drop" {
+    // The exact quotient of 1 and the maximum finite binary64 rounds to the
+    // subnormal 2^-1024 (0x0004000000000000): the exact value 2^-971 /
+    // (2^53 - 1) is 2^50 ulps plus one eighth of an ulp, so it rounds down to
+    // 2^50 ulps. A target whose binary64 divide flushes the subnormal
+    // range answers a signed zero for it, so these rows are the
+    // consumer-visible difference.
+    // The reduced denominator is one there, so the imaginary part is the
+    // positive zero of the exact numerator.
+    var real_numerator: Complexd = .{ .re = 1, .im = 0 };
+    var real_divisor: Complexd = .{ .re = maximum_d, .im = 0 };
+    std.mem.doNotOptimizeAway(&real_numerator);
+    std.mem.doNotOptimizeAway(&real_divisor);
+    const over_real = complex.divd(real_numerator, real_divisor);
+    try expectBitsD(over_real.re, 0x0004_0000_0000_0000);
+    try expectBitsD(over_real.im, 0x0000_0000_0000_0000);
+
+    // An imaginary-only divisor turns the same reciprocal a quarter turn
+    // first, so the subnormal reaches the real part through the other
+    // numerator term.
+    var imaginary_numerator: Complexd = .{ .re = 0, .im = 1 };
+    var imaginary_divisor: Complexd = .{ .re = 0, .im = maximum_d };
+    std.mem.doNotOptimizeAway(&imaginary_numerator);
+    std.mem.doNotOptimizeAway(&imaginary_divisor);
+    const over_imaginary = complex.divd(imaginary_numerator, imaginary_divisor);
+    try expectBitsD(over_imaginary.re, 0x0004_0000_0000_0000);
+    try expectBitsD(over_imaginary.im, 0x0000_0000_0000_0000);
+
+    // A divisor with two maximal components leaves a reduced denominator of
+    // two, so the quotient halves to the subnormal 2^-1025 in both parts at
+    // once and every sign quadrant of it is reachable.
+    const quadrants = [_]struct { numerator: Complexd, divisor: Complexd, re: u64, im: u64 }{
+        .{
+            .numerator = .{ .re = 1, .im = 0 },
+            .divisor = .{ .re = maximum_d, .im = maximum_d },
+            .re = 0x0002_0000_0000_0000,
+            .im = 0x8002_0000_0000_0000,
+        },
+        .{
+            .numerator = .{ .re = -1, .im = 0 },
+            .divisor = .{ .re = maximum_d, .im = maximum_d },
+            .re = 0x8002_0000_0000_0000,
+            .im = 0x0002_0000_0000_0000,
+        },
+        .{
+            .numerator = .{ .re = 1, .im = 0 },
+            .divisor = .{ .re = -maximum_d, .im = -maximum_d },
+            .re = 0x8002_0000_0000_0000,
+            .im = 0x0002_0000_0000_0000,
+        },
+        .{
+            .numerator = .{ .re = -1, .im = 0 },
+            .divisor = .{ .re = -maximum_d, .im = -maximum_d },
+            .re = 0x0002_0000_0000_0000,
+            .im = 0x8002_0000_0000_0000,
+        },
+    };
+    var quadrant_fixtures = quadrants;
+    std.mem.doNotOptimizeAway(&quadrant_fixtures);
+    for (quadrant_fixtures) |row| {
+        const quotient = complex.divd(row.numerator, row.divisor);
+        try expectBitsD(quotient.re, row.re);
+        try expectBitsD(quotient.im, row.im);
+    }
+
+    // One order of magnitude further inside the range, where 1 / 1e308 is the
+    // subnormal 0x000730d67819e8d2 rather than a zero.
+    var moderate_divisor: Complexd = .{ .re = 1e308, .im = 0 };
+    std.mem.doNotOptimizeAway(&moderate_divisor);
+    const moderate = complex.divd(real_numerator, moderate_divisor);
+    try expectBitsD(moderate.re, 0x0007_30d6_7819_e8d2);
+    try expectBitsD(moderate.im, 0x0000_0000_0000_0000);
 }
 
 test "abs is overflow-safe and dominates both components" {
@@ -682,6 +759,45 @@ test "sqrt is the principal root" {
     try expectBitsF(complex.sqrtf(.{ .re = 1, .im = signaling_nan_f }).im, 0x7fc0_0001);
 }
 
+test "sqrt keeps a subnormal component that a flushing divide would drop" {
+    // The root of 2 +- i times three units in the last place of the binary64
+    // subnormal range divides that imaginary part by exactly 2 * sqrt(2), and
+    // 3 / 2.828... is 1.06 units, which rounds to one unit of the subnormal
+    // range. A target whose binary64 divide flushes that range answers a
+    // signed zero instead. The normal component is sqrt(0.5 * 2 + 0.5 * 2),
+    // the root of two, and the input imaginary sign carries it.
+    const three_units: f64 = @bitCast(@as(u64, 3));
+    const rows = [_]struct { z: Complexd, re: u64, im: u64 }{
+        .{
+            .z = .{ .re = 2, .im = three_units },
+            .re = 0x3ff6_a09e_667f_3bcd,
+            .im = 0x0000_0000_0000_0001,
+        },
+        .{
+            .z = .{ .re = 2, .im = -three_units },
+            .re = 0x3ff6_a09e_667f_3bcd,
+            .im = 0x8000_0000_0000_0001,
+        },
+        .{
+            .z = .{ .re = -2, .im = three_units },
+            .re = 0x0000_0000_0000_0001,
+            .im = 0x3ff6_a09e_667f_3bcd,
+        },
+        .{
+            .z = .{ .re = -2, .im = -three_units },
+            .re = 0x0000_0000_0000_0001,
+            .im = 0xbff6_a09e_667f_3bcd,
+        },
+    };
+    var fixtures = rows;
+    std.mem.doNotOptimizeAway(&fixtures);
+    for (fixtures) |row| {
+        const root = complex.sqrtd(row.z);
+        try expectBitsD(root.re, row.re);
+        try expectBitsD(root.im, row.im);
+    }
+}
+
 test "pow reproduces the C special cases" {
     // pow(0, 0) is one, and the zero exponent keeps its own sign.
     const origin = complex.powf(.{ .re = 0, .im = 0 }, .{ .re = 0, .im = 0 });
@@ -930,7 +1046,7 @@ test "asin, acos and atan use the C99 principal branches" {
         try expectComplexApprox(z, complex.cosd(complex.acosd(z)), 1e-12);
         try expectComplexApprox(z, complex.tand(complex.atand(z)), 1e-12);
         const square = complex.muld(z, z);
-        const one_minus_square = Complexd{ .re = 1 - square.re, .im = -square.im };
+        const one_minus_square: Complexd = .{ .re = 1 - square.re, .im = -square.im };
         try expectComplexApprox(complex.sqrtd(one_minus_square), complex.cosd(complex.asind(z)), 1e-12);
         // A real argument inside the unit interval is the classic round trip.
         try testing.expectApproxEqRel(@as(f64, 0.5), complex.sind(complex.asind(.{ .re = 0.5, .im = 0 })).re, 1e-15);

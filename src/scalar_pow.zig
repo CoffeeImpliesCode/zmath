@@ -7,7 +7,7 @@
 
 const std = @import("std");
 
-extern fn cr_powf16(base: f16, exponent: f16) callconv(.c) f16;
+extern fn zmath_core_powh_bits(base: u16, exponent: u16) callconv(.c) u16;
 extern fn cr_powfFiniteBits(base_bits: u32, exponent: f32) callconv(.c) f32;
 extern fn cr_powFinite(base: f64, exponent: f64) callconv(.c) f64;
 
@@ -158,10 +158,10 @@ pub fn powh(base: f16, exponent: f16) f16 {
     if ((base_bits & sign_mask_h) != 0) {
         const exponent_class = classifyIntegerH(exponent_bits);
         if (exponent_class == .non_integer) return @bitCast(canonical_nan_bits_h);
-        return @bitCast(@as(u16, @bitCast(cr_powf16(@bitCast(base_bits & magnitude_mask_h), exponent))) |
+        return @bitCast(zmath_core_powh_bits(base_bits & magnitude_mask_h, exponent_bits) |
             if (exponent_class == .odd_integer) sign_mask_h else 0);
     }
-    return cr_powf16(base, exponent);
+    return @bitCast(zmath_core_powh_bits(base_bits, exponent_bits));
 }
 
 noinline fn powfNonRegular(

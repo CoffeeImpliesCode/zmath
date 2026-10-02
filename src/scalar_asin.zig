@@ -26,6 +26,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const half_tables = @import("scalar_half_tables.zig");
 
 const sign_mask_h: u16 = 0x8000;
@@ -111,7 +113,7 @@ pub fn asinf(value: f32) f32 {
     const doubled_magnitude = bits << 1;
     if (doubled_magnitude < 0x7ec2_9000) {
         if (doubled_magnitude < (115 << 24)) {
-            return @mulAdd(f32, value, 0x1p-25, value);
+            return fma_impl.fma(value, 0x1p-25, value);
         }
         const coefficients = [_]f64{
             0x1.0000000000005p+0,  0x1.55557aeca105dp-3,
@@ -199,7 +201,7 @@ fn mulDd(x_high: f64, x_low: f64, coefficient_high: f64, coefficient_low: f64, l
     @setFloatMode(.strict);
     const high_product = coefficient_high * x_high;
     low.* = (coefficient_low * x_high + coefficient_high * x_low) +
-        @mulAdd(f64, coefficient_high, x_high, -high_product);
+        fma_impl.fma64(coefficient_high, x_high, -high_product);
     return high_product;
 }
 
@@ -228,7 +230,7 @@ fn polyDd(
 fn asinRefine(value: f64, approximation: f64) f64 {
     @setFloatMode(.strict);
     const square = value * value;
-    const square_error = @mulAdd(f64, value, value, -square);
+    const square_error = fma_impl.fma64(value, value, -square);
     // SAFETY: fastTwoSum writes complement_low before it is read.
     var complement_low: f64 = undefined;
     var complement_high = fastTwoSum(1.0, -square, &complement_low);
@@ -236,7 +238,7 @@ fn asinRefine(value: f64, approximation: f64) f64 {
     complement_high = fastTwoSum(complement_high, complement_low, &complement_low);
 
     const cosine_high = @sqrt(complement_high);
-    const cosine_low = (complement_low - @mulAdd(f64, cosine_high, cosine_high, -complement_high)) *
+    const cosine_low = (complement_low - fma_impl.fma64(cosine_high, cosine_high, -complement_high)) *
         (0.5 / cosine_high);
 
     const table_index: usize = @intCast(roundEvenFinite(
@@ -275,10 +277,10 @@ fn asinRefine(value: f64, approximation: f64) f64 {
     const cosine_delta_low = cosine_low - cosine_table_low;
 
     const magic = 0x1.8p-4;
-    const sine_correction = @mulAdd(f64, sine_table_high, cosine_delta_high, magic) - magic;
-    const sine_correction_error = @mulAdd(f64, sine_table_high, cosine_delta_high, -sine_correction);
-    const cosine_correction = @mulAdd(f64, cosine_table_high, sine_delta_high, magic) - magic;
-    const cosine_correction_error = @mulAdd(f64, cosine_table_high, sine_delta_high, -cosine_correction);
+    const sine_correction = fma_impl.fma64(sine_table_high, cosine_delta_high, magic) - magic;
+    const sine_correction_error = fma_impl.fma64(sine_table_high, cosine_delta_high, -sine_correction);
+    const cosine_correction = fma_impl.fma64(cosine_table_high, sine_delta_high, magic) - magic;
+    const cosine_correction_error = fma_impl.fma64(cosine_table_high, sine_delta_high, -cosine_correction);
 
     var delta = cosine_correction - sine_correction;
     var delta_error = (cosine_table_high * sine_delta_low + cosine_table_low * sine_delta_high) -
@@ -556,7 +558,7 @@ pub fn asind(value: f64) f64 {
         coefficient_index = @intCast(roundEvenFinite(reduced * 0x1p5));
         const table_offset: f64 = @floatFromInt(coefficient_index);
         root = copySignD(@sqrt(reduced), -value);
-        root_low = @mulAdd(f64, root, root, -reduced) * ((-0.5 / reduced) * root);
+        root_low = fma_impl.fma64(root, root, -reduced) * ((-0.5 / reduced) * root);
         reduced = 0.25 * reduced - table_offset * 0x1p-7;
         error_bound = (if (root < 0.0) -root else root) *
             (if (reduced < 0.0) -reduced else reduced) * 0x1.99p-52;
@@ -566,7 +568,7 @@ pub fn asind(value: f64) f64 {
         const square = value * value;
         coefficient_index = @intCast(roundEvenFinite(square * 0x1p7));
         const table_offset: f64 = @floatFromInt(coefficient_index);
-        reduced = @mulAdd(f64, value, value, -0x1p-7 * table_offset);
+        reduced = fma_impl.fma64(value, value, -0x1p-7 * table_offset);
         root = value;
         root_low = 0.0;
         error_bound = (if (value * reduced < 0.0) -value * reduced else value * reduced) * 0x1.10p-52;

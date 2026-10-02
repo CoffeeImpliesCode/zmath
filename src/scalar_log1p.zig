@@ -28,6 +28,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_log1ph_data.zig");
 
 const sign_mask_h: u16 = 0x8000;
@@ -46,9 +48,9 @@ const minus_infinity_bits_f: u32 = 0xff80_0000;
 
 fn log1phSmall(value: f32) f32 {
     @setFloatMode(.strict);
-    const coefficient3 = @mulAdd(f32, value, -0x1p-2, 0x1.555556p-2);
-    const coefficient2 = @mulAdd(f32, value, coefficient3, -0.5);
-    return @mulAdd(f32, value, value * coefficient2, value);
+    const coefficient3 = fma_impl.fma(value, -0x1p-2, 0x1.555556p-2);
+    const coefficient2 = fma_impl.fma(value, coefficient3, -0.5);
+    return fma_impl.fma(value, value * coefficient2, value);
 }
 
 pub fn log1ph(value: f16) f16 {
@@ -90,7 +92,7 @@ pub fn log1ph(value: f16) f16 {
     const adjusted_bits: u32 = @bitCast(adjusted);
     const table_index: usize = @intCast((adjusted_bits >> 20) - 928);
     const reduction = data.half_reduction[table_index];
-    const reduced = @mulAdd(f32, reduction[0], adjusted, -1.0);
+    const reduced = fma_impl.fma(reduction[0], adjusted, -1.0);
     return @floatCast(reduction[1] + log1phSmall(reduced));
 }
 

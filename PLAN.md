@@ -31,14 +31,16 @@ Two colocated repositories:
 | Root names legal as a `@Vector` overload | 96: 90 of the `pub fn` names plus all 6 callable aliases |
 | Root names with no `@Vector` spelling | 7, and it is not `nan` alone: `nan`, plus the six narrowing forms `fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, `fsqrt`, whose lane-parallel entry points live in `zmath.vector` as `faddv` and its five siblings |
 | Public `@Vector` entry points | 417 across six modules |
-| Source files under `src/` | 241: 209 Zig, 27 C, 5 headers, from a complete directory read rather than a capped glob |
 | Local unit tests | 903/903 in both `Debug` and `ReleaseSafe`; the whole-surface optimization round recorded 890/890 in `ReleaseSafe`, and the frozen pre-expansion baseline tree carried 873 |
+| Cross-target unit checks | `cross-test`: 903/903 on each of four Linux targets in both `Debug` and `ReleaseSafe`; x86-64 native and AArch64 through QEMU |
 
 The vector layer is portable Zig `@Vector`, lowered by the compiler per target.
 There is no SIMD dispatch, no hand-written per-ISA kernel, no runtime CPU
-detection, and no SSE2 fallback. The build requires `+fma` for x86/x86_64 C
-kernels and supports little-endian aarch64; a big-endian target is rejected at
-configure time and by a `_Static_assert` in the generated ABI guard.
+detection, and no SSE2 fallback. The build retains the x86/x86_64 `+fma` floor
+and checks the other C representation requirements rather than rejecting
+architectures by name. Binary16 C operands/results are `uint16_t` encodings;
+native half conversion is optional. Both byte orders are admitted, and C/Zig
+share one compile-time native binary32 FMA policy with an exact integer fallback.
 
 ### Non-scalar modules
 
@@ -79,6 +81,8 @@ Run from the repository root. The qualified corpus profile is
 ```text
 # runtime
 zig build test
+cross-test
+cross-test --output zig-out/cross-test-release-safe -- -Doptimize=ReleaseSafe
 gate
 zig build run
 ```
@@ -95,7 +99,7 @@ Earlier whole-surface check receipts; the unit-suite row includes current counts
 | `ziglint`, 210 files | 210 findings, down from 231, with no added finding class |
 | AST check | passed, 210 files, no failures |
 | LSP over the 13 changed files | no issues |
-| House gate | not claimed; see below |
+| Gate | not claimed; see below |
 
 The receipts behind these rows are `final-verification.json`, `final-tests.txt`,
 and `final-demo.txt` in the round's consumer scratch.
@@ -104,22 +108,21 @@ The gate is external to this repository and was being revised while this round
 ran. One invocation reached format, build, test, the AST check, and the zlint and
 zbc sections before aborting with a shell parse error; a second reached format,
 build, and test before aborting the same way. Both aborted partway, so no
-completed house gate pass exists for this round. That is a fact about the tool,
+completed gate pass exists for this round. That is a fact about the tool,
 not about this tree: the tool is unrelated global state, was not edited, and was
 not exercised again. The checks are therefore verified standalone, above.
 
-`gate` is the devenv script wrapping `zig-gate`. It runs format, build, test,
-AST check, and three linters. On a host with a `/nix/store` the store script runs
-it directly; on this host there is no `/nix/store` at all, so `.envrc`
-synthesizes a `gate` shim into the gitignored `.devenv/host-bin`.
+`gate` is the development environment's check wrapper. It runs format, build,
+test, AST check, and three linters. It lives outside this repository and is
+neither installed nor repaired by it.
 
-**The gate used to truncate its own linter output.** An earlier `zig-gate`
+**The gate used to truncate its own linter output.** An earlier revision
 piped zbc's findings through `head -30` and counted them with `grep -c 'error('`,
 so an advisory past the thirtieth line could not reach the result and a run
 carrying warnings still printed "found 0 potential issue(s)". Six advisories in
-the accepted scalar kernels went unrecorded for that reason. The tool on this
-host is being revised to per-rule histograms and a warning census, so this is
-history, not a description of it. The durable part is the method: a census comes
+the accepted scalar kernels went unrecorded for that reason. The tool is being
+revised to per-rule histograms and a warning census, so this is history, not a
+description of it. The durable part is the method: a census comes
 from the tool that produces the findings, over every file, with nothing in
 between. That is why the census below is a whole-tree run, not a wrapper's
 summary.
@@ -156,7 +159,7 @@ round added no new class of finding and removed 21.
 ## Acceptance evidence, re-verified
 
 The sibling `zmath-testing` is present at `../zmath-testing`. Its published evidence is
-re-verified on this host rather than merely inherited: the table below is what the tree can show
+re-verified rather than merely inherited: the table below is what the tree can show
 now, measured here.
 
 | Check | Source of truth | Current value |
@@ -188,7 +191,7 @@ producer, so every field in it is a number nobody can reproduce and every field
 goes stale silently.
 
 That generation step reused 337 verified artifacts and produced only the 324 new
-bounded records, and the staging run took 137.84 s on this host. That is the cost
+bounded records, and the staging run took 137.84 s on the measurement machine. That is the cost
 of a bounded increment, not of a whole-domain regeneration, so it predicts
 nothing about an exhaustive binary16 or binary32 campaign.
 Replaying the whole 5,164,943,119-byte publication at 347 descriptors took
@@ -206,9 +209,9 @@ the run wrote its records. Judge publication integrity by the digest `COMPLETE`
 carries and the loader checks, never by a digest recomputed from another
 output root or from another snapshot.
 
-Bringing the harness up on this host required repairing it; see the two commits in
-`../zmath-testing`. The oracle generator needs a flint that the host can load, and the store's
-build cannot be, so a flint and MPFR are built for the host into a local prefix.
+Bringing the harness up required repairing it; see the two commits in
+`../zmath-testing`. The oracle generator needs a flint the machine can load, so
+a flint and MPFR are built into a local prefix.
 
 ## Known limits, stated so they are not mistaken for gaps
 
@@ -253,7 +256,7 @@ The latest request refers to the seven next steps listed after the cluster cost 
 The earlier P8/P9 checklist completed a first tranche, not every item in that request.
 
 1. **Published-tool gate.** Implemented.
-   Both gate entry points build `published-tools` under the qualified profile before the house gate.
+   Both gate entry points build `published-tools` under the qualified profile before the gate.
    This closes the stale-producer build gap.
 2. **Harness advisories.** Cleared.
    The direct whole-tree zbc census reports zero findings.
@@ -445,7 +448,7 @@ Every measurement recorded under this section shares the round's parameters:
 | --- | --- |
 | Target | `x86_64-linux-gnu.2.38`, `haswell` |
 | Optimization mode | `ReleaseSafe` |
-| Host | Intel Xeon Gold 6354 |
+| Host | a shared machine, not isolated to this project |
 | CPU pinning | CPU 0 |
 | Formats under measurement | binary64 and binary16 only |
 | Binary32 kernels in the profile | none, as an input, as a result, or transitively |
@@ -565,13 +568,13 @@ That last row is the old bug at the type level, and it is a named-type failure
 rather than an array one: the old parameter was `Vec2f`, and the repaired call site
 supplies `Vec3f`.
 
-No completed house-gate wrapper pass is claimed. That wrapper is externally broken,
+No completed gate-wrapper pass is claimed. That wrapper is externally broken,
 was left untouched, and was not rerun; the receipts above are its standalone
 constituents. This repair adds no benchmark, no paired binary32 profiling, no
 corpus, no manifest, and no commit, and it re-measures nothing in the round above:
 the 3,939 reservation, the 4,096 cap, the 5,180 calls, the 5,933 labels, and every
 latency table there still describe the pre-repair tree. Raw receipts and provenance
-are under `/tmp/zmath-rect-mulvec.y8E4Zg/`; the three smoke sources
+are under that round's scratch prefix; the three smoke sources
 and their consumer cache were deleted once the proofs were taken, and the receipts
 were kept. Cleanup deleted no caches outside this repair's scratch directory and
 left shared tooling and the prior optimization receipts in place.
@@ -633,7 +636,7 @@ re-pinning its behaviour.
 
 The `zbc` coverage is a complete 210-file sweep assembled as five 30-file groups
 and sixty single-file checks. The broad 210-file command and two of the 30-file
-commands timed out on this host and are not counted as successes. No finding
+commands timed out and are not counted as successes. No finding
 was suppressed to reach the zero and no global tool was repaired.
 
 ### Isolated paired binary64 re-measurement
@@ -645,7 +648,7 @@ median. All 109 were re-measured; none was dropped and none was added.
 | Parameter | Value |
 | --- | --- |
 | Profile | `x86_64-linux-gnu.2.38` / `haswell` / `ReleaseSafe` |
-| Host and pinning | Intel Xeon Gold 6354, CPU 0 |
+| Host and pinning | a shared machine, pinned to CPU 0 |
 | Cohorts | 109 |
 | Repetitions | 9 alternating baseline and current pairs, pair 1 baseline-first and pair 2 current-first |
 | Validated rows | 1,962, which is 109 cohorts by 2 variants by 9 pairs, one receipt each |
@@ -686,7 +689,7 @@ table describes nine alternating pairs on one machine under one qualified
 profile. It is not a portable throughput result and it is not a whole-domain
 accuracy claim. And it is not a causal claim: the round re-measured a tree
 rather than isolating each source change, so a cohort that moved says the tree
-moved on this host, not which edit moved it.
+moved on that machine, not which edit moved it.
 
 The timed-path comparison is complete.
 Each of the 109 cohorts carries a verdict over 15 named components: the timed
@@ -775,13 +778,123 @@ what the contract-agreement column on all 1,962 validated rows records.
 
 ### Raw receipts
 
-Every figure above comes from receipts under the exact prefix
-`/tmp/zmath-qa-perf.dWn4yw/`. The four that carry this section are
-`qa-phase-evidence.json`, `isolated-statistics.json`,
+Every figure above comes from the round's scratch receipts. The four that carry
+this section are `qa-phase-evidence.json`, `isolated-statistics.json`,
 `isolated-measurement-metadata.json`, and `fixture-recovery-evidence.json`. The
-1,962 per-cohort pair receipts and the sample ledger sit under the same prefix.
+1,962 per-cohort pair receipts and the sample ledger sit in the same receipt set.
 `isolated-artifact-sha256.json` fingerprints the 654 built artifacts.
 `isolated-codegen-evidence.tar.zst` retains the 436 IR and assembly files;
 `evidence-archive-verification.json` records a streaming SHA-256 check of every
 member against that manifest. Owned binaries, build caches and loose scaffolds
 are removed; raw measurements, corrected ledgers and archived provenance remain.
+
+## Initial cross-test adoption: four-target evidence
+
+The results in this section precede the portability repairs below and describe
+the original four-target profile, not the current inherited 53-platform matrix.
+
+The adoption adds an auto-discovered `cross-test.profile.sh` and
+`zig build test-build`, which installs the existing complete suite as
+`bin/zmath-test` without running it. The profile is included in
+`build.zig.zon`'s package paths. The ordinary `test`, `run`, and default
+demonstration-install steps keep their behavior.
+
+The profile uses the tool's artifact hooks so each target gets its required
+CPU features and its own install/cache paths: `baseline+fma` on x86-64,
+`baseline` on AArch64. Arguments after `--` pass through to the build.
+The build logs resolve Zig 0.16.0 through the installed version selector;
+the tool's compiler-agnostic artifact mode leaves the summary's `zig_version`
+field empty.
+
+Actual strict execution results:
+
+| Target | Runner | Debug | ReleaseSafe |
+| --- | --- | --- | --- |
+| `x86_64-linux-gnu.2.38` | native | 903/903 | 903/903 |
+| `aarch64-linux-gnu.2.38` | `qemu-aarch64` | 903/903 | 903/903 |
+| `x86_64-linux-musl` | native | 903/903 | 903/903 |
+| `aarch64-linux-musl` | `qemu-aarch64` | 903/903 | 903/903 |
+
+Both commands use `--require-runners`; both schema-2 summaries report
+`pass=4`, `fail=0`, `build_only=0`, and `partial=0`, with exit 0:
+
+- Debug: `zig-out/cross-test/cross-test-summary.json`.
+- ReleaseSafe: `zig-out/cross-test-release-safe/cross-test-summary.json`.
+
+Each prefix retains that run's build/run logs under `runs/`.
+The traditional native `zig build test` also passed 903/903 in ReleaseSafe;
+the native demo passed 6/6 steps and printed
+`exp2m1(1.0) = 0x3ff0000000000000`. Formatting checks passed for both changed
+Zig build files, and `bash -n cross-test.profile.sh` passed.
+
+The executed binaries are statically linked little-endian ELF files for their
+requested architectures. GNU and musl are compiler/ABI target variants here,
+not coverage of separate dynamically linked libc runtimes. QEMU execution is
+not AArch64 hardware or throughput evidence. The four-target matrix does not
+cover 32-bit x86, other architectures, or other operating systems, and it does
+not replace the gate. No numerical kernels, corpus, manifest, or
+profiling workloads changed; the acceptance authority and previous profiling
+ledger are unchanged.
+
+## Portability repairs: integer widths, C ABI, and exact fusion
+
+The original failures were implementation constraints, not a reason to narrow
+the profile to four targets. The profile now inherits all 53 published
+Zig 0.16.0 Tier 1/2 platforms and preserves each platform's artifact suffix.
+Missing OS runtimes remain distinct from compiler and numerical failures.
+
+The cutover:
+
+- Uses `Log2Int(usize)` for word-sized blade-mask shifts and bounded `usize`
+  indices for scalar lookup tables on 32-bit targets.
+- Admits C `_BitInt(128)` as well as native `__int128`; primitive signed and
+  unsigned 128-bit multiplication, division, shifts, and word extraction
+  compiled on all 21 architecture families in the capability probe.
+- Exchanges all twelve private binary16 C entry points as `uint16_t` bits.
+  Native half conversion is optional; the fallback rounds directly from
+  binary64, not through binary32. Both byte orders are admitted.
+- Uses one target-feature policy for native binary32/binary64 FMA in Zig and
+  C. Other targets use a bounded integer dyadic product, sum, and final pack.
+  Native x86/x86-64 still requires `+fma`; no dispatch or ISA-specific
+  polynomial was added.
+- Replaces copied finite round-even fallbacks and a bare `roundeven` builtin
+  with one private helper. Targets with native lowering keep it; every other
+  target rounds the binary64 encoding with integer arithmetic, because RISC-V
+  lowers `round`, `roundeven` and `floor` to calls into libm.
+- Preserves positive infinity at both private binary16 log1p entry points.
+
+### Observed numerical regressions
+
+| Scenario | Before repair | After repair |
+| --- | --- | --- |
+| ARM binary32 fused midpoint plus a positive tiny term | Rounded to the unperturbed tie | Runtime boundary tests pass |
+| ARM finite round-even smoke | Four failures among seven cases, including signed-zero and odd/even ties | Seven cases, zero failures |
+| Two private binary16 log1p C entries at `+Inf` | Both returned `0x7e00` NaN | Both return `0x7c00` infinity |
+| WASI Debug `hypotd(max_finite, min_subnormal)` | `0xfff8000000000001` NaN instead of maximum finite; full suite 910/911 | Full suite 919/919 through the Node.js WASI runner |
+
+ReleaseSafe passed the pre-binary64-repair WASI suite because that suite did not
+expose the same runtime failure there. Permanent fusion boundary tests now
+keep their arguments at runtime with `doNotOptimizeAway`; they check expected
+bits rather than echoing `@mulAdd`.
+
+Actual consumer programs passed natively, on ARM, and on big-endian MIPS. They
+checked half `atan2` at `0x3e49`, the perturbed binary32 fused result at
+`0x3f801001`, the two private log infinities, and maximum-finite results through
+`hypotd`, public `fmad`, and the private C software-fusion export.
+The native ReleaseSafe suite passed 919/919; the demonstration passed 6/6
+steps and printed `exp2m1(1.0) = 0x3ff0000000000000`.
+
+The self-contained receipts under `docs/portability-receipts/` retain commands,
+sources, compiler predefines/lowering, and observed results:
+`compiler-capabilities.json`, `compiler-predefines.json`,
+`wide-integer-capabilities.json`, `fma-lowering.json`, `fma-cpu-predefines.json`,
+`round-lowering.json`, `numerical-regressions.json`, `consumer-smokes.json`,
+`suite-verification.json`, `primitive-abi-diagnostics.json`,
+`primitive-aggregate-gnu-diagnostics.json`, `algebra-inverse-diagnostics.json`,
+`algebra-constant-inverse-diagnostics.json`, and
+`algebra-inverse-stage-diagnostics.json`, with `algebra-integer-residue-smoke.json`,
+`algebra-contiguous-residue-smoke.json`, and `hex-reducer-diagnostics.json`.
+These are correctness/portability evidence, not oracle acceptance, hardware
+throughput, or whole-domain accuracy proof.
+No corpus replay or profiling campaign was run. The previous profiling ledger
+and manifest-qualified target remain unchanged.

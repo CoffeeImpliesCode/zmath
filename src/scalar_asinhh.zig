@@ -23,6 +23,8 @@
 //
 // The caller must keep IEEE round-to-nearest, ties-to-even active.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const sign_mask: u16 = 0x8000;
 const magnitude_mask: u16 = 0x7fff;
 const infinity_bits: u16 = 0x7c00;
@@ -128,21 +130,21 @@ pub fn asinhh(value: f16) f16 {
         }
         const t_squared = t * t;
         const p = coefficients[0];
-        const c5 = @mulAdd(f32, p[3], t_squared, p[2]);
-        var c1 = @mulAdd(f32, p[1], t_squared, p[0]);
-        c1 = @mulAdd(f32, c5, t_squared * t_squared, c1);
+        const c5 = fma_impl.fma(p[3], t_squared, p[2]);
+        var c1 = fma_impl.fma(p[1], t_squared, p[0]);
+        c1 = fma_impl.fma(c5, t_squared * t_squared, c1);
         return @floatCast(t * c1);
     }
 
     if (sign) t = -t;
     const t_squared = t * t;
     const p = coefficients[@intCast(exponent)];
-    var c4 = @mulAdd(f32, p[5], t, p[4]);
-    const c2 = @mulAdd(f32, p[3], t, p[2]);
-    var c0 = @mulAdd(f32, p[1], t, p[0]);
-    c4 = @mulAdd(f32, p[6], t_squared, c4);
-    c0 = @mulAdd(f32, c2, t_squared, c0);
-    var result = @mulAdd(f32, c4, t_squared * t_squared, c0);
+    var c4 = fma_impl.fma(p[5], t, p[4]);
+    const c2 = fma_impl.fma(p[3], t, p[2]);
+    var c0 = fma_impl.fma(p[1], t, p[0]);
+    c4 = fma_impl.fma(p[6], t_squared, c4);
+    c0 = fma_impl.fma(c2, t_squared, c0);
+    var result = fma_impl.fma(c4, t_squared * t_squared, c0);
 
     switch (exponent) {
         7 => {

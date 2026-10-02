@@ -23,6 +23,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_sinpid_data.zig");
 const scalar_tiny = @import("scalar_tiny.zig");
 
@@ -67,7 +69,7 @@ fn mulDoubleDoubleAcc(
     const high_low = c_high * x_low;
     const low_high = c_low * x_high;
     const high_high = c_high * x_high;
-    var high_error = @mulAdd(f64, c_high, x_high, -high_high);
+    var high_error = fma_impl.fma64(c_high, x_high, -high_high);
     high_error += low_high + high_low;
     return fastTwoSum(high_high, high_error, low);
 }
@@ -75,7 +77,7 @@ fn mulDoubleDoubleAcc(
 fn mulDoubleDouble(x_high: f64, x_low: f64, c_high: f64, low: *f64) f64 {
     const high_low = c_high * x_low;
     const high_high = c_high * x_high;
-    const high_error = @mulAdd(f64, c_high, x_high, -high_high);
+    const high_error = fma_impl.fma64(c_high, x_high, -high_high);
     const middle = high_error + high_low;
     const result = high_high + middle;
     low.* = (high_high - result) + middle;
@@ -105,9 +107,9 @@ fn polyDoubleDouble(
 
 fn sinpiZero(value: f64) f64 {
     const square = value * value;
-    const square_error = @mulAdd(f64, value, value, -square);
+    const square_error = fma_impl.fma64(value, value, -square);
     const cube = square * value;
-    const cube_error = @mulAdd(f64, square, value, -cube) + square_error * value;
+    const cube_error = fma_impl.fma64(square, value, -cube) + square_error * value;
     const coefficients = [_][2]f64{
         .{ -0x1.4abbce625be53p+2, 0x1.05511c68477bep-52 },
         .{ 0x1.466bc6775aae2p+1, -0x1.6dc0cbefae1dap-54 },
@@ -132,9 +134,9 @@ fn sinpiZero(value: f64) f64 {
     rounded_bits &= 0x000f_ffff_ffff_ffff;
     rounded_bits +%= @as(u64, 85) << 51;
     rounded = (rounded + @as(f64, @bitCast(rounded_bits))) - @as(f64, @bitCast(rounded_bits));
-    const rounded_low = @mulAdd(f64, pi_high, value, -rounded);
+    const rounded_low = fma_impl.fma64(pi_high, value, -rounded);
     var middle = pi_middle * value;
-    var middle_low = @mulAdd(f64, pi_middle, value, -middle) + pi_low * value;
+    var middle_low = fma_impl.fma64(pi_middle, value, -middle) + pi_low * value;
     middle = addDoubleDouble(middle, middle_low, rounded_low, 0.0, &middle_low);
     middle = addDoubleDouble(middle, middle_low, high, low_part, &low_part);
     rounded = fastTwoSum(rounded, middle, &middle);
@@ -153,7 +155,7 @@ fn sinpiZero(value: f64) f64 {
 fn sinpiRefine(index_input: i32, z: f64) f64 {
     const x = z * 0x1p-63;
     const square = x * x;
-    const square_error = @mulAdd(f64, x, x, -square);
+    const square_error = fma_impl.fma64(x, x, -square);
     const sine_coefficients = [_][2]f64{
         .{ 0x1.921fb54442d18p+1, 0x1.1a62633145c06p-53 },
         .{ -0x1.4abbce625be53p-22, 0x1.05511cbc65743p-76 },
@@ -255,18 +257,18 @@ pub fn sinpid(value: f64) f64 {
             if (absolute_value < 0x1p-970) {
                 const scaled = value * 0x1p106;
                 high = pi_high * scaled;
-                low = @mulAdd(f64, pi_high, scaled, -high) + pi_low * scaled;
+                low = fma_impl.fma64(pi_high, scaled, -high) + pi_low * scaled;
                 const sum = high + low;
                 const scaled_sum = sum * 0x1p-106;
                 const restored = scaled_sum * 0x1p106;
-                return @mulAdd(f64, (high - restored) + low, 0x1p-106, scaled_sum);
+                return fma_impl.fma64((high - restored) + low, 0x1p-106, scaled_sum);
             }
             high = pi_high * value;
-            low = @mulAdd(f64, pi_high, value, -high) + pi_low * value;
+            low = fma_impl.fma64(pi_high, value, -high) + pi_low * value;
             return high + low;
         }
         high = pi_high * value;
-        low = @mulAdd(f64, pi_high, value, -high) + pi_low * value;
+        low = fma_impl.fma64(pi_high, value, -high) + pi_low * value;
         const square = value * value;
         const cube = square * value;
         const fourth = square * square;

@@ -60,8 +60,15 @@ fn bitsOf(comptime V: type, v: V) [widthOf(V)]intOf(@typeInfo(V).@"struct".field
 }
 
 /// The lanes of a `@Vector` as an array, for a test that compares them.
+///
+/// This is the coercion from a `@Vector` to an array of the same length and
+/// element type, so lane `i` becomes element `i`. It must not be a `@bitCast`:
+/// that reinterprets the bytes of the vector, an array has a well-defined byte
+/// layout but a vector has none, and on a big-endian target the pun returned
+/// the lanes reversed.
 fn lanesOf(comptime N: usize, comptime T: type, v: @Vector(N, T)) [N]T {
-    return @bitCast(v);
+    const lanes: [N]T = v;
+    return lanes;
 }
 
 /// The value one ulp above `v`, for a test that needs two distinct neighbours

@@ -1,0 +1,475 @@
+[
+  {
+    "architecture": "x86_64",
+    "target": "x86_64-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "x86_64-linux",
+      "-mfma",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "8388608",
+      "__FLT16_MANT_DIG__": "11",
+      "__FMA__": "1",
+      "__SSE4_1__": "1"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "aarch64",
+    "target": "aarch64-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "aarch64-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__ARM_FEATURE_FMA": "1",
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11",
+      "__FP_FAST_FMA": "1",
+      "__FP_FAST_FMAF": "1"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "aarch64_be",
+    "target": "aarch64_be-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "aarch64_be-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__ARM_FEATURE_FMA": "1",
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11",
+      "__FP_FAST_FMA": "1",
+      "__FP_FAST_FMAF": "1"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "arm",
+    "target": "arm-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "arm-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "armeb",
+    "target": "armeb-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "armeb-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "hexagon",
+    "target": "hexagon-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "hexagon-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "loongarch64",
+    "target": "loongarch64-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "loongarch64-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11",
+      "__loongarch_frlen": "64"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "mips",
+    "target": "mips-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "mips-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "mipsel",
+    "target": "mipsel-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "mipsel-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "mips64",
+    "target": "mips64-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "mips64-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128"
+    },
+    "stderr": "zig: warning: ignoring '-fno-PIC' option as it cannot be used with implicit usage of -mabicalls and the N64 ABI [-Woption-ignored]\n"
+  },
+  {
+    "architecture": "mips64el",
+    "target": "mips64el-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "mips64el-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128"
+    },
+    "stderr": "zig: warning: ignoring '-fno-PIC' option as it cannot be used with implicit usage of -mabicalls and the N64 ABI [-Woption-ignored]\n"
+  },
+  {
+    "architecture": "powerpc",
+    "target": "powerpc-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "powerpc-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__powerpc__": "1"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "powerpc64",
+    "target": "powerpc64-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "powerpc64-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__powerpc__": "1"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "powerpc64le",
+    "target": "powerpc64le-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "powerpc64le-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__powerpc__": "1"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "riscv32",
+    "target": "riscv32-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "riscv32-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11",
+      "__riscv_flen": "64"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "riscv64",
+    "target": "riscv64-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "riscv64-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11",
+      "__riscv_flen": "64"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "s390x",
+    "target": "s390x-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "s390x-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11",
+      "__s390x__": "1"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "thumb",
+    "target": "thumb-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "thumb-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "thumbeb",
+    "target": "thumbeb-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "thumbeb-linux",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128",
+      "__FLT16_MANT_DIG__": "11"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "wasm32",
+    "target": "wasm32-wasi",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "wasm32-wasi",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "128"
+    },
+    "stderr": ""
+  },
+  {
+    "architecture": "x86",
+    "target": "x86-linux",
+    "command": [
+      "<zig-global-cache>/zig",
+      "cc",
+      "-target",
+      "x86-linux",
+      "-mfma",
+      "-ffreestanding",
+      "-dM",
+      "-E",
+      "-x",
+      "c",
+      "/dev/null"
+    ],
+    "exit_code": 0,
+    "defines": {
+      "__BITINT_MAXWIDTH__": "8388608",
+      "__FLT16_MANT_DIG__": "11",
+      "__FMA__": "1",
+      "__SSE4_1__": "1"
+    },
+    "stderr": ""
+  }
+]

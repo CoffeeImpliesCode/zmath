@@ -4,7 +4,7 @@
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa and are used under the MIT License.
 // They are compiled freestanding and do not call host libm, fenv, or allocation APIs.
 
-extern fn cr_erfcf16(value: f16) callconv(.c) f16;
+extern fn zmath_core_erfch_bits(value: u16) callconv(.c) u16;
 extern fn cr_erfcf(value: f32) callconv(.c) f32;
 extern fn zmath_core_erfcd_negative(value: f64) callconv(.c) f64;
 extern fn zmath_core_erfcd_positive(value: f64) callconv(.c) f64;
@@ -28,7 +28,7 @@ pub fn erfch(value: f16) f16 {
     @setFloatMode(.strict);
     const bits: u16 = @bitCast(value);
     if ((bits & magnitude_mask_h) > infinity_bits_h) return @bitCast(bits | quiet_nan_bit_h);
-    return cr_erfcf16(value);
+    return @bitCast(zmath_core_erfch_bits(bits));
 }
 
 /// Correctly rounded complementary error function for binary32 values.

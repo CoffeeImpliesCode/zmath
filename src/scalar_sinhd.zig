@@ -1,3 +1,5 @@
+const fma_impl = @import("scalar_fma.zig");
+
 const data = @import("scalar_sinhd_data.zig");
 
 const sign_mask: u64 = 0x8000_0000_0000_0000;
@@ -17,7 +19,7 @@ fn fastTwoSum(x: f64, y: f64, error_value: *f64) f64 {
 fn mulDd(x_high: f64, x_low: f64, c_high: f64, c_low: f64, error_value: *f64) f64 {
     @setFloatMode(.strict);
     const high = x_high * c_high;
-    error_value.* = @mulAdd(f64, x_high, c_high, -high) +
+    error_value.* = fma_impl.fma64(x_high, c_high, -high) +
         x_high * c_low + x_low * c_high;
     return high;
 }
@@ -25,7 +27,7 @@ fn mulDd(x_high: f64, x_low: f64, c_high: f64, c_low: f64, error_value: *f64) f6
 fn mulDdd(x_high: f64, x_low: f64, c: f64, error_value: *f64) f64 {
     @setFloatMode(.strict);
     const high = x_high * c;
-    error_value.* = @mulAdd(f64, x_high, c, -high) + x_low * c;
+    error_value.* = fma_impl.fma64(x_high, c, -high) + x_low * c;
     return high;
 }
 
@@ -90,7 +92,7 @@ fn asExpAccurate(
     const reduced = x - log2_high * index;
     const reduced_low = log2_low * index;
     const reduced_tail = log2_tail * index +
-        @mulAdd(f64, log2_low, index, -reduced_low);
+        fma_impl.fma64(log2_low, index, -reduced_low);
     const reduced_high = reduced + reduced_low;
     const reduced_error = (reduced - reduced_high) + reduced_low + reduced_tail;
     var polynomial_low = reduced_high *
@@ -130,7 +132,7 @@ fn asSinhZero(value: f64) f64 {
         .{ 0x1.ae64567f54482p-26, -0x1.defcf17a6ab79p-81 },
     };
     const square_high = value * value;
-    const square_low = @mulAdd(f64, value, value, -square_high);
+    const square_low = fma_impl.fma64(value, value, -square_high);
     var polynomial_low = square_high *
         (0x1.6124613aef206p-33 + square_high *
             (0x1.ae7f36beea815p-41 + square_high * 0x1.95785063cd974p-49));
@@ -254,7 +256,7 @@ pub fn sinhd(value: f64) f64 {
 
     const scale = 0x1.71547652b82fep+12;
     const absolute_value: f64 = @bitCast(absolute_bits);
-    const rounded_product = @mulAdd(f64, absolute_value, scale, 0x1.8000002p+26);
+    const rounded_product = fma_impl.fma64(absolute_value, scale, 0x1.8000002p+26);
     const rounded_bits: u64 = @bitCast(rounded_product);
     const reduction_mask: u64 = ~@as(u64, (1 << 26) - 1);
     const reduction = @as(f64, @bitCast(rounded_bits & reduction_mask)) - 0x1.8p+26;
@@ -271,7 +273,7 @@ pub fn sinhd(value: f64) f64 {
     const table_1_low = data.t1[positive_table_1_index][0];
     const table_high = table_0_high * table_1_high;
     const table_low = table_0_high * table_1_low + table_1_high * table_0_low +
-        @mulAdd(f64, table_0_high, table_1_high, -table_high);
+        fma_impl.fma64(table_0_high, table_1_high, -table_high);
     const log2_high = 0x1.62e42ffp-13;
     const log2_low = 0x1.718432a1b0e26p-47;
     const reduced = (absolute_value - log2_high * reduction) + log2_low * reduction;
@@ -331,7 +333,7 @@ pub fn sinhd(value: f64) f64 {
         const negative_table_product_high = negative_table_high * negative_scale;
         const negative_table_low_unscaled = negative_table_0_high * negative_table_1_low +
             negative_table_1_high * negative_table_0_low +
-            @mulAdd(f64, negative_table_0_high, negative_table_1_high, -negative_table_high);
+            fma_impl.fma64(negative_table_0_high, negative_table_1_high, -negative_table_high);
         const negative_table_product_low = negative_table_low_unscaled * negative_scale;
         const negative_reduced = -reduced;
         const negative_even = 0x1p+0 + reduced_squared * 0x1.5555555aaaaaep-3;
@@ -398,7 +400,7 @@ pub fn sinhd(value: f64) f64 {
     const negative_high_unscaled = negative_table_0_high * negative_table_1_high;
     const negative_low_unscaled = negative_table_0_high * negative_table_1_low +
         negative_table_1_high * negative_table_0_low +
-        @mulAdd(f64, negative_table_0_high, negative_table_1_high, -negative_high_unscaled);
+        fma_impl.fma64(negative_table_0_high, negative_table_1_high, -negative_high_unscaled);
     const negative_high_scaled = negative_high_unscaled * negative_scale;
     const negative_low_scaled = negative_low_unscaled * negative_scale;
     const negative_reduced = -reduced;

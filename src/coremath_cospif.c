@@ -26,6 +26,7 @@ SOFTWARE.
 */
 
 #include <stdint.h>
+#include "coremath_fma.h"
 
 // Warning: clang also defines __GNUC__
 #if defined(__GNUC__) && !defined(__clang__)
@@ -81,9 +82,9 @@ float cr_cospif(float x){
     uint32_t ax = ix.u & (~0u>>1);
     // Warning: -0x1.3bd3ccp+2f * x underflows for |x| < 0x1.9f03p-129
     if (ax >= 0x19f030u)
-      return __builtin_fmaf (-0x1.3bd3ccp+2f * x, x, 1.0f);
+      return zmath_fmaf (-0x1.3bd3ccp+2f * x, x, 1.0f);
     else // |x| < 0x1.9f03p-129
-      return __builtin_fmaf (-x, x, 1.0f);
+      return zmath_fmaf (-x, x, 1.0f);
   }
   if(__builtin_expect(p>31, 0)) {
     if(__builtin_expect(p>63, 0)) return 1.0f;

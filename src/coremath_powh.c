@@ -26,16 +26,20 @@ SOFTWARE.
 
 #include <stdint.h>
 
-typedef union {_Float16 f; uint16_t u;} b16u16_u;
-typedef union {double f; uint64_t u;} b64u64_u;
-static const b16u16_u poszero = {.u = 0x0000};
-static const b16u16_u negzero = {.u = 0x8000};
-static const b16u16_u one = {.u = 0x3c00};
-static const b16u16_u neginf = {.u = 0xfc00};
-static const b16u16_u posinf = {.u = 0x7c00};
+#include "coremath_fma.h"
+#include "coremath_half.h"
+#include "coremath_roundeven.h"
 
-static inline int integer_class(b16u16_u v) {
-	uint16_t magnitude = v.u & 0x7fff;
+#define ZMATH_POWH_POSZERO 0x0000u
+#define ZMATH_POWH_NEGZERO 0x8000u
+#define ZMATH_POWH_ONE 0x3c00u
+#define ZMATH_POWH_NEGINF 0xfc00u
+#define ZMATH_POWH_POSINF 0x7c00u
+
+typedef union {double f; uint64_t u;} b64u64_u;
+
+static inline int integer_class(uint16_t v) {
+	uint16_t magnitude = v & 0x7fff;
 	if (!magnitude) return 2;
 	unsigned exponent = magnitude >> 10;
 	if (exponent < 15) return 0;
@@ -50,40 +54,40 @@ static inline int integer_class(b16u16_u v) {
 // return non-zero if x^y might be representable with 11 precision bits
 // See https://ens-lyon.hal.science/ensl-00169409v2/file/power-rr.lip.pdf
 // for more details
-static inline uint64_t is_exact(b16u16_u x, b16u16_u y) {
+static inline uint64_t is_exact(uint16_t x, uint16_t y) {
 	// S_1 = {(x, y) | x = 2^E and -25 <= y*E <= 15}
 	// S_2 = {(x, y) | y = n2^F with 1 <= n <= 7 and -2 <= F < 0}
 		// ie y = 1/4, 1/2, 3/4, 5/4, 3/2, 7/4, 5/2, 7/2
 	// S_3 = {(x, y) | 1 <= y <= 7 (integer)}
 
 	// S_1
-	if (!(x.u & 0x3ff)) { // x = 2^E with E >= -14
-		int E = (x.u >> 10) - 15;
-		int yE = E * (float) y.f;
-		if (((y.u >> 10) & 0x1f) + __builtin_ctz(y.u | 0x400) + __builtin_ctz(E) >= 25 && -25 <= yE && yE <= 15) return (0x3ffull + yE) << 52;
+	if (!(x & 0x3ff)) { // x = 2^E with E >= -14
+		int E = (x >> 10) - 15;
+		int yE = E * (float) zmath_half_to_float_bits(y);
+		if (((y >> 10) & 0x1f) + __builtin_ctz((unsigned)(y | 0x400)) + __builtin_ctz((unsigned)E) >= 25 && -25 <= yE && yE <= 15) return (0x3ffull + yE) << 52;
 	}
-	else if (__builtin_ctz(x.u) + __builtin_clz(x.u) == 31) { // x = 2^E with E < -14
-		int E = -24 + __builtin_ctz(x.u);
-		int yE = E * (float) y.f;
-		if (((y.u >> 10) & 0x1f) + __builtin_ctz(y.u | 0x400) + __builtin_ctz(E) >= 25 && -25 <= yE && yE <= 15) return (0x3ffull + yE) << 52;
+	else if (__builtin_ctz((unsigned)x) + __builtin_clz((unsigned)x) == 31) { // x = 2^E with E < -14
+		int E = -24 + __builtin_ctz((unsigned)x);
+		int yE = E * (float) zmath_half_to_float_bits(y);
+		if (((y >> 10) & 0x1f) + __builtin_ctz((unsigned)(y | 0x400)) + __builtin_ctz((unsigned)E) >= 25 && -25 <= yE && yE <= 15) return (0x3ffull + yE) << 52;
 	}
 	// S_2 and S_3
-	if (!(y.u & 0xff)) { // return (n << 4) + 2^-F
-		if (y.u == 0x3400) return 0x14; // 0.25
-		if (y.u == 0x3800) return 0x12; // 0.5
-		if (y.u == 0x3a00) return 0x34; // 0.75
-		if (y.u == 0x3c00) return 0x11; // 1
-		if (y.u == 0x3d00) return 0x54; // 1.25
-		if (y.u == 0x3e00) return 0x32; // 1.5
-		if (y.u == 0x3f00) return 0x74; // 1.75
-		if (y.u == 0x4000) return 0x21; // 2
-		if (y.u == 0x4100) return 0x52; // 2.5
-		if (y.u == 0x4200) return 0x31; // 3
-		if (y.u == 0x4300) return 0x72; // 3.5
-		if (y.u == 0x4400) return 0x41; // 4
-		if (y.u == 0x4500) return 0x51; // 5
-		if (y.u == 0x4600) return 0x61; // 6
-		if (y.u == 0x4700) return 0x71; // 7
+	if (!(y & 0xff)) { // return (n << 4) + 2^-F
+		if (y == 0x3400) return 0x14; // 0.25
+		if (y == 0x3800) return 0x12; // 0.5
+		if (y == 0x3a00) return 0x34; // 0.75
+		if (y == 0x3c00) return 0x11; // 1
+		if (y == 0x3d00) return 0x54; // 1.25
+		if (y == 0x3e00) return 0x32; // 1.5
+		if (y == 0x3f00) return 0x74; // 1.75
+		if (y == 0x4000) return 0x21; // 2
+		if (y == 0x4100) return 0x52; // 2.5
+		if (y == 0x4200) return 0x31; // 3
+		if (y == 0x4300) return 0x72; // 3.5
+		if (y == 0x4400) return 0x41; // 4
+		if (y == 0x4500) return 0x51; // 5
+		if (y == 0x4600) return 0x61; // 6
+		if (y == 0x4700) return 0x71; // 7
 	}
 	return 0;
 }
@@ -139,9 +143,9 @@ static inline double log_in_pow(double x) {
 	int expo = (xd.u >> 52) - 1023;
 	int i = (xd.u & (0x3full << 46)) >> 46;
 	xd.f = (xd.u & 0x3fffffffffff) * tl[i];
-	xd.f *= __builtin_fma(__builtin_fma(__builtin_fma(__builtin_fma(0x1.999999999999ap-3, xd.f, -0.25), xd.f, 0x1.5555555555555p-2), xd.f, -0.5), xd.f, 1.0);
-	// xd.f *= __builtin_fma(__builtin_fma(0x1.5555555555555p-2, xd.f, -0.5), xd.f, 1.0);
-	return __builtin_fma(log2, (double) expo, tb[i] + xd.f);
+	xd.f *= zmath_fma(zmath_fma(zmath_fma(zmath_fma(0x1.999999999999ap-3, xd.f, -0.25), xd.f, 0x1.5555555555555p-2), xd.f, -0.5), xd.f, 1.0);
+	// xd.f *= zmath_fma(zmath_fma(0x1.5555555555555p-2, xd.f, -0.5), xd.f, 1.0);
+	return zmath_fma(log2, (double) expo, tb[i] + xd.f);
 }
 
 static inline double exp_in_pow(double x) {
@@ -173,107 +177,107 @@ static inline double exp_in_pow(double x) {
 	else if (xd.f > x1.f) return 0x1.ffcp+15 + 0x1p+5;
 	static const double sixtyfour_over_log2 = 0x1.71547652b82fep+6;
 	static const double minus_log2_over_sixtyfour = -0x1.62e42fefa39efp-7;
-	double j = __builtin_roundeven(sixtyfour_over_log2 * xd.f);
+	double j = zmath_roundeven_finite(sixtyfour_over_log2 * xd.f);
 	int64_t jint = j;
 	int i = jint & 0x3f;
-	double xp = __builtin_fma(minus_log2_over_sixtyfour, j, xd.f);
-	xp = __builtin_fma(__builtin_fma(__builtin_fma(0x1.55555555555p-3, xp, 0.5), xp, 1.0), xp, 1.0);
+	double xp = zmath_fma(minus_log2_over_sixtyfour, j, xd.f);
+	xp = zmath_fma(zmath_fma(zmath_fma(0x1.55555555555p-3, xp, 0.5), xp, 1.0), xp, 1.0);
 	b64u64_u ret = {.f = xp * tb[i]};
 	ret.u += (jint >> 6) * (1ull << 52);
 	return ret.f;
 }
 
-_Float16 cr_powf16(_Float16 x, _Float16 y){
-	b16u16_u vx = {.f = x}, vy = {.f = y};
+uint16_t zmath_core_powh_bits(uint16_t x, uint16_t y){
+	uint16_t vx = x, vy = y;
 	uint64_t sign = 0;
-	if ((vx.u & 0x7fff) == 0x3c00) { // |x| = 1
-		if (vx.u >> 15) { // x = -1
-			if ((vy.u & 0x7fff) > 0x7c00) return y + y; // y = NaN
+	if ((vx & 0x7fff) == 0x3c00) { // |x| = 1
+		if (vx >> 15) { // x = -1
+			if ((vy & 0x7fff) > 0x7c00) return zmath_half_nan_bits(vy); // y = NaN
 			int y_class = integer_class(vy);
-			if (y_class) return (y_class == 1) ? vx.f : -vx.f;
+			if (y_class) return (y_class == 1) ? vx : ZMATH_POWH_ONE;
 #ifdef CORE_MATH_SUPPORT_ERRNO
 			errno = EDOM;
 #endif
-			return 0.0f / 0.0f;
+			return ZMATH_HALF_CANONICAL_NAN_BITS;
 		}
-		return ((vy.u & 0x7fff) > 0x7c00 && !(vy.u & 0x0200)) ? y + y : x;
+		return ((vy & 0x7fff) > 0x7c00 && !(vy & 0x0200)) ? zmath_half_nan_bits(vy) : vx;
 		// 1^y = 1 except if y = sNaN
 	}
-	if (!(vy.u & 0x7fff)) // y = 0
-		return ((vx.u & 0x7fff) > 0x7c00 && !(vx.u & 0x0200)) ? x + x : one.f;
+	if (!(vy & 0x7fff)) // y = 0
+		return ((vx & 0x7fff) > 0x7c00 && !(vx & 0x0200)) ? zmath_half_nan_bits(vx) : ZMATH_POWH_ONE;
 	// x^0 = 1 except if x = sNaN
-	if ((vy.u & 0x7fff) >= 0x7c00) { // y = Inf/NaN
+	if ((vy & 0x7fff) >= 0x7c00) { // y = Inf/NaN
 		// the case |x| = 1 was checked above
-		if ((vx.u & 0x7fff) > 0x7c00) return x + x; // x = NaN
-		if ((vy.u & 0x7fff) == 0x7c00) { // y = +/-Inf
-                  if (((vx.u & 0x7fff) < 0x3c00) ^ (vy.u >> 15))
-                    return poszero.f; // |x| < 1 && y = +Inf or |x| > 1 && y = -Inf
+		if ((vx & 0x7fff) > 0x7c00) return zmath_half_nan_bits(vx); // x = NaN
+		if ((vy & 0x7fff) == 0x7c00) { // y = +/-Inf
+                  if (((vx & 0x7fff) < 0x3c00) ^ (vy >> 15))
+                    return ZMATH_POWH_POSZERO; // |x| < 1 && y = +Inf or |x| > 1 && y = -Inf
 		  else
-                    return posinf.f; // |x| < 1 && y = -Inf or |x| > 1 && y = +Inf
+                    return ZMATH_POWH_POSINF; // |x| < 1 && y = -Inf or |x| > 1 && y = +Inf
                 }
-		return y + y; // y = NaN
+		return zmath_half_nan_bits(vy); // y = NaN
 	}
-	if (!(vx.u & 0x7fff)) { // if x = 0
+	if (!(vx & 0x7fff)) { // if x = 0
 		int y_class = integer_class(vy);
-		if (vy.u >> 15) { // y < 0
+		if (vy >> 15) { // y < 0
 #ifdef CORE_MATH_SUPPORT_ERRNO
 			errno = ERANGE;
 #endif
-			if (y_class == 1 && vx.u >> 1) return neginf.f;
-			else return posinf.f;
+			if (y_class == 1 && vx >> 1) return ZMATH_POWH_NEGINF;
+			else return ZMATH_POWH_POSINF;
 		} else { // y > 0
-			if (y_class == 1 && vx.u >> 1) return negzero.f;
-			else return poszero.f;
+			if (y_class == 1 && vx >> 1) return ZMATH_POWH_NEGZERO;
+			else return ZMATH_POWH_POSZERO;
 		}
 	}
-	if (vx.u >= 0x7c00) { // x = Inf or x = NaN or x <= 0
+	if (vx >= 0x7c00) { // x = Inf or x = NaN or x <= 0
 		int y_class = integer_class(vy);
-		if ((vx.u & 0x7fff) == 0x7c00) { // x = +/-Inf
-			if (y_class != 1) vx.u &= 0x7fff; // y even -> ret will be positive
-			if (vy.u >> 15) vx.u &= 0x8000; // y < 0 -> ret will be +/-0
-			return vx.f;
+		if ((vx & 0x7fff) == 0x7c00) { // x = +/-Inf
+			if (y_class != 1) vx &= 0x7fff; // y even -> ret will be positive
+			if (vy >> 15) vx &= 0x8000; // y < 0 -> ret will be +/-0
+			return vx;
 		}
-		if ((vx.u & 0x7fff) > 0x7c00) return x + x; // x is NaN
+		if ((vx & 0x7fff) > 0x7c00) return zmath_half_nan_bits(vx); // x is NaN
 		// x < 0
 		if (y_class == 0) {
 #ifdef CORE_MATH_SUPPORT_ERRNO
 			errno = EDOM;
 #endif
-			return 0.0f / 0.0f;
+			return ZMATH_HALF_CANONICAL_NAN_BITS;
 		} 
 		else if (y_class == 1) sign = 1ull << 63;
-		vx.u &= 0x7fff;
+		vx &= 0x7fff;
 	}
 	// some wrong cases
-	if (vx.u == 0x1c94 && vy.u == 0x31bc) return 0x1.848p-2f - 0x1p-14f;
-	if (vx.u == 0x537b && vy.u == 0x25bf) return 0x1.18cp+0f - 0x1p-12f;
-	if (vx.u == 0x756b && vy.u == 0x112e) return 0x1.01cp+0f - 0x1p-12f;
-	if (vx.u == 0x0d36 && vy.u == 0x2316) return 0x1.cap-1f + 0x1p-13f;
-	if (vx.u == 0x273b && vy.u == 0x38b3) return 0x1.f8p-4f + 0x1p-16f;
-	if (vx.u == 0x32bb && vy.u == 0x4242) return 0x1.f2cp-8f + 0x1p-20f;
-	if (vx.u == 0x4d47 && vy.u == 0x9d5f) return 0x1.f8p-1 - 0x1p-13;
-	if (vx.u == 0x2e27 && vy.u == 0xc107) return 0x1.688p+8 - 0x1p-4;
-	if (vx.u == 0x14cb && vy.u == 0xbe46) return 0x1.35cp+15 - 0x1p-3;
-	if (vx.u == 0x7abf && vy.u == 0x8cc5) return 0x1.fe8p-1 - 0x1p-13;
-	if (vx.u == 0x650c && vy.u == 0x9bed) return 0x1.f2p-1 + 0x1p-13;
-	if (vx.u == 0x29a0 && vy.u == 0xb5cf) return 0x1.8ep+1 + 0x1p-11;
-	if (vx.u == 0x17e9 && vy.u == 0xb1cf) return 0x1.8ep+1 + 0x1p-11;
-	if (vx.u == 0x5988 && vy.u == 0x9443) return 0x1.fd4p-1 + 0x1p-13;
+	if (vx == 0x1c94 && vy == 0x31bc) return zmath_half_from_double_bits((double)(0x1.848p-2f - 0x1p-14f));
+	if (vx == 0x537b && vy == 0x25bf) return zmath_half_from_double_bits((double)(0x1.18cp+0f - 0x1p-12f));
+	if (vx == 0x756b && vy == 0x112e) return zmath_half_from_double_bits((double)(0x1.01cp+0f - 0x1p-12f));
+	if (vx == 0x0d36 && vy == 0x2316) return zmath_half_from_double_bits((double)(0x1.cap-1f + 0x1p-13f));
+	if (vx == 0x273b && vy == 0x38b3) return zmath_half_from_double_bits((double)(0x1.f8p-4f + 0x1p-16f));
+	if (vx == 0x32bb && vy == 0x4242) return zmath_half_from_double_bits((double)(0x1.f2cp-8f + 0x1p-20f));
+	if (vx == 0x4d47 && vy == 0x9d5f) return zmath_half_from_double_bits(0x1.f8p-1 - 0x1p-13);
+	if (vx == 0x2e27 && vy == 0xc107) return zmath_half_from_double_bits(0x1.688p+8 - 0x1p-4);
+	if (vx == 0x14cb && vy == 0xbe46) return zmath_half_from_double_bits(0x1.35cp+15 - 0x1p-3);
+	if (vx == 0x7abf && vy == 0x8cc5) return zmath_half_from_double_bits(0x1.fe8p-1 - 0x1p-13);
+	if (vx == 0x650c && vy == 0x9bed) return zmath_half_from_double_bits(0x1.f2p-1 + 0x1p-13);
+	if (vx == 0x29a0 && vy == 0xb5cf) return zmath_half_from_double_bits(0x1.8ep+1 + 0x1p-11);
+	if (vx == 0x17e9 && vy == 0xb1cf) return zmath_half_from_double_bits(0x1.8ep+1 + 0x1p-11);
+	if (vx == 0x5988 && vy == 0x9443) return zmath_half_from_double_bits(0x1.fd4p-1 + 0x1p-13);
 	uint64_t isex = is_exact(vx, vy);
 	b64u64_u ret;
 	if (isex > 0xff) ret.u = isex;
 	else if (isex) {
-          ret.f = exp_in_pow(log_in_pow(vx.f) * (double) vy.f);
+          ret.f = exp_in_pow(log_in_pow(zmath_half_to_double_bits(vx)) * zmath_half_to_double_bits(vy));
 		// Test if ret is exact :
-		b64u64_u test_exact1 = {.f = fast_pow(vx.f, isex >> 4)};
+		b64u64_u test_exact1 = {.f = fast_pow(zmath_half_to_double_bits(vx), isex >> 4)};
 		b64u64_u test_exact2 = {.u = (ret.u + (0x1ull << 40)) & (0xfffffeull << 40)};
 		test_exact2.f = fast_pow(test_exact2.f, isex & 0xf);
 		if (test_exact1.u == test_exact2.u) {
 			ret.u = (ret.u + (1ull << 40)) & (0xfffffeull << 40);
 		}
 	}
-	else ret.f = exp_in_pow(log_in_pow(vx.f) * (double) vy.f);
+	else ret.f = exp_in_pow(log_in_pow(zmath_half_to_double_bits(vx)) * zmath_half_to_double_bits(vy));
 	ret.u += sign;
-	return ret.f;
+	return zmath_half_from_double_bits(ret.f);
 }
 
