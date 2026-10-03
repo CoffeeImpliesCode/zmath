@@ -67,6 +67,20 @@ fn roundEvenFinite(value: f64) i64 {
     return rounded_bits -% 0x4338_0000_0000_0000;
 }
 
+/// Inverse sine of a `binary16` value.
+///
+/// The trailing `h` is this package's binary16 suffix, so this computes
+/// `asin`, not an inverse hyperbolic sine; that kernel is `asinhh`.
+///
+/// A magnitude above 1, and either infinity, is a domain error and gives the
+/// positive canonical quiet NaN (0x7e00). A NaN input is returned with its
+/// quiet bit set, its sign and payload kept. Magnitudes up to 0.045044, and
+/// either signed zero, are returned unchanged; `value` of 1 gives the binary16
+/// nearest to pi/2 with the sign of `value`.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The
+/// returned float is the whole result: no error code, floating-point exception
+/// flag, or retained status reports the domain error.
 pub fn asinh(value: f16) f16 {
     @setFloatMode(.strict);
     const bits: u16 = @bitCast(value);
@@ -95,6 +109,12 @@ fn poly12(value: f64, coefficients: []const f64) f64 {
     return low_0 + value_fourth * (low_4 + value_fourth * low_8);
 }
 
+/// Inverse sine of a `binary32` value.
+///
+/// A magnitude above 1, and either infinity, is a domain error and gives the
+/// positive canonical quiet NaN (0x7fc0_0000). A NaN input is returned with
+/// its quiet bit set, its sign and payload kept. A signed zero is returned
+/// unchanged, and `value` of 1 gives pi/2 with the sign of `value`.
 pub fn asinf(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);
@@ -389,6 +409,13 @@ fn asinDatabase(value: f64, approximation: f64) f64 {
     return if (value > 0.0) result else -result;
 }
 
+/// Inverse sine of a `binary64` value.
+///
+/// A magnitude above 1, and either infinity, is a domain error and gives the
+/// positive canonical quiet NaN (0x7ff8_0000_0000_0000). A NaN input is
+/// returned with its quiet bit set, its sign and payload kept. Magnitudes
+/// below 2.15e-8, and either signed zero, are returned unchanged; `value` of 1
+/// gives pi/2 with the sign of `value`.
 pub fn asind(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);

@@ -122,6 +122,16 @@ fn log2fFinite(input_bits: u32) f32 {
 //
 // This code is derived from CORE-MATH and used under the MIT License.
 
+/// The binary logarithm of a `binary32` value.
+///
+/// A negative `value`, `-infinity` included, is out of domain and gives the
+/// positive canonical quiet NaN (0x7fc0_0000). The boundary `+0` and `-0` are in
+/// domain and give `-infinity`; `+infinity` gives `+infinity`. A NaN input is
+/// returned with its quiet bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn log2f(value: f32) f32 {
     const bits: u32 = @bitCast(value);
     const magnitude = bits & magnitude_mask;

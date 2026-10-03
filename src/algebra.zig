@@ -67,8 +67,8 @@
 //! algebraic result wins there, not the IEEE one. No operation reads,
 //! validates, sets, or restores `fenv`, so the caller must keep
 //! round-to-nearest-ties-to-even active. `normalized`, `inverseChecked`, and
-//! the `unit` constructors return `null` for a zero, negative, or non-finite
-//! scale instead of writing a non-finite result.
+//! the `unit` constructors reject invalid scale values with `null`. They do not
+//! guarantee finite output coefficients; final scaling is not checked.
 //!
 //! `inverse`, `inverseChecked`, and `normalized` divide a nonzero finite scale.
 //! A binary32 quotient of a nonzero divisor is normal whenever it is nonzero,
@@ -103,24 +103,24 @@
 //! | `scalarPart` | scalar | the mask `0` coefficient | none | none |
 //! | `vectorPart`, `euclideanPart` | `[dimension]T` | basis order, no sign | none | none |
 //! | `reverse` | same grades | `(-1)^(k * (k - 1) / 2)` | none | none |
-//! | `conjugate` | same grades | `(-1)^(k * (k + 1) / 2)`, so `-1` on grades 1, 2, 4 | none | none |
+//! | `conjugate` | same grades | `(-1)^(k * (k + 1) / 2)`: negative on grades 1, 2, 5, 6 | none | none |
 //! | `dual` | grade `n - k` | right dual, or signed Poincare | none | none |
 //! | `dualComplement` | grade `n - k` | unsigned complement | none | none |
-//! | `evenPart` | grades `0`, `2`, `4` | exact | none | none |
+//! | `evenPart` | all even grades | exact | none | none |
 //! | `norm` | scalar | grade-0 of `A * A(reverse)` | none | none |
 //! | `normalized` | unit multivector | divide by the square root of `norm` | `norm` positive and finite | `null` |
-//! | `inverse` | `A^-1` | versor conjugate over the sandwich scalar | the sandwich is a nonzero finite scalar | none, unchecked |
-//! | `inverseChecked` | `A^-1` | as `inverse` | as `inverse`, finite, and scalar above grade 0 | `null` |
+//! | `inverse` | candidate inverse | even conjugate over scalar sandwich | finite nonzero scalar sandwich | unchecked |
+//! | `inverseChecked` | as `inverse` | checks input and sandwich, not final coefficients | as `inverse` | `null` |
 //! | `isFinite` | bool | exact | none | none |
-//! | `unitRotor` | unit grades `0` and `2` | normalize `1 + b` | `b` is a pure bivector | `null` |
-//! | `unitVersor` | unit even grades | normalize the even part | `self` is even | `null` |
-//! | `unitFlat` | unit single-grade blade | normalize the blade | one grade is present | `null` |
+//! | `unitRotor` | normalized even part of `1 + b` | normalize | caller establishes rotor membership | `null` |
+//! | `unitVersor` | normalized even part | normalize | caller establishes versor membership | `null` |
+//! | `unitFlat` | normalized single grade | normalize | caller establishes blade decomposability | `null` |
 //! | `motorPart` | grade `4` | exact | none | none |
 //! | `point` (Pga) | grade `2` | `e0 wedge x`, `e0` coefficient `+1` | none | none |
-//! | `n_o` (Cga) | `e_minus - e_plus` over `2` | exact, fixed | none | none |
-//! | `n_inf` (Cga) | `e_minus + e_plus` | exact, fixed | none | none |
-//! | `origin` (Cga) | grade `0`, `1`, and `n_inf` parts | exact, `n_o` | none | none |
-//! | `embed` (Cga) | `n_o + x + (x dot x) * n_inf / 2` | exact, `+1` | none | none |
+//! | `n_o` (Cga) | grade `1`, `(e_minus - e_plus) / 2` | exact, fixed | none | none |
+//! | `n_inf` (Cga) | grade `1`, `e_minus + e_plus` | exact, fixed | none | none |
+//! | `origin` (Cga) | grade `1`, and exactly `n_o` | exact, fixed | none | none |
+//! | `embed` (Cga) | grade `1`: `n_o + x + (x dot x) * n_inf / 2` | exact, `+1` | none | none |
 //! | `unitRound` (Cga) | unit grade `n - 1` | normalize that grade | that grade is present | `null` |
 //!
 //! The normalization table does not name a PGA line or plane operation, and
@@ -138,6 +138,31 @@
 //! `origin`, `embed`, and `unitRound` are conformal only. Every other name in
 //! the table exists on all twelve types, and `motorPart` and `vectorPart` are
 //! meaningful on all three families.
+//!
+//! ## A shortest use
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn rotorAndRefusals() !void {
+//!     const A = zmath.algebra.Cl3d;
+//!
+//!     // A pure bivector, stored as the coefficient of the blade mask.
+//!     var coefficients = [_]f64{0} ** A.coefficient_count;
+//!     coefficients[0b011] = 1.0; // e1 wedge e2
+//!     const rotor = A.unitRotor(A.fromCoefficients(coefficients)) orelse
+//!         return error.NoRotor;
+//!     // The inverse of a unit versor is its conjugate, so the product is one.
+//!     const product = rotor.geometricProduct(rotor.inverse());
+//!     std.debug.assert(@abs(product.scalarPart() - 1.0) < 1e-12);
+//!
+//!     // A zero multivector has neither a unit form nor an inverse, and both
+//!     // report the reason as `null` rather than writing a non-finite answer.
+//!     std.debug.assert(A.zero().normalized() == null);
+//!     std.debug.assert(A.zero().inverseChecked() == null);
+//! }
+//! ```
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
@@ -469,6 +494,8 @@ fn Multivector(
         }
 
         /// The multivector with the supplied coefficients, replacing every one.
+        /// Nothing is mutated: the receiver arrives by value and the answer is a
+        /// new multivector, so a caller keeps whatever `self` held.
         pub fn setCoefficients(self: Self, values: [coefficient_count]T) Self {
             _ = self;
             return .{ .c = values };
@@ -545,7 +572,7 @@ fn Multivector(
             return .{ .c = result };
         }
 
-        /// The grades `0`, `2`, and `4` of the multivector, exactly.
+        /// Retains every even grade, including grade 6 where supported.
         pub fn evenPart(self: Self) Self {
             var result = [_]T{0} ** coefficient_count;
             for (0..coefficient_count) |mask| {
@@ -643,14 +670,11 @@ fn Multivector(
             return .{ .c = result };
         }
 
-        /// The Clifford conjugate, whose grade sign is `(-1)^(k * (k + 1) / 2)`,
-        /// so it is `-1` on grades 1, 2, and 4 and `+1` on grades 0, 3, and 5.
+        /// The Clifford conjugate, with grade sign `(-1)^(k * (k + 1) / 2)`.
+        /// In the supported dimensions it negates grades 1, 2, 5, and 6,
+        /// and preserves grades 0, 3, and 4.
         ///
-        /// This is the pattern for which the grade-0 part of
-        /// `A * conjugate(A)` is the squared norm of a blade, and for which the
-        /// inverse of a unit versor is its conjugate. The sign that is `+1` on
-        /// every even grade is the grade negation, and it does not pair a
-        /// multivector with its inverse.
+        /// This is distinct from `reverse`; it is not a general versor inverse.
         pub fn conjugate(self: Self) Self {
             var result = [_]T{0} ** coefficient_count;
             for (0..coefficient_count) |mask| {
@@ -683,25 +707,22 @@ fn Multivector(
             return .{ .c = result };
         }
 
-        /// The multivector inverse over the sandwich scalar.
+        /// Scales the even Clifford conjugate by the reciprocal sandwich scalar.
         ///
-        /// Precondition: the sandwich of `self` with its versor conjugate, which
-        /// is the even part of `conjugate`, is a nonzero finite scalar. That
-        /// holds for every single-grade blade and for every rotor, a scalar plus
-        /// a bivector. It does not hold for a motor, whose grade-4 part leaves a
-        /// grade-4 residue in the sandwich, and the grade-0 part alone would
-        /// give a wrong answer. Because the versor conjugate is the even part of
-        /// `conjugate`, the inverse of a unit versor is exactly its conjugate.
-        /// Without the precondition the result is not the inverse, so use
-        /// `inverseChecked` to test it.
+        /// Precondition: its product with `self` is a finite, nonzero scalar.
+        /// Only then is the scaled value an inverse. This is not a general
+        /// multivector inverse; an odd-only blade fails that precondition.
+        /// Final scaling can overflow. `inverseChecked` checks the input and
+        /// sandwich, but does not check the final scaled coefficients.
         pub fn inverse(self: Self) Self {
             const sandwich = self.sandwichConjugate();
             return sandwich.scale(Reciprocal(T, scalarProduct(sandwich, self)));
         }
 
-        /// The multivector inverse, or `null` when `self` holds a non-finite
-        /// coefficient, when the sandwich scalar is zero or non-finite, or when
-        /// the sandwich has a nonzero coefficient above grade 0.
+        /// The same candidate as `inverse`, or `null` for non-finite input,
+        /// a zero/non-finite sandwich scalar, or a non-scalar sandwich.
+        /// An odd-only blade returns `null`; general invertibility is not
+        /// tested. Final scaled coefficients can still be non-finite.
         pub fn inverseChecked(self: Self) ?Self {
             if (!self.isFinite()) return null;
             const conjugate_part = self.sandwichConjugate();
@@ -748,28 +769,24 @@ fn Multivector(
         // Named multivector operations
         // ------------------------------------------------------------------
 
-        /// The unit rotor built from the bivector `b`, which is `1 + b`
-        /// normalized over the even grades.
-        ///
-        /// Precondition: `b` is a pure bivector. Failure: `null` when the even
-        /// part of `1 + b` is zero or non-finite.
+        /// Normalizes the even part of `1 + b`. For a rotor result, the caller
+        /// must establish rotor membership; this does not check it. Returns
+        /// `null` when the normalizer rejects its norm.
         pub fn unitRotor(b: Self) ?Self {
             return one().add(b).evenPart().normalized();
         }
 
-        /// The unit versor built from `self`, which is the even part normalized.
-        ///
-        /// Precondition: `self` is even. Failure: `null` when its even part is
-        /// zero or non-finite.
+        /// Normalizes the even part of `self`. The caller must establish that
+        /// it is a versor; even grade alone does not establish membership.
+        /// Returns `null` when the normalizer rejects its norm.
         pub fn unitVersor(self: Self) ?Self {
             return self.evenPart().normalized();
         }
 
-        /// The unit flat, which is a single-grade blade normalized.
-        ///
-        /// Precondition: at most one grade of `self` carries a nonzero
-        /// coefficient. Failure: `null` for zero, for two or more grades, or
-        /// for a non-finite coefficient.
+        /// Normalizes a nonzero single-grade value. The caller must establish
+        /// blade decomposability to use it as a flat; that is not checked.
+        /// Returns `null` for mixed grades, non-finite coefficients, zero, or
+        /// a norm the normalizer rejects.
         pub fn unitFlat(self: Self) ?Self {
             if (!self.isFinite()) return null;
             var seen: usize = 0;
@@ -822,7 +839,10 @@ fn Multivector(
             return .{ .c = result };
         }
 
-        /// The `e_minus - e_plus` blade over `2`, the conformal origin. Its
+        /// The conformal origin, the grade-1 blade `(e_minus - e_plus) / 2`: the
+        /// coefficient `+0.5` on `e_minus` and `-0.5` on `e_plus`, which are the
+        /// last two basis vectors, and nothing else. It is a sum of two grade-1
+        /// basis coefficients and NOT a wedge, so it is not a grade-2 blade. Its
         /// inner product with `n_inf` is `-1`.
         ///
         /// Only `Cga` ends its basis with the two conformal directions, so this
@@ -835,7 +855,10 @@ fn Multivector(
             return .{ .c = result };
         }
 
-        /// The `e_minus + e_plus` blade, the conformal direction.
+        /// The conformal direction, the grade-1 blade `e_minus + e_plus`: the
+        /// coefficient `+1` on each of the last two basis vectors and nothing
+        /// else. It squares to zero, because the two conformal directions carry
+        /// opposite metric signs, so `norm` of it is `0`.
         ///
         /// Only `Cga` ends its basis with the two conformal directions, so this
         /// operation exists only there.
@@ -847,7 +870,11 @@ fn Multivector(
             return .{ .c = result };
         }
 
-        /// The point at the Euclidean origin, which is `n_o`.
+        /// The point at the Euclidean origin, which is `n_o` itself: the grade-1
+        /// blade with `+0.5` on `e_minus` and `-0.5` on `e_plus`, and no
+        /// scalar part, no Euclidean part, and no `n_inf` part. It is the
+        /// embedding of the zero vector, so `origin()` and `embed(.{0} ** dimension)`
+        /// are the same multivector.
         ///
         /// Only `Cga` has a conformal origin, so this operation exists only
         /// there.

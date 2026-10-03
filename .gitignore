@@ -12,3 +12,4 @@ codedb.snapshot
 /HANDOFF-packup.md
 /.portability-primitives.zig
 /src/.*
+*.core

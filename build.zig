@@ -385,8 +385,33 @@ pub fn build(b: *std.Build) void {
     const test_build_step = b.step("test-build", "Install tests without running them");
     test_build_step.dependOn(&install_tests.step);
 
+    // Zig's documentation collector skips DT_UNKNOWN entries on NFS. Stage
+    // regular Zig sources individually so the archive sees local file kinds.
+    const docs_sources = b.addWriteFiles();
+    const io = b.graph.io;
+    const source_dir = b.build_root.handle.openDir(io, "src", .{ .iterate = true }) catch
+        @panic("unable to open zmath documentation sources");
+    defer source_dir.close(io);
+    var source_iterator = source_dir.iterate();
+    while (source_iterator.next(io) catch @panic("unable to enumerate zmath documentation sources")) |entry| {
+        if (!std.mem.endsWith(u8, entry.name, ".zig")) continue;
+        const kind = if (entry.kind == .unknown)
+            (source_dir.statFile(io, entry.name, .{}) catch @panic("unable to stat zmath documentation source")).kind
+        else
+            entry.kind;
+        if (kind != .file) continue;
+        _ = docs_sources.addCopyFile(b.path(b.fmt("src/{s}", .{entry.name})), entry.name);
+    }
+    const docs = b.addObject(.{
+        .name = "zmath-docs",
+        .root_module = b.createModule(.{
+            .root_source_file = docs_sources.getDirectory().path(b, "root.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
     const install_docs = b.addInstallDirectory(.{
-        .source_dir = exe.getEmittedDocs(),
+        .source_dir = docs.getEmittedDocs(),
         .install_dir = .prefix,
         .install_subdir = "docs",
     });

@@ -9,10 +9,14 @@
 
 const c23 = @import("scalar_c23_types.zig");
 
-/// The rounded logarithm of |gamma(x)| and the sign of gamma(x).
+/// The result type of the three `lgamma` kernels below, re-exported beside
+/// them.
 ///
-/// The sign is -1, 0, or 1. Callers must keep IEEE round-to-nearest,
-/// ties-to-even active. The implementation does not inspect or change fenv.
+/// This alias adds the environmental obligation the type itself cannot carry:
+/// the kernels assume IEEE round-to-nearest, ties-to-even is active, and they
+/// neither inspect nor change the floating-point environment. They also carry
+/// no `errno` and no exception status, so there is no global `signgam` and no
+/// hidden gamma-sign state behind the returned `sign`.
 pub const LgammaResult = c23.LgammaResult;
 
 extern fn zmath_core_lgammah_bits(value: u16, sign: *c_int) callconv(.c) u16;
@@ -29,7 +33,15 @@ const quiet_nan_bit_h: u16 = 0x0200;
 const quiet_nan_bit_f: u32 = 0x0040_0000;
 const quiet_nan_bit_d: u64 = 0x0008_0000_0000_0000;
 
-/// Computes the correctly rounded binary16 lgamma result.
+/// Returns `log(abs(Gamma(value)))` in `result.value` and the sign of
+/// `Gamma(value)` in `result.sign`, which is `-1` or `1` and never `0`.
+///
+/// `result.value` is `+infinity` at a finite negative-integer pole and at
+/// either zero; `result.sign` is `-1` at a pole and at `-0.0`, and `1` at
+/// `+0.0`, at either infinity and for a NaN input. A NaN input comes back with
+/// its quiet bit set and its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn lgammah(value: f16) c23.LgammaResult(f16) {
     @setFloatMode(.strict);
     const bits: u16 = @bitCast(value);
@@ -42,7 +54,13 @@ pub fn lgammah(value: f16) c23.LgammaResult(f16) {
     return .{ .value = @bitCast(result), .sign = @intCast(sign_c) };
 }
 
-/// Computes the correctly rounded binary32 lgamma result.
+/// Returns `log(abs(Gamma(value)))` in `result.value` and the sign of
+/// `Gamma(value)` in `result.sign`, which is `-1` or `1` and never `0`.
+///
+/// The poles, the zeros, the infinities and a NaN input follow the same rule as
+/// `lgammah`, at binary32 width.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn lgammaf(value: f32) c23.LgammaResult(f32) {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);
@@ -55,7 +73,13 @@ pub fn lgammaf(value: f32) c23.LgammaResult(f32) {
     return .{ .value = result, .sign = @intCast(sign_c) };
 }
 
-/// Computes the correctly rounded binary64 lgamma result.
+/// Returns `log(abs(Gamma(value)))` in `result.value` and the sign of
+/// `Gamma(value)` in `result.sign`, which is `-1` or `1` and never `0`.
+///
+/// The poles, the zeros, the infinities and a NaN input follow the same rule as
+/// `lgammah`, at binary64 width.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn lgammad(value: f64) c23.LgammaResult(f64) {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);

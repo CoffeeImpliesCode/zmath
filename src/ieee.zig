@@ -1,8 +1,42 @@
+//! The IEC 60559 encoding layer: bit reinterpretation, classification, sign
+//! manipulation, directed scaling and rounding to an integral value, and the
+//! C23 operations every supported format can perform.
+//!
+//! Every entry point is fixed to one of the three supported formats and is
+//! suffixed `h`, `f` or `d` for binary16, binary32 and binary64. Names follow
+//! the C23 spellings (`canonicalize`, `nextUp`, `setPayloadSig`, and so on), not
+//! the underscore-separated C library spellings the `zmath.scalar` module uses.
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn main() void {
+//!     const step = zmath.ieee.nextUph(@as(f16, 1.0));
+//!     std.debug.print("{x}\n", .{@as(u16, @bitCast(step))});
+//! }
+//! ```
+//!
+//! Nothing here allocates, retains a resource, or reads or writes `errno`, and
+//! no entry point inspects or restores a floating-point exception flag. The two
+//! families that take a `RoundMode`, `scaleB` and `roundIntegral`, round their
+//! own result in the mode they are given; that argument is a per-call
+//! parameter and does not read, set or change the process floating-point
+//! environment. Every other numeric entry point here builds its result from
+//! target-format bits, so it depends on no ambient rounding mode at all.
+//!
+//! `zmath.scalar` publishes the elementary functions, and the root module
+//! publishes a generic form of each operation that selects the format from the
+//! argument type; neither duplicates the contracts stated here.
+
 const std = @import("std");
 const c23_core = @import("ieee_c23_core.zig");
 const c23_optional = @import("ieee_c23_optional.zig");
 const c23_types = @import("scalar_c23_types.zig");
 
+/// The two C23 result types the operations below produce. They are the same
+/// types `zmath.scalar` and the root module publish, so a result obtained
+/// through either route has one type and one contract.
 pub const CanonicalizeResult = c23_types.CanonicalizeResult;
 pub const PayloadResult = c23_types.PayloadResult;
 
@@ -22,6 +56,9 @@ pub const nextDownh = c23_core.nextDownh;
 pub const nextDownf = c23_core.nextDownf;
 pub const nextDownd = c23_core.nextDownd;
 
+// The magnitude-order and payload operations. These are published here under
+// their C23 names; `ieee_c23_optional.zig` is their owner and carries each
+// entry point's own contract, so nothing is restated below.
 pub const totalOrderMagh = c23_optional.totalOrderMagh;
 pub const totalOrderMagf = c23_optional.totalOrderMagf;
 pub const totalOrderMagd = c23_optional.totalOrderMagd;
@@ -35,6 +72,13 @@ pub const setPayloadSigh = c23_optional.setPayloadSigh;
 pub const setPayloadSigf = c23_optional.setPayloadSigf;
 pub const setPayloadSigd = c23_optional.setPayloadSigd;
 
+/// The rounding directions `scaleB` and `roundIntegral` apply to their own
+/// result.
+///
+/// Naming one here neither reads nor sets the process floating-point rounding
+/// mode. These four are the whole set; the C23 `nearest_from_zero` direction is
+/// not offered here, because no operation in this module rounds a half case
+/// away from zero.
 pub const RoundMode = enum {
     nearest_even,
     toward_zero,
@@ -42,6 +86,12 @@ pub const RoundMode = enum {
     toward_negative,
 };
 
+/// The class of a value under the IEC 60559 encoding, decided from its bits.
+///
+/// Every value of a supported format has exactly one class, so the tags
+/// partition the whole domain rather than reporting a partial answer. The two
+/// NaN tags are told apart by the quiet bit, not by the payload, and a
+/// signaling NaN is one whose quiet bit is clear whatever its payload holds.
 pub const Class = enum {
     zero,
     subnormal,
@@ -149,14 +199,26 @@ const DFormat = struct {
     }
 };
 
+/// Returns the 16-bit encoding of `value`. Every one of the 65536 bit patterns
+/// maps to a `f16`, including the signaling NaNs, so this is a reinterpretation
+/// with no domain and no rounding.
 pub fn toBitsh(value: f16) u16 {
     return @bitCast(value);
 }
 
+/// Returns the `f16` with the encoding `bits`, the inverse of `toBitsh`.
+///
+/// Every `u16` is a valid encoding, so this never fails and never rounds; a
+/// `bits` value with the quiet bit clear and a nonzero fraction is a signaling
+/// NaN and is produced as one.
 pub fn fromBitsh(bits: u16) f16 {
     return @bitCast(bits);
 }
 
+/// Returns the `Class` of `value`, decided from its encoding.
+///
+/// The two NaN classes are told apart by the quiet bit alone, and the payload
+/// does not affect the answer.
 pub fn classifyh(value: f16) Class {
     const bits: u16 = @bitCast(value);
     const exponent = bits & exponent_mask_h;
@@ -172,6 +234,8 @@ pub fn classifyh(value: f16) Class {
     return .signaling_nan;
 }
 
+/// Returns the `Class` of `value` at binary32 width, with the same rules as
+/// `classifyh`.
 pub fn classifyf(value: f32) Class {
     const bits: u32 = @bitCast(value);
     const exponent = bits & exponent_mask_f;
@@ -187,6 +251,8 @@ pub fn classifyf(value: f32) Class {
     return .signaling_nan;
 }
 
+/// Returns the `Class` of `value` at binary64 width, with the same rules as
+/// `classifyh`.
 pub fn classifyd(value: f64) Class {
     const bits: u64 = @bitCast(value);
     const exponent = bits & exponent_mask_d;
@@ -202,6 +268,8 @@ pub fn classifyd(value: f64) Class {
     return .signaling_nan;
 }
 
+/// Returns the magnitude of `value` with the sign of `sign`, by replacing the
+/// sign bit and nothing else, so every other field of `value` survives intact.
 pub fn copySignh(value: f16, sign: f16) f16 {
     const value_bits: u16 = @bitCast(value);
     const sign_bits: u16 = @bitCast(sign);
@@ -209,6 +277,8 @@ pub fn copySignh(value: f16, sign: f16) f16 {
     return @bitCast(result_bits);
 }
 
+/// Returns the magnitude of `value` with the sign of `sign` at binary32 width,
+/// with the same bit-level rule as `copySignh`.
 pub fn copySignf(value: f32, sign: f32) f32 {
     const value_bits: u32 = @bitCast(value);
     const sign_bits: u32 = @bitCast(sign);
@@ -216,6 +286,8 @@ pub fn copySignf(value: f32, sign: f32) f32 {
     return @bitCast(result_bits);
 }
 
+/// Returns the magnitude of `value` with the sign of `sign` at binary64 width,
+/// with the same bit-level rule as `copySignh`.
 pub fn copySignd(value: f64, sign: f64) f64 {
     const value_bits: u64 = @bitCast(value);
     const sign_bits: u64 = @bitCast(sign);
@@ -223,6 +295,15 @@ pub fn copySignd(value: f64, sign: f64) f64 {
     return @bitCast(result_bits);
 }
 
+/// Returns the next binary16 representable value after `from` in the direction
+/// of `to`.
+///
+/// `from` and `to` bit-identical returns `to`, so the two signed zeros are each
+/// other's successor toward the other. A NaN operand is returned with its quiet
+/// bit set and its sign and payload kept, `from` first when both are NaN; a
+/// quiet NaN is returned unchanged. A zero `from` yields the smallest subnormal
+/// with the sign of `to`. There is no infinity overflow: stepping away from
+/// `+infinity` in either direction gives the largest finite value.
 pub fn nextAfterh(from: f16, to: f16) f16 {
     const from_bits: u16 = @bitCast(from);
     const to_bits: u16 = @bitCast(to);
@@ -247,6 +328,8 @@ pub fn nextAfterh(from: f16, to: f16) f16 {
     return @bitCast(result_bits);
 }
 
+/// Returns the next binary32 representable value after `from` in the direction
+/// of `to`, with the same rules as `nextAfterh`.
 pub fn nextAfterf(from: f32, to: f32) f32 {
     const from_bits: u32 = @bitCast(from);
     const to_bits: u32 = @bitCast(to);
@@ -271,6 +354,8 @@ pub fn nextAfterf(from: f32, to: f32) f32 {
     return @bitCast(result_bits);
 }
 
+/// Returns the next binary64 representable value after `from` in the direction
+/// of `to`, with the same rules as `nextAfterh`.
 pub fn nextAfterd(from: f64, to: f64) f64 {
     const from_bits: u64 = @bitCast(from);
     const to_bits: u64 = @bitCast(to);
@@ -295,42 +380,81 @@ pub fn nextAfterd(from: f64, to: f64) f64 {
     return @bitCast(result_bits);
 }
 
+/// Returns `value * 2^exponent` with one rounding, in `mode`.
+///
+/// `mode` names the rounding of this one result. It is a parameter: the call
+/// neither reads nor sets the process floating-point environment, so two calls
+/// with different modes give different results without either depending on an
+/// ambient setting.
+///
+/// A result too large for the format saturates at the boundary the mode allows:
+/// infinity where the mode lets the magnitude grow, and the largest finite value
+/// of the sign where it does not, so `toward_zero` clamps instead of overflowing
+/// and `toward_positive` on a negative value clamps while on a positive one
+/// overflows. A NaN `value` comes back with its quiet bit set and its sign and
+/// payload kept, and a zero or an infinity comes back unchanged.
 pub fn scaleBh(mode: RoundMode, value: f16, exponent: i32) f16 {
     return scaleB(HFormat, mode, value, exponent);
 }
 
+/// Returns `value * 2^exponent` with one rounding in `mode`, at binary32 width,
+/// with the same saturation rules as `scaleBh`.
 pub fn scaleBf(mode: RoundMode, value: f32, exponent: i32) f32 {
     return scaleB(FFormat, mode, value, exponent);
 }
 
+/// Returns `value * 2^exponent` with one rounding in `mode`, at binary64 width,
+/// with the same saturation rules as `scaleBh`.
 pub fn scaleBd(mode: RoundMode, value: f64, exponent: i32) f64 {
     return scaleB(DFormat, mode, value, exponent);
 }
 
+/// Rounds `value` to an integral value with one rounding, in `mode`.
+///
+/// `mode` names the rounding of this one result and, as in `scaleB`, does not
+/// read or set the process floating-point environment. A value with no
+/// fractional part is already integral and comes back unchanged in every mode.
+/// A magnitude below one rounds to `0`, `1`, or `-1` depending on the mode and
+/// the sign. A NaN comes back with its quiet bit set and its sign and payload
+/// kept, and a zero or an infinity comes back unchanged.
 pub fn roundIntegralh(mode: RoundMode, value: f16) f16 {
     return roundIntegral(HFormat, mode, value);
 }
 
+/// Rounds `value` to an integral value in `mode`, at binary32 width, with the
+/// same rules as `roundIntegralh`.
 pub fn roundIntegralf(mode: RoundMode, value: f32) f32 {
     return roundIntegral(FFormat, mode, value);
 }
 
+/// Rounds `value` to an integral value in `mode`, at binary64 width, with the
+/// same rules as `roundIntegralh`.
 pub fn roundIntegrald(mode: RoundMode, value: f64) f64 {
     return roundIntegral(DFormat, mode, value);
 }
 
+/// Returns true when `left` precedes or equals `right` in the IEEE totalOrder of
+/// binary16, which orders every bit pattern.
+///
+/// The two signed zeros are ordered `-0` below `+0`, both infinities sit below
+/// every NaN, and signaling NaNs sit below quiet ones. Two bit-identical
+/// operands therefore answer true in both directions.
 pub fn totalOrderh(left: f16, right: f16) bool {
     const left_bits: u16 = @bitCast(left);
     const right_bits: u16 = @bitCast(right);
     return totalOrderKeyH(left_bits) <= totalOrderKeyH(right_bits);
 }
 
+/// Returns true when `left` precedes or equals `right` in the IEEE totalOrder of
+/// binary32, with the same ordering rules as `totalOrderh`.
 pub fn totalOrderf(left: f32, right: f32) bool {
     const left_bits: u32 = @bitCast(left);
     const right_bits: u32 = @bitCast(right);
     return totalOrderKeyF(left_bits) <= totalOrderKeyF(right_bits);
 }
 
+/// Returns true when `left` precedes or equals `right` in the IEEE totalOrder of
+/// binary64, with the same ordering rules as `totalOrderh`.
 pub fn totalOrderd(left: f64, right: f64) bool {
     const left_bits: u64 = @bitCast(left);
     const right_bits: u64 = @bitCast(right);

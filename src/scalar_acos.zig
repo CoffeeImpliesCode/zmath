@@ -133,6 +133,20 @@ fn polyDd(
     return high;
 }
 
+/// Inverse cosine of a `binary16` value.
+///
+/// The trailing `h` is this package's binary16 suffix, so this computes
+/// `acos`, not an inverse hyperbolic cosine; that kernel is `acoshh`.
+///
+/// A magnitude above 1, and either infinity, is a domain error and gives the
+/// positive canonical quiet NaN (0x7e00). A NaN input is returned with its
+/// quiet bit set, its sign and payload kept. `value` of 1 gives +0, of -1
+/// gives the binary16 nearest to pi, and either signed zero gives the binary16
+/// nearest to pi/2.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The
+/// returned float is the whole result: no error code, floating-point exception
+/// flag, or retained status reports the domain error.
 pub fn acosh(value: f16) f16 {
     @setFloatMode(.strict);
     const bits: u16 = @bitCast(value);
@@ -195,6 +209,12 @@ fn poly12(value: f64, coefficients: []const f64) f64 {
     return low_0 + fourth * (low_4 + fourth * low_8);
 }
 
+/// Inverse cosine of a `binary32` value.
+///
+/// A magnitude above 1, and either infinity, is a domain error and gives the
+/// positive canonical quiet NaN (0x7fc0_0000). A NaN input is returned with
+/// its quiet bit set, its sign and payload kept. `value` of 1 gives +0 and of
+/// -1 gives pi; either signed zero gives pi/2.
 pub fn acosf(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);
@@ -539,6 +559,12 @@ fn acosRefine(value: f64, approximation: f64) f64 {
     return phase_high + phase_low;
 }
 
+/// Inverse cosine of a `binary64` value.
+///
+/// A magnitude above 1, and either infinity, is a domain error and gives the
+/// positive canonical quiet NaN (0x7ff8_0000_0000_0000). A NaN input is
+/// returned with its quiet bit set, its sign and payload kept. `value` of 1
+/// gives +0 and of -1 gives pi; either signed zero gives pi/2.
 pub fn acosd(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);

@@ -40,6 +40,17 @@ const quiet_nan_bit_d: u64 = 0x0008_0000_0000_0000;
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+/// Two raised to `value`, rounded to a `binary16` result.
+///
+/// The whole line is in domain, so no finite argument is a domain error. A NaN
+/// input is returned with its quiet bit set, its sign and payload kept;
+/// positive infinity is returned unchanged and negative infinity gives +0. A
+/// power that leaves the binary16 range rounds to +inf above it and to +0
+/// below it.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The
+/// returned float is the whole result: no error code, floating-point exception
+/// flag, or retained status reports anything else.
 pub fn exp2h(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     const magnitude = bits & magnitude_mask_h;
@@ -142,6 +153,13 @@ fn exp2fFinite(value: f32, bits: u32) f32 {
 // This code is derived from CORE-MATH src/binary32/exp2/exp2f.c at revision
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa and is used under the MIT License.
 
+/// Two raised to `value`, rounded to a `binary32` result.
+///
+/// The whole line is in domain. A NaN input is returned with its quiet bit
+/// set, its sign and payload kept; positive infinity is returned unchanged and
+/// negative infinity gives +0. Either signed zero gives 1.0. Finite values at
+/// or above 128 give +inf; values at or below -150 give +0. The smallest
+/// positive result is the binary32 minimum subnormal, 2^-149.
 pub fn exp2f(value: f32) f32 {
     const bits: u32 = @bitCast(value);
     return exp2fFinite(value, bits);
@@ -352,6 +370,12 @@ noinline fn exp2dAccurate(value: f64) f64 {
     return exp2dToDenormal(result.high + result.low);
 }
 
+/// Two raised to `value`, rounded to a `binary64` result.
+///
+/// The whole line is in domain. A NaN input is returned with its quiet bit
+/// set, its sign and payload kept; positive infinity is returned unchanged and
+/// negative infinity gives +0. Either signed zero gives 1.0. Finite values
+/// at or above 1024 give +inf; values at or below -1075 give +0.
 pub fn exp2d(value: f64) f64 {
     @setFloatMode(.strict);
 

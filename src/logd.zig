@@ -1269,6 +1269,16 @@ noinline fn accurateLog(value: f64) f64 {
     return dintToF64(result);
 }
 
+/// The natural logarithm of a `binary64` value.
+///
+/// A negative `value`, `-infinity` included, is out of domain and gives the
+/// positive canonical quiet NaN (0x7ff8_0000_0000_0000). The boundary `+0` and
+/// `-0` are in domain and give `-infinity`; `+infinity` gives `+infinity`. A NaN
+/// input is returned with its quiet bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn logd(value: f64) f64 {
     const bits: u64 = @bitCast(value);
     const infinity_bits: u64 = 0x7ff0_0000_0000_0000;

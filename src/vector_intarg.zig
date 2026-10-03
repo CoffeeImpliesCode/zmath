@@ -73,10 +73,11 @@ const types = @import("scalar_c23_types.zig");
 // `vector_core` does, because every `vector_core` helper returns a `@Vector`
 // and therefore cannot carry a struct result.
 //
-// `widthOf`, `LaneOf` and `PowerVector` are public so that the top-level
-// dispatch in `root.zig` can spell the array return type of `pown`, `compoundn`
-// and `rootn` for a vector argument. The existing `PowerResult(@TypeOf(value))`
-// there is the scalar shape and is wrong for a vector.
+// `widthOf`, `LaneOf` and `PowerVector` are published rather than kept private
+// so a caller writing its own lane-parallel entry point over `pown`,
+// `compoundn` or `rootn` can name the lane-ordered array result type and get
+// the same per-lane bit identity these three operations guarantee. No
+// dispatch inside this package reads them.
 // ---------------------------------------------------------------------------
 
 /// Returns the lane count of the vector type `X`.

@@ -8334,6 +8334,18 @@ fn quietNaNBits(comptime Bits: type, bits: Bits, quiet_bit: Bits) Bits {
     return bits | quiet_bit;
 }
 
+/// Hyperbolic tangent of a `binary16` value, `tanh(value)`, defined on the
+/// whole real line.
+///
+/// This is the hyperbolic kernel; `tanh` earlier in this file is the binary16
+/// tangent. A NaN input is returned with its quiet bit set, its sign and
+/// payload kept. A magnitude at or above 4.5078 gives 1.0 with the sign of
+/// `value`; magnitudes up to 0.028381, and either signed zero, are returned
+/// unchanged.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The
+/// returned float is the whole result: no error code, floating-point exception
+/// flag, or retained status reports anything else.
 pub fn tanhh(value: f16) f16 {
     @setFloatMode(.strict);
     const input_bits: u16 = @bitCast(value);
@@ -8350,6 +8362,13 @@ pub fn tanhh(value: f16) f16 {
     return @bitCast(half_tables.tanh_bits[index] | (input_bits & sign_mask_h));
 }
 
+/// Hyperbolic tangent of a `binary32` value, `tanh(value)`, defined on the
+/// whole real line.
+///
+/// A NaN input is returned with its quiet bit set, its sign and payload kept.
+/// An infinity gives 1.0 with the sign of `value`, and a magnitude above
+/// 9.0109 gives that 1.0 less 2^-25. Either signed zero is returned
+/// unchanged.
 pub fn tanhf(value: f32) f32 {
     @setFloatMode(.strict);
     const input_bits: u32 = @bitCast(value);
@@ -8691,6 +8710,12 @@ fn asTanhDatabase(value: f64, fallback: f64) f64 {
     return fallback;
 }
 
+/// Hyperbolic tangent of a `binary64` value, `tanh(value)`, defined on the
+/// whole real line.
+///
+/// A NaN input is returned with its quiet bit set, its sign and payload kept.
+/// An infinity gives 1.0 with the input's sign. Large finite inputs also
+/// round to that signed 1.0. Either signed zero is returned unchanged.
 pub fn tanhd(value: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(value);

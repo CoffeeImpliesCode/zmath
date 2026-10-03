@@ -53,6 +53,20 @@ fn log1phSmall(value: f32) f32 {
     return fma_impl.fma(value, value * coefficient2, value);
 }
 
+/// The natural logarithm of `1 + value` for a `binary16` value.
+///
+/// The trailing `h` is this package's binary16 suffix, so this computes `log1p`,
+/// not `logp1`; that spelling is `logp1h`.
+///
+/// A `value` below `-1`, `-infinity` included, is out of domain and gives the
+/// positive canonical quiet NaN (0x7e00). The boundary `value` of `-1` is in
+/// domain and gives `-infinity`; either signed zero is returned unchanged, so
+/// `-0.0` gives `-0.0`. `+infinity` gives `+infinity`; a NaN input is returned
+/// with its quiet bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn log1ph(value: f16) f16 {
     @setFloatMode(.strict);
 
@@ -107,6 +121,17 @@ fn log1pfSeries(value: f64, value_squared: f64) f64 {
     return value_squared * ((term0 + value_squared * term1) + value_fourth * term3);
 }
 
+/// The natural logarithm of `1 + value` for a `binary32` value.
+///
+/// A `value` below `-1`, `-infinity` included, is out of domain and gives the
+/// positive canonical quiet NaN (0x7fc0_0000). The boundary `value` of `-1` is
+/// in domain and gives `-infinity`; either signed zero is returned unchanged, so
+/// `-0.0` gives `-0.0`. `+infinity` gives `+infinity`; a NaN input is returned
+/// with its quiet bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn log1pf(value: f32) f32 {
     @setFloatMode(.strict);
 

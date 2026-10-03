@@ -1,15 +1,86 @@
-//! By convention, root.zig is the root source file when making a package.
+//! Root module of `zmath`: IEC 60559 binary16, binary32 and binary64 elementary
+//! functions for `f16`, `f32`, `f64` and `@Vector`s of those.
+//!
+//! Nine namespace modules hold the full surface, and each carries its own
+//! contract: `ieee` for encoding, classification and payload operations,
+//! `scalar` for the per-format elementary functions, `vector` for the portable
+//! `@Vector` layer and the `Vec*` value types, then `complex`, `quaternion`,
+//! `matrix`, `geometry`, `linalg` and `algebra`.
+//!
+//! This file adds generic convenience functions over `scalar` and `ieee` and
+//! re-exports their shared result types. Floating argument types select the
+//! format. Operations not named here are reached through a namespace.
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn main() void {
+//!     // Argument types select the format; both calls below use binary32.
+//!     const scalar_result = zmath.sin(@as(f32, 0.5));
+//!     const lane_result = zmath.sin(@as(@Vector(4, f32), @splat(0.5)));
+//!     std.debug.print("{d} {d}\n", .{ scalar_result, lane_result[0] });
+//! }
+//! ```
+//!
+//! ## Result shape
+//!
+//! Generic operations accept supported scalar floats or `@Vector`s of those,
+//! except `nan`, which takes an explicit scalar type and a payload string.
+//! A vector argument keeps its lane count. For a per-lane result type `R`, it
+//! returns `@Vector(N, R)` when `R` is a plain float, integer, or `bool`.
+//! A scalar argument returns `R`.
+//!
+//! A result struct instead returns `[N]Result` for a vector argument, because
+//! Zig forbids a struct as a `@Vector` element type. Element `i` is the value
+//! the scalar kernel returned for lane `i`.
+//!
+//! The six narrowing operations `fadd`, `fsub`, `fmul`, `fdiv`, `ffma` and
+//! `fsqrt` are the one exception: their parameters are `f64` and their result
+//! is `f32`, so they have no `@Vector` form here. `zmath.vector.narrow` is the
+//! lane-parallel route for those six.
+//!
+//! ## What a caller must know
+//!
+//! Numerical kernels require IEEE round-to-nearest, ties-to-even. Other
+//! active rounding modes are unsupported. Calls return numeric values or
+//! result structs; they do not use `errno` or a floating-exception protocol.
+//! They do not inspect, clear, report, or restore exception flags. Incidental
+//! processor flags are outside the contract. An explicit rounding argument
+//! controls one result without changing the process rounding mode.
+//! No operation allocates; there is nothing for a caller to release.
 const std = @import("std");
 
+/// The IEC 60559 encoding, classification and NaN-payload operations, with one
+/// entry point per format.
 pub const ieee = @import("ieee.zig");
+
+/// The elementary functions with one fixed entry point per format, suffixed
+/// `h`, `f` or `d`.
 pub const scalar = @import("scalar.zig");
+
+/// The portable `@Vector` layer over `scalar` and `ieee`, plus the `Vec*`
+/// component value types.
 pub const vector = @import("vector.zig");
+
+/// The complex value types and the complex elementary functions.
 pub const complex = @import("complex.zig");
+
+/// The quaternion value type and its elementary functions.
 pub const quaternion = @import("quaternion.zig");
+
+/// The Clifford algebra value types and their operations.
 pub const algebra = @import("algebra.zig");
+
+/// The fixed-size matrices and the one structural generic `Mat`.
 pub const matrix = @import("matrix.zig");
+
+/// The checked plane, ray, sphere and triangle intersections.
 pub const geometry = @import("geometry.zig");
+
+/// The decompositions, factorizations and solvers over `matrix` and `vector`.
 pub const linalg = @import("linalg.zig");
+
 const generic_scalar_test = @import("generic_scalar_test.zig");
 const c23_public_surface_test = @import("c23_public_surface_test.zig");
 const scalar_c23_types = @import("scalar_c23_types.zig");
@@ -22,6 +93,10 @@ comptime {
     _ = scalar_div;
 }
 
+/// The shared C23 result types returned by the operations below. The same
+/// types are reachable as `zmath.scalar.<Name>`, and `zmath.ieee` re-exports
+/// `CanonicalizeResult` and `PayloadResult` for the operations that produce
+/// them.
 pub const FromFpRound = scalar_c23_types.FromFpRound;
 pub const IntegerResult = scalar_c23_types.IntegerResult;
 pub const Atan2Result = scalar_c23_types.Atan2Result;
@@ -491,6 +566,10 @@ pub fn atanh(value: anytype) @TypeOf(value) {
     @compileError("zmath.atanh supports only f16, f32, and f64");
 }
 
+/// Computes the arc tangent of `value`, in radians in `(-pi/2, pi/2)`, with
+/// the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn atan(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.atanv(value);
@@ -500,6 +579,10 @@ pub fn atan(value: anytype) @TypeOf(value) {
     @compileError("zmath.atan supports only f16, f32, and f64");
 }
 
+/// Computes the real cube root of `value`, negative for a negative input, with
+/// the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn cbrt(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.cbrtv(value);
@@ -509,6 +592,9 @@ pub fn cbrt(value: anytype) @TypeOf(value) {
     @compileError("zmath.cbrt supports only f16, f32, and f64");
 }
 
+/// Computes 2 raised to `value` with the scalar implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn exp2(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.exp2v(value);
@@ -518,6 +604,10 @@ pub fn exp2(value: anytype) @TypeOf(value) {
     @compileError("zmath.exp2 supports only f16, f32, and f64");
 }
 
+/// Computes e raised to `value` minus one with the scalar implementation for
+/// its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn expm1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.expm1v(value);
@@ -527,6 +617,10 @@ pub fn expm1(value: anytype) @TypeOf(value) {
     @compileError("zmath.expm1 supports only f16, f32, and f64");
 }
 
+/// Computes the natural logarithm of one plus `value` with the scalar
+/// implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn log1p(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.log1pv(value);
@@ -536,6 +630,10 @@ pub fn log1p(value: anytype) @TypeOf(value) {
     @compileError("zmath.log1p supports only f16, f32, and f64");
 }
 
+/// Computes the natural logarithm of one plus `value` under the C23 `logp1`
+/// spelling. It is the same kernel as `log1p` and returns the same value.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn logp1(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.logp1v(value);
@@ -545,6 +643,11 @@ pub fn logp1(value: anytype) @TypeOf(value) {
     @compileError("zmath.logp1 supports only f16, f32, and f64");
 }
 
+/// Rounds `value` toward positive infinity with the scalar implementation for
+/// its type.
+///
+/// The direction is fixed in the kernel: this call does not read, change or
+/// restore any floating-point rounding mode.
 pub fn ceil(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ceilv(value);
@@ -554,6 +657,11 @@ pub fn ceil(value: anytype) @TypeOf(value) {
     @compileError("zmath.ceil supports only f16, f32, and f64");
 }
 
+/// Rounds `value` toward negative infinity with the scalar implementation for
+/// its type.
+///
+/// The direction is fixed in the kernel: this call does not read, change or
+/// restore any floating-point rounding mode.
 pub fn floor(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.floorv(value);
@@ -563,6 +671,13 @@ pub fn floor(value: anytype) @TypeOf(value) {
     @compileError("zmath.floor supports only f16, f32, and f64");
 }
 
+/// Rounds `value` to the nearest integer, ties to even, with the scalar
+/// implementation for its type.
+///
+/// The direction is fixed in the kernel, so unlike the C library `rint` family
+/// this call never consults the ambient rounding mode. An integral `value` and
+/// both infinities come back unchanged, and a NaN comes back with its quiet bit
+/// set and its sign and payload kept.
 pub fn nearbyint(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.nearbyintv(value);
@@ -572,6 +687,12 @@ pub fn nearbyint(value: anytype) @TypeOf(value) {
     @compileError("zmath.nearbyint supports only f16, f32, and f64");
 }
 
+/// Rounds `value` to the nearest integer, ties to even, with the scalar
+/// implementation for its type.
+///
+/// This is the C23 `rint` spelling of `nearbyint` and shares its kernel. It
+/// never consults the ambient rounding mode, so a caller cannot use it to round
+/// in the mode the process happens to have active.
 pub fn rint(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.rintv(value);
@@ -581,6 +702,12 @@ pub fn rint(value: anytype) @TypeOf(value) {
     @compileError("zmath.rint supports only f16, f32, and f64");
 }
 
+/// Rounds `value` to the nearest integer, halfway cases away from zero, with
+/// the scalar implementation for its type.
+///
+/// The direction is fixed in the kernel and is not read from any
+/// floating-point environment. It is ties-away-from-zero, unlike
+/// `roundeven`, which breaks a tie toward even.
 pub fn round(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ieee_family.roundv(value);
@@ -590,6 +717,11 @@ pub fn round(value: anytype) @TypeOf(value) {
     @compileError("zmath.round supports only f16, f32, and f64");
 }
 
+/// Rounds `value` to the nearest integer, ties to even, with the scalar
+/// implementation for its type.
+///
+/// The direction is fixed in the kernel and is not read from any
+/// floating-point environment.
 pub fn roundeven(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.roundevenv(value);
@@ -599,6 +731,10 @@ pub fn roundeven(value: anytype) @TypeOf(value) {
     @compileError("zmath.roundeven supports only f16, f32, and f64");
 }
 
+/// Rounds `value` toward zero with the scalar implementation for its type.
+///
+/// The direction is fixed in the kernel: this call does not read, change or
+/// restore any floating-point rounding mode.
 pub fn trunc(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.truncv(value);
@@ -608,6 +744,16 @@ pub fn trunc(value: anytype) @TypeOf(value) {
     @compileError("zmath.trunc supports only f16, f32, and f64");
 }
 
+/// Rounds `value` to the nearest integer with ties to even and returns it as
+/// an `IntegerResult`.
+///
+/// `ok` is false and `value` is 0 when `value` is a NaN, either infinity, or a
+/// finite magnitude outside `[-0x1p63, 0x1p63)`; that `0` is a sentinel and must
+/// not be read as a converted result. The conversion never traps and never
+/// reads, changes or restores the floating-point environment, so no caller can
+/// obtain a different rounding by changing the active mode.
+///
+/// A vector argument returns `[N]IntegerResult`, one entry per lane.
 pub fn lrint(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.lrintv(value);
@@ -617,6 +763,11 @@ pub fn lrint(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     @compileError("zmath.lrint supports only f16, f32, and f64");
 }
 
+/// The C23 `llrint` spelling of `lrint`. It shares that kernel and returns the
+/// same `i64`-based `IntegerResult`, including the same out-of-range sentinel;
+/// the `ll` spelling does not widen the returned integer here.
+///
+/// A vector argument returns `[N]IntegerResult`, one entry per lane.
 pub fn llrint(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.llrintv(value);
@@ -626,6 +777,14 @@ pub fn llrint(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     @compileError("zmath.llrint supports only f16, f32, and f64");
 }
 
+/// Rounds `value` to the nearest integer with halfway cases away from zero and
+/// returns it as an `IntegerResult`.
+///
+/// `ok` is false and `value` is 0 on the same inputs that make `lrint` fail, and
+/// that `0` is a sentinel rather than a converted result. The tie rule and the
+/// sentinel are the only differences from `lrint`.
+///
+/// A vector argument returns `[N]IntegerResult`, one entry per lane.
 pub fn lround(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.lroundv(value);
@@ -635,6 +794,11 @@ pub fn lround(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     @compileError("zmath.lround supports only f16, f32, and f64");
 }
 
+/// The C23 `llround` spelling of `lround`. It shares that kernel and returns the
+/// same `i64`-based `IntegerResult`, including the same out-of-range sentinel;
+/// the `ll` spelling does not widen the returned integer here.
+///
+/// A vector argument returns `[N]IntegerResult`, one entry per lane.
 pub fn llround(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.llroundv(value);
@@ -644,6 +808,23 @@ pub fn llround(value: anytype) LaneResult(IntegerResult, @TypeOf(value)) {
     @compileError("zmath.llround supports only f16, f32, and f64");
 }
 
+/// Rounds `value` to the integer a signed `width`-bit conversion would produce
+/// and returns it in the same float type, for example `3.0` for `3.7`.
+///
+/// `direction` selects the rounding of this one result. It is a parameter, not
+/// a mode: this call neither reads nor sets the process floating-point
+/// environment.
+///
+/// `width` is the bit width of the target integer type and is not capped at the
+/// width of any integer type this package names, so any positive `width` is
+/// accepted. A `width` of 0, a NaN or infinite `value`, and a rounded value
+/// that still does not fit the signed `width`-bit range each return the
+/// positive canonical quiet NaN of `value`'s own format. Rounding happens
+/// before the range test, so a value that rounds into range is accepted.
+///
+/// `fromfpx` is the C23 spelling that would report inexactness. This package has
+/// no inexactness channel: `fromfpx` and `fromfp` are the same kernel and return
+/// the same value.
 pub fn fromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.fromfpv(value, direction, width);
@@ -653,6 +834,17 @@ pub fn fromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value)
     @compileError("zmath.fromfp supports only f16, f32, and f64");
 }
 
+/// As `fromfp`, for an unsigned `width`-bit target, so a negative `value` is
+/// out of range.
+///
+/// `direction` rounds this result only and does not change the process
+/// floating-point environment. A `width` of 0, a NaN or infinite `value`, and a
+/// negative or out-of-range rounded value each return the positive canonical
+/// quiet NaN of `value`'s own format.
+///
+/// `ufromfpx` is the C23 spelling that would report inexactness. This package
+/// has no inexactness channel: `ufromfpx` and `ufromfp` are the same kernel and
+/// return the same value.
 pub fn ufromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.ufromfpv(value, direction, width);
@@ -662,6 +854,12 @@ pub fn ufromfp(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value
     @compileError("zmath.ufromfp supports only f16, f32, and f64");
 }
 
+/// The C23 `fromfpx` spelling of `fromfp`: the same kernel, the same rounding
+/// by `direction`, the same `width` handling, and the same positive canonical
+/// quiet NaN for an invalid input.
+///
+/// This package reports no inexactness, so the `x` spelling buys no extra
+/// information over `fromfp` here.
 pub fn fromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.fromfpxv(value, direction, width);
@@ -671,6 +869,12 @@ pub fn fromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value
     @compileError("zmath.fromfpx supports only f16, f32, and f64");
 }
 
+/// The C23 `ufromfpx` spelling of `ufromfp`: the same kernel, the same rounding
+/// by `direction`, the same `width` handling, and the same positive canonical
+/// quiet NaN for an invalid input.
+///
+/// This package reports no inexactness, so the `x` spelling buys no extra
+/// information over `ufromfp` here.
 pub fn ufromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.ufromfpxv(value, direction, width);
@@ -680,6 +884,18 @@ pub fn ufromfpx(value: anytype, direction: FromFpRound, width: u32) @TypeOf(valu
     @compileError("zmath.ufromfpx supports only f16, f32, and f64");
 }
 
+/// Computes the arc tangent of `y / x`, using the signs of the two operands to
+/// select the quadrant, and returns it in radians in `[-pi, pi]`.
+///
+/// The result is an `Atan2Result`, not a bare float. `value` is the angle and
+/// `resolved` reports whether the kernel could settle it: the binary16 and
+/// binary32 kernels return `resolved = true` for every input, including the
+/// special-value branches, and only the binary64 kernel can return
+/// `resolved = false`. When it does, `value` is the positive canonical quiet
+/// NaN and carries no angle, so a caller must retry or handle that case rather
+/// than read `value`.
+///
+/// A vector argument returns `[N]Atan2Result`, one entry per lane.
 pub fn atan2(y: anytype, x: anytype) LaneResult(Atan2Result(FloatLane(@TypeOf(y))), @TypeOf(y)) {
     const T = @TypeOf(y);
     if (@typeInfo(T) == .vector) return vector.struct_family.atan2v(y, x);
@@ -692,6 +908,11 @@ pub fn atan2(y: anytype, x: anytype) LaneResult(Atan2Result(FloatLane(@TypeOf(y)
     @compileError("zmath.atan2 supports only f16, f32, and f64");
 }
 
+/// Computes `asin(value) / pi`, in `[-0.5, 0.5]`, with the scalar
+/// implementation for its type. For example, `value = 0.5` gives the
+/// rounded value of `1 / 6`.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn asinpi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.asinpiv(value);
@@ -701,6 +922,11 @@ pub fn asinpi(value: anytype) @TypeOf(value) {
     @compileError("zmath.asinpi supports only f16, f32, and f64");
 }
 
+/// Computes the arc cosine of `value` in half revolutions, so the result lies
+/// in `[0, 1]` and `value` of `0` gives `0.5`, with the scalar implementation
+/// for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn acospi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.acospiv(value);
@@ -710,6 +936,11 @@ pub fn acospi(value: anytype) @TypeOf(value) {
     @compileError("zmath.acospi supports only f16, f32, and f64");
 }
 
+/// Computes the arc tangent of `value` in half revolutions, so the result lies
+/// in `[-0.5, 0.5]` and `value` of `1.0` gives `0.25`, with the scalar
+/// implementation for its type.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn atanpi(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.atanpiv(value);
@@ -719,6 +950,13 @@ pub fn atanpi(value: anytype) @TypeOf(value) {
     @compileError("zmath.atanpi supports only f16, f32, and f64");
 }
 
+/// Computes `atan2(y, x) / pi`, in `[-1, 1]`, in half revolutions.
+///
+/// The result is an `Atan2Result` with the same meaning for `resolved`: it is
+/// false only for a binary64 input, and `value` is then the positive canonical
+/// quiet NaN and carries no angle.
+///
+/// A vector argument returns `[N]Atan2Result`, one entry per lane.
 pub fn atan2pi(y: anytype, x: anytype) LaneResult(Atan2Result(FloatLane(@TypeOf(y))), @TypeOf(y)) {
     const T = @TypeOf(y);
     if (@typeInfo(T) == .vector) return vector.struct_family.atan2piv(y, x);
@@ -731,6 +969,17 @@ pub fn atan2pi(y: anytype, x: anytype) LaneResult(Atan2Result(FloatLane(@TypeOf(
     @compileError("zmath.atan2pi supports only f16, f32, and f64");
 }
 
+/// Raises `value` to the integer `exponent`, in the range `[-64, 64]`, and
+/// returns it as a `PowerResult`.
+///
+/// An `exponent` outside that range is not a domain result but a rejected
+/// call: `ok` is false and `value` is the positive canonical quiet NaN, which
+/// must not be read as a power. Every input inside the range returns `ok =
+/// true`, and a case with no real answer, such as a negative base with an odd
+/// exponent pair that leaves the reals, returns `ok = true` with the positive
+/// canonical quiet NaN in `value`.
+///
+/// A vector argument returns `[N]PowerResult`, one entry per lane.
 pub fn pown(value: anytype, exponent: i64) LaneResult(PowerResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.pownv(value, exponent);
@@ -740,6 +989,15 @@ pub fn pown(value: anytype, exponent: i64) LaneResult(PowerResult(FloatLane(@Typ
     @compileError("zmath.pown supports only f16, f32, and f64");
 }
 
+/// Raises a nonnegative `base` to the reciprocal of `exponent`, as the C23
+/// `powr` operation does, with the scalar implementation for their common type.
+///
+/// The domain is restricted: a negative `base`, a zero base with a zero
+/// `exponent`, a base of `1` with an infinite `exponent`, and an infinite base
+/// with a zero `exponent` each return the positive canonical quiet NaN. A NaN
+/// operand is returned with its quiet bit set and its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn powr(base: anytype, exponent: anytype) @TypeOf(base) {
     const T = @TypeOf(base);
     if (@typeInfo(T) == .vector) return vector.powrv(base, exponent);
@@ -752,6 +1010,16 @@ pub fn powr(base: anytype, exponent: anytype) @TypeOf(base) {
     @compileError("zmath.powr supports only f16, f32, and f64");
 }
 
+/// Computes `(1 + value) ^ exponent` for an integer `exponent` in the range
+/// `[-64, 64]`, and returns it as a `PowerResult`.
+///
+/// An `exponent` outside that range returns `ok = false` with the positive
+/// canonical quiet NaN in `value`; that field is a sentinel, not a compound
+/// result. A `value` with a magnitude below the reduced magnitude leaves
+/// `value` at `+1.0`, and a `value` outside `[-1, 0]` with a negative `exponent`
+/// returns `ok = true` with the positive canonical quiet NaN.
+///
+/// A vector argument returns `[N]PowerResult`, one entry per lane.
 pub fn compoundn(value: anytype, exponent: i64) LaneResult(PowerResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.compoundnv(value, exponent);
@@ -761,6 +1029,17 @@ pub fn compoundn(value: anytype, exponent: i64) LaneResult(PowerResult(FloatLane
     @compileError("zmath.compoundn supports only f16, f32, and f64");
 }
 
+/// Computes the `degree`-th real root of `value`, that is
+/// `value ^ (1 / degree)`, for a `degree` in the range `[-64, 64]`, and returns
+/// it as a `PowerResult`.
+///
+/// A `degree` outside that range returns `ok = false` with the positive
+/// canonical quiet NaN in `value`. A degree of zero is inside the accepted
+/// integer range: it returns `ok = true` with the positive canonical quiet
+/// NaN, as does a negative nonzero `value` with an even `degree`. An odd
+/// degree gives the negative real root of a negative value.
+///
+/// A vector argument returns `[N]PowerResult`, one entry per lane.
 pub fn rootn(value: anytype, degree: i64) LaneResult(PowerResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.rootnv(value, degree);
@@ -770,6 +1049,17 @@ pub fn rootn(value: anytype, degree: i64) LaneResult(PowerResult(FloatLane(@Type
     @compileError("zmath.rootn supports only f16, f32, and f64");
 }
 
+/// Computes the natural logarithm of the absolute value of the gamma function
+/// at `value`, with the scalar implementation for its type.
+///
+/// The result is a `LgammaResult`. `value` is the logarithm and `sign` is `-1`
+/// or `1`, never `0`; both are set on every path, including a NaN input, where
+/// `value` is the input NaN with its quiet bit set and `sign` is `1`. At a
+/// finite negative-integer pole and at either zero `value` is `+infinity`, with
+/// `sign` `-1` at a pole and at `-0.0` and `1` at `+0.0`. There is no global
+/// `signgam` and no hidden gamma-sign state behind this result.
+///
+/// A vector argument returns `[N]LgammaResult`, one entry per lane.
 pub fn lgamma(value: anytype) LaneResult(LgammaResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.lgammav(value);
@@ -779,6 +1069,14 @@ pub fn lgamma(value: anytype) LaneResult(LgammaResult(FloatLane(@TypeOf(value)))
     @compileError("zmath.lgamma supports only f16, f32, and f64");
 }
 
+/// Computes the truncated quotient `x / y`, that is `x - trunc(x / y) * y`, with
+/// the scalar implementation for their common type.
+///
+/// An infinite `x` or a zero `y` returns the positive canonical quiet NaN, and
+/// a NaN operand is returned with its quiet bit set, its sign and payload kept,
+/// and the first NaN operand chosen.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn fmod(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.fmodv(x, y);
@@ -791,6 +1089,15 @@ pub fn fmod(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.fmod supports only f16, f32, and f64");
 }
 
+/// Computes the IEEE remainder of `x` divided by `y`, rounded to the nearest
+/// even quotient, with the scalar implementation for their common type.
+///
+/// The result's magnitude is at most half of `y`'s. An infinite `x` or a zero
+/// `y` returns the positive canonical quiet NaN, and a NaN operand is returned
+/// with its quiet bit set, its sign and payload kept, and the first NaN operand
+/// chosen.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn remainder(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.remainderv(x, y);
@@ -803,6 +1110,18 @@ pub fn remainder(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.remainder supports only f16, f32, and f64");
 }
 
+/// Computes the IEEE remainder of `x` divided by `y`, the same value `remainder`
+/// returns, and also reports the low three bits of the integer quotient in
+/// `quotient`, signed.
+///
+/// The quotient is `(x - value) / y` reduced modulo 8, so it is `-7` through `7`
+/// and its sign is the sign of the quotient. Every path sets it, including the
+/// failing ones, where it is `0`: an infinite `x` or a zero `y` returns the
+/// positive canonical quiet NaN in `value`, and a NaN operand is returned with
+/// its quiet bit set, its sign and payload kept, and the first NaN operand
+/// chosen.
+///
+/// A vector argument returns `[N]RemquoResult`, one entry per lane.
 pub fn remquo(x: anytype, y: anytype) LaneResult(RemquoResult(FloatLane(@TypeOf(x))), @TypeOf(x)) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.struct_family.remquov(x, y);
@@ -815,6 +1134,16 @@ pub fn remquo(x: anytype, y: anytype) LaneResult(RemquoResult(FloatLane(@TypeOf(
     @compileError("zmath.remquo supports only f16, f32, and f64");
 }
 
+/// Decomposes `value` into a signed fraction in `[0.5, 1)` and the power of two
+/// `exponent` such that `value == fraction * 2^exponent`.
+///
+/// A zero, either sign, comes back unchanged in `fraction` with `exponent` of
+/// `0`; a subnormal is normalized without losing bits; an infinity comes back
+/// unchanged in `fraction` with `exponent` of `0`; and a NaN comes back with
+/// its quiet bit set, its sign and payload kept, with `exponent` of `0`. Both
+/// fields are always set.
+///
+/// A vector argument returns `[N]FrexpResult`, one entry per lane.
 pub fn frexp(value: anytype) LaneResult(FrexpResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.frexpv(value);
@@ -824,6 +1153,16 @@ pub fn frexp(value: anytype) LaneResult(FrexpResult(FloatLane(@TypeOf(value))), 
     @compileError("zmath.frexp supports only f16, f32, and f64");
 }
 
+/// Splits `value` into its signed integral and fractional parts, which sum back
+/// to `value` and carry its sign.
+///
+/// The fractional part has the sign of `value`. A zero of either sign, and a
+/// value whose magnitude is below one, come back with `fractional` equal to
+/// `value` and `integral` the signed zero; a NaN comes back with both fields
+/// holding the same quiet NaN, with the sign and payload kept. Both fields are
+/// always set.
+///
+/// A vector argument returns `[N]ModfResult`, one entry per lane.
 pub fn modf(value: anytype) LaneResult(ModfResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.modfv(value);
@@ -833,6 +1172,16 @@ pub fn modf(value: anytype) LaneResult(ModfResult(FloatLane(@TypeOf(value))), @T
     @compileError("zmath.modf supports only f16, f32, and f64");
 }
 
+/// Returns the exponent of `value` in its binary format, rounded toward zero,
+/// so a finite nonzero `value` in `[2^n, 2^(n+1))` gives `n`.
+///
+/// The three non-finite answers are sentinels, not exponents, and a caller must
+/// test for them rather than use the value: a zero of either sign gives
+/// `std.math.minInt(i32)`, and an infinity or a NaN gives `std.math.maxInt(i32)`.
+/// A subnormal is reported at its own magnitude exponent, below the minimum
+/// normal one. The sign of `value` does not affect the result.
+///
+/// A vector argument returns `@Vector(N, i32)`, one exponent per lane.
 pub fn ilogb(value: anytype) LaneVector(i32, @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ieee_family.ilogbv(value);
@@ -842,6 +1191,12 @@ pub fn ilogb(value: anytype) LaneVector(i32, @TypeOf(value)) {
     @compileError("zmath.ilogb supports only f16, f32, and f64");
 }
 
+/// As `ilogb`, returning the same exponent in an `i64`.
+///
+/// The zero sentinel is `std.math.minInt(i64)` and the infinity and NaN sentinel
+/// is `std.math.maxInt(i64)`.
+///
+/// A vector argument returns `@Vector(N, i64)`, one exponent per lane.
 pub fn llogb(value: anytype) LaneVector(i64, @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ieee_family.llogbv(value);
@@ -851,6 +1206,15 @@ pub fn llogb(value: anytype) LaneVector(i64, @TypeOf(value)) {
     @compileError("zmath.llogb supports only f16, f32, and f64");
 }
 
+/// Returns the exponent of `value` in its binary format as a float, so it is
+/// the same quantity `ilogb` returns widened, not `log2(abs(value))`.
+///
+/// A zero gives negative infinity, an infinity gives positive infinity, and a
+/// NaN comes back with its quiet bit set and its sign and payload kept. Every
+/// finite exponent is exactly representable in the same format, so the float
+/// result is exact.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn logb(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.logbv(value);
@@ -860,6 +1224,15 @@ pub fn logb(value: anytype) @TypeOf(value) {
     @compileError("zmath.logb supports only f16, f32, and f64");
 }
 
+/// Computes `value * 2^exponent` with one round-to-nearest, ties-to-even
+/// rounding, with the scalar implementation for its type.
+///
+/// An `exponent` large enough to leave the format's range returns an infinity
+/// with `value`'s sign, and a small enough one underflows to a rounded subnormal
+/// or to a signed zero. A zero of either sign and an infinity come back
+/// unchanged, and a NaN comes back with its quiet bit set and its sign and
+/// payload kept. The scaling is exact in the kernel and does not read the
+/// ambient rounding mode.
 pub fn ldexp(value: anytype, exponent: i32) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.ldexpv(value, exponent);
@@ -869,6 +1242,8 @@ pub fn ldexp(value: anytype, exponent: i32) @TypeOf(value) {
     @compileError("zmath.ldexp supports only f16, f32, and f64");
 }
 
+/// The C23 `scalbn` spelling of `ldexp`: the same kernel, the same `i32`
+/// `exponent` type, and the same result here.
 pub fn scalbn(value: anytype, exponent: i32) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.scalbnv(value, exponent);
@@ -878,6 +1253,12 @@ pub fn scalbn(value: anytype, exponent: i32) @TypeOf(value) {
     @compileError("zmath.scalbn supports only f16, f32, and f64");
 }
 
+/// Computes `value * 2^exponent` from a wide `exponent`, with the same single
+/// round-to-nearest, ties-to-even rounding, underflow and overflow handling as
+/// `ldexp`.
+///
+/// An `exponent` beyond the range of `i32` is accepted and saturates the same
+/// way an extreme one does, instead of being a compile-time or run-time error.
 pub fn scalbln(value: anytype, exponent: i64) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.scalblnv(value, exponent);
@@ -887,6 +1268,12 @@ pub fn scalbln(value: anytype, exponent: i64) @TypeOf(value) {
     @compileError("zmath.scalbln supports only f16, f32, and f64");
 }
 
+/// Computes `x - y` when `x > y` and `+0` otherwise, with the scalar
+/// implementation for their common type.
+///
+/// The non-positive branch returns POSITIVE zero even when both operands are
+/// negative, so the result is never `-0`. A NaN operand comes back with its
+/// quiet bit set, its sign and payload kept, and the first NaN operand chosen.
 pub fn fdim(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.fdimv(x, y);
@@ -899,6 +1286,12 @@ pub fn fdim(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.fdim supports only f16, f32, and f64");
 }
 
+/// Returns the larger of `x` and `y` with the scalar implementation for their
+/// common type, treating a NaN operand as missing: a NaN `x` yields `y`, a NaN
+/// `y` yields `x`, and two NaNs yield the first, quieted.
+///
+/// This is the C `fmax` policy. `fmaximum` is the spelling that propagates a
+/// NaN instead, and the two differ on every input where one operand is a NaN.
 pub fn fmax(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.fmaxv(x, y);
@@ -911,6 +1304,12 @@ pub fn fmax(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.fmax supports only f16, f32, and f64");
 }
 
+/// Returns the smaller of `x` and `y` with the scalar implementation for their
+/// common type, treating a NaN operand as missing: a NaN `x` yields `y`, a NaN
+/// `y` yields `x`, and two NaNs yield the first, quieted.
+///
+/// This is the C `fmin` policy. `fminimum` is the spelling that propagates a
+/// NaN instead, and the two differ on every input where one operand is a NaN.
 pub fn fmin(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.fminv(x, y);
@@ -923,6 +1322,13 @@ pub fn fmin(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.fmin supports only f16, f32, and f64");
 }
 
+/// Returns the larger of `x` and `y` with the scalar implementation for their
+/// common type, propagating a NaN: the first NaN operand comes back with its
+/// quiet bit set and its sign and payload kept, and only when neither operand
+/// is a NaN is the ordinary ordered comparison used.
+///
+/// The ordered comparison distinguishes `+0` above `-0`. `fmax` is the spelling
+/// that treats a NaN as missing instead.
 pub fn fmaximum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.fmaximumv(x, y);
@@ -935,6 +1341,13 @@ pub fn fmaximum(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.fmaximum supports only f16, f32, and f64");
 }
 
+/// Returns the smaller of `x` and `y` with the scalar implementation for their
+/// common type, propagating a NaN: the first NaN operand comes back with its
+/// quiet bit set and its sign and payload kept, and only when neither operand
+/// is a NaN is the ordinary ordered comparison used.
+///
+/// The ordered comparison distinguishes `-0` below `+0`. `fmin` is the spelling
+/// that treats a NaN as missing instead.
 pub fn fminimum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.fminimumv(x, y);
@@ -947,6 +1360,13 @@ pub fn fminimum(x: anytype, y: anytype) @TypeOf(x) {
     @compileError("zmath.fminimum supports only f16, f32, and f64");
 }
 
+/// Returns whichever of `x` and `y` has the greater magnitude, with the scalar
+/// implementation for their common type.
+///
+/// An exact magnitude tie, which includes `+0` against `-0` and equal
+/// magnitudes of opposite sign, falls back to the ordinary ordered comparison,
+/// so the positive operand wins. A NaN operand propagates with its quiet bit set
+/// and its sign and payload kept, and the first NaN operand is the one chosen.
 fn fmaximumMag(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.ieee_family.fmaximumMagv(x, y);
@@ -961,6 +1381,13 @@ fn fmaximumMag(x: anytype, y: anytype) @TypeOf(x) {
 
 pub const fmaximum_mag = fmaximumMag;
 
+/// Returns whichever of `x` and `y` has the smaller magnitude, with the scalar
+/// implementation for their common type.
+///
+/// An exact magnitude tie, which includes `+0` against `-0` and equal
+/// magnitudes of opposite sign, falls back to the ordinary ordered comparison,
+/// so the negative operand wins. A NaN operand propagates with its quiet bit set
+/// and its sign and payload kept, and the first NaN operand is the one chosen.
 fn fminimumMag(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.ieee_family.fminimumMagv(x, y);
@@ -975,6 +1402,12 @@ fn fminimumMag(x: anytype, y: anytype) @TypeOf(x) {
 
 pub const fminimum_mag = fminimumMag;
 
+/// Returns the larger of `x` and `y` by the C23 "maximum number" rule, which
+/// treats a NaN operand as missing rather than propagating it.
+///
+/// A NaN `x` yields `y`, a NaN `y` yields `x`, and two NaNs yield the first,
+/// quieted. On this package's three formats that rule agrees with `fmax` on
+/// every input, so the two spellings differ in name only.
 fn fmaximumNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.ieee_family.fmaximumNumv(x, y);
@@ -989,6 +1422,12 @@ fn fmaximumNum(x: anytype, y: anytype) @TypeOf(x) {
 
 pub const fmaximum_num = fmaximumNum;
 
+/// Returns the smaller of `x` and `y` by the C23 "minimum number" rule, which
+/// treats a NaN operand as missing rather than propagating it.
+///
+/// A NaN `x` yields `y`, a NaN `y` yields `x`, and two NaNs yield the first,
+/// quieted. On this package's three formats that rule agrees with `fmin` on
+/// every input, so the two spellings differ in name only.
 fn fminimumNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.ieee_family.fminimumNumv(x, y);
@@ -1003,6 +1442,12 @@ fn fminimumNum(x: anytype, y: anytype) @TypeOf(x) {
 
 pub const fminimum_num = fminimumNum;
 
+/// Returns the operand of greater magnitude, with the scalar implementation for
+/// their common type, combining the magnitude comparison of `fmaximum_mag` with
+/// the missing-NaN rule of `fmaximum_num`.
+///
+/// An exact magnitude tie falls back to the ordinary ordered comparison, and a
+/// NaN operand is treated as missing rather than propagated.
 fn fmaximumMagNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.ieee_family.fmaximumMagNumv(x, y);
@@ -1019,6 +1464,12 @@ fn fmaximumMagNum(x: anytype, y: anytype) @TypeOf(x) {
 
 pub const fmaximum_mag_num = fmaximumMagNum;
 
+/// Returns the operand of smaller magnitude, with the scalar implementation for
+/// their common type, combining the magnitude comparison of `fminimum_mag` with
+/// the missing-NaN rule of `fminimum_num`.
+///
+/// An exact magnitude tie falls back to the ordinary ordered comparison, and a
+/// NaN operand is treated as missing rather than propagated.
 fn fminimumMagNum(x: anytype, y: anytype) @TypeOf(x) {
     const T = @TypeOf(x);
     if (@typeInfo(T) == .vector) return vector.ieee_family.fminimumMagNumv(x, y);
@@ -1035,6 +1486,13 @@ fn fminimumMagNum(x: anytype, y: anytype) @TypeOf(x) {
 
 pub const fminimum_mag_num = fminimumMagNum;
 
+/// Returns `value` with any signaling NaN quieted, keeping its sign and payload
+/// and leaving a quiet NaN bit-for-bit unchanged.
+///
+/// The result is a `CanonicalizeResult`. `ok` is true on every path for all
+/// three supported formats, so no input on this surface reports failure; the
+/// field keeps the C23 result shape rather than carrying a case that cannot
+/// occur. A vector argument returns `[N]CanonicalizeResult`, one entry per lane.
 pub fn canonicalize(value: anytype) LaneResult(CanonicalizeResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.canonicalizev(value);
@@ -1044,6 +1502,8 @@ pub fn canonicalize(value: anytype) LaneResult(CanonicalizeResult(FloatLane(@Typ
     @compileError("zmath.canonicalize supports only f16, f32, and f64");
 }
 
+/// Returns the magnitude of `value` with the sign of `sign`, bit by bit, so
+/// every field of `value` other than its sign bit survives unchanged.
 pub fn copySign(value: anytype, sign: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ieee_family.copySignv(value, sign);
@@ -1056,6 +1516,19 @@ pub fn copySign(value: anytype, sign: anytype) @TypeOf(value) {
     @compileError("zmath.copySign supports only f16, f32, and f64");
 }
 
+/// Builds a positive quiet NaN of type `T` whose diagnostic payload is `tag`
+/// read as hexadecimal digits, with `0x` not accepted.
+///
+/// `tag` may be any length and is borrowed only for the duration of this call;
+/// the result copies it into the NaN payload, so the caller may reuse or free
+/// the slice immediately. An empty `tag`, a `tag` holding a character outside
+/// `0-9`, `A-F` and `a-f`, and a `tag` whose value exceeds the payload field of
+/// `T`, which is 9 bits for `f16`, 22 for `f32` and 51 for `f64`, each return
+/// the positive canonical quiet NaN of `T` instead of a value that failure
+/// would let the caller distinguish from an intended payload of zero.
+///
+/// `T` is a comptime type, so this operation has no `@Vector` form;
+/// `zmath.vector` has no lane-parallel spelling for it either.
 pub fn nan(comptime T: type, tag: []const u8) T {
     if (T == f16) return ieee.nanh(tag);
     if (T == f32) return ieee.nanf(tag);
@@ -1063,6 +1536,15 @@ pub fn nan(comptime T: type, tag: []const u8) T {
     @compileError("zmath.nan supports only f16, f32, and f64");
 }
 
+/// Returns the next representable value of the same format after `from` in the
+/// direction of `to`, with the sign of `to` deciding which direction that is.
+///
+/// `from` equal to `to` returns `to`, so the two signed zeros are each other's
+/// successor in the direction of the other. A NaN operand is returned with its
+/// quiet bit set and its sign and payload kept, the first NaN operand winning
+/// when both are NaN; a quiet NaN is returned bit-for-bit unchanged. There is
+/// no infinity-overflow case: `nextAfter(+infinity, -infinity)` is the largest
+/// finite value of the format.
 pub fn nextAfter(from: anytype, to: anytype) @TypeOf(from) {
     const T = @TypeOf(from);
     if (@typeInfo(T) == .vector) return vector.ieee_family.nextAfterv(from, to);
@@ -1075,6 +1557,15 @@ pub fn nextAfter(from: anytype, to: anytype) @TypeOf(from) {
     @compileError("zmath.nextAfter supports only f16, f32, and f64");
 }
 
+/// Returns the next representable value of `value`'s own format after it in the
+/// direction of `toward`, which is always a `f64` and never the lane type.
+///
+/// A NaN `value` is returned with its quiet bit set and its sign and payload
+/// kept. A NaN `toward` is narrowed to the result format: the sign and the
+/// high-order payload bits that fit are kept and the quiet bit is set, so the
+/// result is a quiet NaN rather than a payload-free one. `value` equal to
+/// `toward` returns `value`, except at zero, where the result takes the sign of
+/// `toward`.
 pub fn nextToward(value: anytype, toward: f64) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.intarg.nextTowardv(value, toward);
@@ -1084,6 +1575,11 @@ pub fn nextToward(value: anytype, toward: f64) @TypeOf(value) {
     @compileError("zmath.nextToward supports only f16, f32, and f64");
 }
 
+/// Returns the next representable value of the same format above `value`.
+///
+/// `+infinity` returns unchanged, a NaN is returned with its quiet bit set and
+/// its sign and payload kept, and `-0.0` gives the smallest positive subnormal
+/// rather than a value below zero.
 pub fn nextUp(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ieee_family.nextUpv(value);
@@ -1093,6 +1589,11 @@ pub fn nextUp(value: anytype) @TypeOf(value) {
     @compileError("zmath.nextUp supports only f16, f32, and f64");
 }
 
+/// Returns the next representable value of the same format below `value`.
+///
+/// `-infinity` returns unchanged, a NaN is returned with its quiet bit set and
+/// its sign and payload kept, and `+0.0` gives the smallest negative subnormal
+/// rather than a value above zero.
 pub fn nextDown(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ieee_family.nextDownv(value);
@@ -1102,6 +1603,14 @@ pub fn nextDown(value: anytype) @TypeOf(value) {
     @compileError("zmath.nextDown supports only f16, f32, and f64");
 }
 
+/// Returns true when `left` precedes or equals `right` in the IEEE totalOrder
+/// of the format, which is a total order over every bit pattern: every value
+/// compares, and `-0` sorts below `+0` while both infinities sort below every
+/// NaN and signaling NaNs sort below quiet ones.
+///
+/// Two operands that are bit-identical always compare true in both directions.
+///
+/// A vector argument returns `@Vector(N, bool)`, one verdict per lane.
 pub fn totalOrder(left: anytype, right: anytype) LaneVector(bool, @TypeOf(left)) {
     const T = @TypeOf(left);
     if (@typeInfo(T) == .vector) return vector.ieee_family.totalOrderv(left, right);
@@ -1114,6 +1623,15 @@ pub fn totalOrder(left: anytype, right: anytype) LaneVector(bool, @TypeOf(left))
     @compileError("zmath.totalOrder supports only f16, f32, and f64");
 }
 
+/// Returns true when the magnitude of `left` is at most the magnitude of
+/// `right`, ignoring both signs.
+///
+/// The comparison is on the sign-cleared encodings, so it is a total order over
+/// the magnitudes: numbers, then infinity, then signaling NaNs, then quiet NaNs,
+/// with the diagnostic payload increasing inside each NaN class. Unlike
+/// `totalOrder` it does not distinguish `-0` from `+0`.
+///
+/// A vector argument returns `@Vector(N, bool)`, one verdict per lane.
 pub fn totalOrderMag(left: anytype, right: anytype) LaneVector(bool, @TypeOf(left)) {
     const T = @TypeOf(left);
     if (@typeInfo(T) == .vector) return vector.ieee_family.totalOrderMagv(left, right);
@@ -1126,6 +1644,14 @@ pub fn totalOrderMag(left: anytype, right: anytype) LaneVector(bool, @TypeOf(lef
     @compileError("zmath.totalOrderMag supports only f16, f32, and f64");
 }
 
+/// Returns the diagnostic payload of a NaN `value` as a float of the same
+/// format, and `-1.0` for every non-NaN input.
+///
+/// The payload is the fraction field below the quiet bit, so the quiet bit is
+/// not part of it and the width is 9 bits for `f16`, 22 for `f32` and 51 for
+/// `f64`; every value in those ranges is exactly representable, so the result
+/// is exact. `-1.0` is a sentinel for "this operand was not a NaN" and is
+/// distinguishable from every payload, because no payload is negative.
 pub fn getPayload(value: anytype) @TypeOf(value) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.ieee_family.getPayloadv(value);
@@ -1135,6 +1661,15 @@ pub fn getPayload(value: anytype) @TypeOf(value) {
     @compileError("zmath.getPayload supports only f16, f32, and f64");
 }
 
+/// Builds a positive quiet NaN carrying the diagnostic payload `value` and
+/// returns it as a `PayloadResult`.
+///
+/// `value` must be either signed zero, which encodes payload zero, or a
+/// positive integral value no larger than 511 for `f16`, 4194303 for `f32` and
+/// 2251799813685247 for `f64`. Any other `value`, including a negative one, a
+/// NaN, an infinity, a non-integral value and one above the format's payload
+/// maximum, returns `+0.0` with `ok` false; that `0.0` is a sentinel and must
+/// not be read as a payload of zero.
 pub fn setPayload(value: anytype) LaneResult(PayloadResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.setPayloadv(value);
@@ -1144,6 +1679,13 @@ pub fn setPayload(value: anytype) LaneResult(PayloadResult(FloatLane(@TypeOf(val
     @compileError("zmath.setPayload supports only f16, f32, and f64");
 }
 
+/// As `setPayload`, but the payload must start at one: a zero fraction with the
+/// quiet bit clear encodes infinity rather than a NaN, so payload zero is not
+/// representable in the signaling spelling.
+///
+/// `value` of zero therefore returns `+0.0` with `ok` false, and every other
+/// accepted and rejected input behaves as in `setPayload`. The returned NaN has
+/// its quiet bit clear and so is a signaling NaN.
 pub fn setPayloadSig(value: anytype) LaneResult(PayloadResult(FloatLane(@TypeOf(value))), @TypeOf(value)) {
     const T = @TypeOf(value);
     if (@typeInfo(T) == .vector) return vector.struct_family.setPayloadSigv(value);
@@ -1153,39 +1695,66 @@ pub fn setPayloadSig(value: anytype) LaneResult(PayloadResult(FloatLane(@TypeOf(
     @compileError("zmath.setPayloadSig supports only f16, f32, and f64");
 }
 
+/// Computes the exact sum of `x` and `y` and rounds the result ONCE to
+/// `f32`. It is not a binary64 addition followed by a narrowing conversion, so
+/// `fadd(1 + 2^-25, -1)` is `2^-25` and not `+0`.
+///
+/// The parameters are `f64` and the result is `f32`, so this entry point takes
+/// no `@Vector`; `zmath.vector.narrow.faddv` is the lane-parallel route, and it
+/// applies this same kernel to every lane. Opposite-signed infinities return
+/// the positive canonical quiet NaN, and a NaN operand is converted with its
+/// sign and the payload bits that fit kept.
 pub fn fadd(x: f64, y: f64) f32 {
-    const T = @TypeOf(x);
-    if (@typeInfo(T) == .vector) return vector.narrow.faddv(x, y);
     return scalar_narrow.fadd(x, y);
 }
 
+/// Computes the exact difference of `x` and `y` and rounds the result ONCE to
+/// `f32`, so the subtraction and the narrowing are one rounding.
+///
+/// Scalar-only, like every operation in this group: `zmath.vector.narrow.fsubv`
+/// is the lane-parallel route. An infinity minus itself returns the positive
+/// canonical quiet NaN.
 pub fn fsub(x: f64, y: f64) f32 {
-    const T = @TypeOf(x);
-    if (@typeInfo(T) == .vector) return vector.narrow.fsubv(x, y);
     return scalar_narrow.fsub(x, y);
 }
 
+/// Computes the exact product of `x` and `y` and rounds the result ONCE to
+/// `f32`.
+///
+/// Scalar-only, like every operation in this group: `zmath.vector.narrow.fmulv`
+/// is the lane-parallel route. An infinite operand with a zero operand returns
+/// the positive canonical quiet NaN.
 pub fn fmul(x: f64, y: f64) f32 {
-    const T = @TypeOf(x);
-    if (@typeInfo(T) == .vector) return vector.narrow.fmulv(x, y);
     return scalar_narrow.fmul(x, y);
 }
 
+/// Computes the exact quotient of `x` and `y` and rounds the result ONCE to
+/// `f32`.
+///
+/// Scalar-only, like every operation in this group: `zmath.vector.narrow.fdivv`
+/// is the lane-parallel route. `0 / 0` and an infinite dividend over an infinite
+/// divisor return the positive canonical quiet NaN.
 pub fn fdiv(x: f64, y: f64) f32 {
-    const T = @TypeOf(x);
-    if (@typeInfo(T) == .vector) return vector.narrow.fdivv(x, y);
     return scalar_narrow.fdiv(x, y);
 }
 
+/// Computes the exact value of `x * y + z` and rounds that ONCE to `f32`. The
+/// product is not rounded before the sum is added, which is what makes this
+/// fused rather than a multiply followed by an add.
+///
+/// Scalar-only, like every operation in this group: `zmath.vector.narrow.ffmav`
+/// is the lane-parallel route. An infinite product opposed in sign by an
+/// infinite addend returns the positive canonical quiet NaN.
 pub fn ffma(x: f64, y: f64, z: f64) f32 {
-    const T = @TypeOf(x);
-    if (@typeInfo(T) == .vector) return vector.narrow.ffmav(x, y, z);
     return scalar_narrow.ffma(x, y, z);
 }
 
+/// Computes the exact square root of `x` and rounds the result ONCE to `f32`.
+///
+/// Scalar-only, like every operation in this group: `zmath.vector.narrow.fsqrtv`
+/// is the lane-parallel route. A negative `x`, including `-0.0`, returns the
+/// positive canonical quiet NaN, except that a `-0.0` input returns `-0.0`.
 pub fn fsqrt(x: f64) f32 {
-    const T = @TypeOf(x);
-    if (@typeInfo(T) == .vector) return vector.narrow.fsqrtv(x);
     return scalar_narrow.fsqrt(x);
 }
 

@@ -109,6 +109,17 @@ const coefficients = [19][7]f32{
     },
 };
 
+/// Inverse hyperbolic sine of a `binary16` value, `asinh(value)`, defined on
+/// the whole real line.
+///
+/// This is the hyperbolic kernel; `asinh` in the inverse-sine file is the
+/// binary16 inverse sine. An infinity is returned unchanged, and a NaN input
+/// is returned with its quiet bit set, its sign and payload kept. Magnitudes
+/// up to 0.045074, and either signed zero, are returned unchanged; the result
+/// carries the sign of `value`.
+///
+/// The returned float is the whole result: no error code, floating-point
+/// exception flag, or retained status reports anything else.
 pub fn asinhh(value: f16) f16 {
     @setFloatMode(.strict);
     const input_bits: u16 = @bitCast(value);

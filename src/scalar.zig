@@ -1,3 +1,36 @@
+//! The elementary functions with one fixed entry point per format: an
+//! operation name followed by `h`, `f` or `d` for binary16, binary32 and
+//! binary64.
+//!
+//! This module is the per-format route. The root module publishes a generic
+//! form of each operation that picks this entry point from the argument type,
+//! so a caller that does not need the format fixed at the call site can use that
+//! instead; the two routes run the same kernels and return the same values.
+//! Nothing here takes a `@Vector` argument: the portable lane-parallel layer is
+//! `zmath.vector`.
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn main() void {
+//!     // `sqrtf` is the binary32 kernel; `zmath.sqrt` with an `f32` reaches it.
+//!     const root = zmath.scalar.sqrtf(@as(f32, 2.0));
+//!     std.debug.print("{d}\n", .{root});
+//! }
+//! ```
+//!
+//! Every entry point here assumes IEEE round-to-nearest, ties-to-even is active
+//! and returns a numeric value or one of the C23 result structs. None allocates,
+//! retains a resource, reads or writes `errno`, or inspects or restores a
+//! floating-point exception flag, so there is nothing for a caller to release.
+//! The `abs*` and `ulpDistance*` entries are the exceptions to the
+//! elementary-function naming: `abs*` is the C23 `fabs` equivalent and
+//! `ulpDistance*` is a zmath extension that is not a C23 operation at all.
+//
+// Every alias below re-exports an implementation file unchanged. That file is
+// the owning declaration and carries the contract; nothing is restated here, so
+// a change to a kernel's contract changes one comment rather than two.
 const fma_impl = @import("scalar_fma.zig");
 
 const c23_types = @import("scalar_c23_types.zig");
@@ -394,6 +427,13 @@ const logf_accurate_coefficients = [_]f64{
     -0x1.001c73915d758p-3,
 };
 
+/// Returns `e` raised to `value` at binary16 width.
+///
+/// Both signed zeros return `1.0`, `+infinity` returns unchanged and
+/// `-infinity` returns `+0.0`, and a NaN comes back with its quiet bit set and
+/// its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn exph(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     const magnitude = bits & magnitude_mask_h;
@@ -979,6 +1019,14 @@ const logh_t3 = [1024]f32{
     -0x1.36a7bap+3,                  -0x1.369fb2p+3, -0x1.3697aep+3, -0x1.368faap+3,
 };
 
+/// Returns the natural logarithm of `value` at binary16 width.
+///
+/// `value` must be nonnegative. A zero of either sign returns `-infinity`, a
+/// negative `value` and `-infinity` return the binary16 positive canonical quiet
+/// NaN, `+infinity` returns unchanged, and a NaN comes back with its quiet bit
+/// set and its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn logh(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     const magnitude = bits & magnitude_mask_h;
@@ -1021,6 +1069,15 @@ pub fn logh(value: f16) f16 {
 // SOFTWARE.
 const sinh_data = @import("scalar_sinh_data.zig");
 
+/// Returns the sine of `value`, in radians, at binary16 width.
+///
+/// This is the binary16 SINE despite the name: the binary16 hyperbolic sine is
+/// `sinhh`, reached as `zmath.sinh` from the root module.
+///
+/// An infinite `value` returns the binary16 positive canonical quiet NaN, and a
+/// NaN comes back with its quiet bit set and its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn sinh(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     const magnitude = bits & magnitude_mask_h;
@@ -1085,6 +1142,16 @@ pub fn sinh(value: f16) f16 {
 // SOFTWARE.
 const cosh_data = @import("scalar_cosh_data.zig");
 
+/// Returns the cosine of `value`, in radians, at binary16 width.
+///
+/// This is the binary16 COSINE despite the name: the binary16 hyperbolic cosine
+/// is `coshh`, reached as `zmath.cosh` from the root module. Either signed zero
+/// returns `1.0`.
+///
+/// An infinite `value` returns the binary16 positive canonical quiet NaN, and a
+/// NaN comes back with its quiet bit set and its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn cosh(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     const magnitude = bits & magnitude_mask_h;
@@ -1132,6 +1199,14 @@ pub fn cosh(value: f16) f16 {
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+/// Returns the natural logarithm of `value` at binary32 width.
+///
+/// `value` must be nonnegative. A zero of either sign returns `-infinity`, a
+/// negative `value` and `-infinity` return the binary32 positive canonical quiet
+/// NaN, `+infinity` returns unchanged, and a NaN comes back with its quiet bit
+/// set and its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn logf(value: f32) f32 {
     @setFloatMode(.strict);
 
@@ -1201,21 +1276,42 @@ pub fn logf(value: f32) f32 {
     return upper;
 }
 
+/// Returns the magnitude of `value` by clearing its sign bit, the C23 `fabs`
+/// equivalent at binary16 width.
+///
+/// The magnitude field is left untouched, so a NaN keeps its payload and a
+/// signaling NaN stays signaling rather than being quieted. `-0.0` returns
+/// `+0.0`.
 pub fn absh(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     return @bitCast(bits & magnitude_mask_h);
 }
 
+/// Returns the magnitude of `value` by clearing its sign bit at binary32 width,
+/// with the same NaN and signed-zero rules as `absh`.
 pub fn absf(value: f32) f32 {
     const bits: u32 = @bitCast(value);
     return @bitCast(bits & magnitude_mask_f);
 }
 
+/// Returns the magnitude of `value` by clearing its sign bit at binary64 width,
+/// with the same NaN and signed-zero rules as `absh`.
 pub fn absd(value: f64) f64 {
     const bits: u64 = @bitCast(value);
     return @bitCast(bits & magnitude_mask_d);
 }
 
+/// Returns how many representable values of the format lie between `a` and `b`,
+/// so `0` means the two encodings are identical and `1` means they are adjacent.
+///
+/// This is a zmath extension and not a C23 operation. The count is taken along
+/// the order-preserving mapping of the whole encoding, so it crosses zero and
+/// spans the subnormal, normal and infinite ranges in one number.
+///
+/// `std.math.maxInt(u16)` is the sentinel for a NaN operand: no pair of values is
+/// that far apart, so a caller can distinguish "not comparable" from a real
+/// distance without a second channel. Two encodings that are equal in value but
+/// differ in bits, the two signed zeros, count as one.
 pub fn ulpDistanceh(a: f16, b: f16) u16 {
     const a_bits: u16 = @bitCast(a);
     const b_bits: u16 = @bitCast(b);
@@ -1228,6 +1324,9 @@ pub fn ulpDistanceh(a: f16, b: f16) u16 {
     return b_ordered - a_ordered;
 }
 
+/// Returns the representable-value distance between `a` and `b` at binary32
+/// width, with `std.math.maxInt(u32)` as the NaN sentinel, as `ulpDistanceh`
+/// describes.
 pub fn ulpDistancef(a: f32, b: f32) u32 {
     const a_bits: u32 = @bitCast(a);
     const b_bits: u32 = @bitCast(b);
@@ -1240,6 +1339,9 @@ pub fn ulpDistancef(a: f32, b: f32) u32 {
     return b_ordered - a_ordered;
 }
 
+/// Returns the representable-value distance between `a` and `b` at binary64
+/// width, with `std.math.maxInt(u64)` as the NaN sentinel, as `ulpDistanceh`
+/// describes.
 pub fn ulpDistanced(a: f64, b: f64) u64 {
     const a_bits: u64 = @bitCast(a);
     const b_bits: u64 = @bitCast(b);
@@ -1368,6 +1470,15 @@ noinline fn expfAccurate(value_wide: f64, correction: f64, scale: f64) f32 {
     return @floatCast(result);
 }
 
+/// Returns `e` raised to `value` at binary32 width.
+///
+/// Both signed zeros return `1.0`, `+infinity` returns unchanged and
+/// `-infinity` returns `+0.0`, and a NaN comes back with its quiet bit set and
+/// its sign and payload kept. A `value` large enough to leave the binary32
+/// range returns an infinity and a small enough one returns `+0.0`, so no input
+/// overflows the format silently.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn expf(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);
@@ -1830,6 +1941,14 @@ fn expdAccurate(value: f64) f64 {
     return expdScaleNormal(result.high, exponent);
 }
 
+/// Returns `e` raised to `value` at binary64 width.
+///
+/// Both signed zeros return `1.0`, `+infinity` returns unchanged and
+/// `-infinity` returns `+0.0`, and a NaN comes back with its quiet bit set and
+/// its sign and payload kept. A `value` large enough to leave the binary64
+/// range returns an infinity and a small enough one returns `+0.0`.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn expd(value: f64) f64 {
     const bits: u64 = @bitCast(value);
     const magnitude = bits & magnitude_mask_d;
@@ -2097,6 +2216,12 @@ noinline fn sinfBig(bits: u32, absolute_bits: u32) f32 {
     return @floatCast(result);
 }
 
+/// Returns the sine of `value`, in radians, at binary32 width.
+///
+/// An infinite `value` returns the binary32 positive canonical quiet NaN, and a
+/// NaN comes back with its quiet bit set and its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn sinf(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);

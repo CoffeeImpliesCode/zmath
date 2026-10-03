@@ -41,6 +41,18 @@ const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
 const negative_one_bits: u64 = 0xbff0_0000_0000_0000;
 const quiet_nan_bit: u64 = 0x0008_0000_0000_0000;
 
+/// The natural logarithm of `1 + x` for a `binary64` value.
+///
+/// The argument is `1 + x`, so an `x` below `-1`, `-infinity` included, is out
+/// of domain and gives the positive canonical quiet NaN
+/// (0x7ff8_0000_0000_0000). The boundary `x` of `-1` is in domain and gives
+/// `-infinity`; either signed zero is returned unchanged, so `-0.0` gives
+/// `-0.0`. `+infinity` gives `+infinity`; a NaN input is returned with its quiet
+/// bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn log1pd(x: f64) f64 {
     const x_bits: u64 = @bitCast(x);
     const magnitude_bits = x_bits & 0x7fff_ffff_ffff_ffff;

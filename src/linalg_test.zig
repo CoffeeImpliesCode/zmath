@@ -59,7 +59,7 @@ const CholeskyMat3d = linalg.CholeskyMat3d;
 const CholeskyMat4d = linalg.CholeskyMat4d;
 
 /// The positive canonical quiet NaN of binary32, from the special-value table
-/// of `spec/core-math-2026-08-22.md:769-801`.
+/// of `spec/core-math-2026-08-22.md#special-values`.
 const nan_f: f32 = @bitCast(@as(u32, 0x7fc0_0000));
 /// The positive infinity of binary32, from the same table.
 const inf_f: f32 = @bitCast(@as(u32, 0x7f80_0000));

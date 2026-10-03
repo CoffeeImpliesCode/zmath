@@ -301,6 +301,17 @@ noinline fn exp10m1Accurate(x: f64) f64 {
     return v.high + v.low;
 }
 
+/// Returns `10` raised to `value` minus one, at binary64 width.
+///
+/// The whole result is this bare float: no `errno`, no floating-point exception
+/// flag, and no retained status. `-infinity` returns `-1.0`, which is where
+/// `10^value - 1` converges as `value` falls, and so does every negative
+/// `value` far enough below zero. A positive `value` above roughly `308.2`
+/// returns `+infinity`, the first binary64 magnitude `10^value` cannot reach, and
+/// `+infinity` returns unchanged. A NaN comes back with its quiet bit set and
+/// its sign and payload kept.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn exp10m1d(value: f64) f64 {
     @setFloatMode(.strict);
     const ux: u64 = @bitCast(value);

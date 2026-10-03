@@ -17,9 +17,9 @@
 //!
 //! `w` is the fourth component. On `Vec4f` and `Vec4d` it is the homogeneous
 //! coordinate, and it matches `Quatf.w` and `Quatd.w`, where `w` is the
-//! quaternion's scalar component (`API.md:910`). Nothing here reads `w`
-//! differently from the others: `dot`, `length`, and `normalize` include it
-//! like any other component.
+//! quaternion's scalar component (`API.md#vectors-and-quaternions`). Nothing
+//! here reads `w` differently from the others: `dot`, `length`, and `normalize`
+//! include it like any other component.
 //!
 //! These are fixed-size value types. No operation allocates.
 //!
@@ -43,10 +43,10 @@
 //!
 //! ## Special values
 //!
-//! `spec/core-math-2026-08-22.md:769-801` pins the encodings, and this module
-//! meets it. A NaN operand propagates through the arithmetic with its sign and
-//! diagnostic payload intact and its quiet bit set, so a signaling NaN becomes
-//! quiet. An invalid operation on non-NaN operands gives the POSITIVE
+//! `spec/core-math-2026-08-22.md#special-values` pins the encodings, and this
+//! module meets it. A NaN operand propagates through the arithmetic with its
+//! sign and diagnostic payload intact and its quiet bit set, so a signaling NaN
+//! becomes quiet. An invalid operation on non-NaN operands gives the POSITIVE
 //! canonical quiet NaN of the format. The second rule is not free: the host
 //! unit produces the NEGATIVE indefinite for an invalid operation, 0x7fc00000
 //! with the sign bit set, so every arithmetic kernel here checks its result
@@ -154,14 +154,14 @@ fn absOf(comptime T: type, a: T) T {
     };
 }
 
-/// The quiet bit of `T`, from the masks
-/// `spec/core-math-2026-08-22.md:781` gives for F and D.
+/// The quiet bit of `T`, from the F and D quiet-bit masks in the
+/// `spec/core-math-2026-08-22.md#special-values` table.
 fn quietMaskOf(comptime T: type) Bits(T) {
     return if (T == f32) 0x0040_0000 else 0x0008_0000_0000_0000;
 }
 
-/// The positive canonical quiet NaN of `T`, from
-/// `spec/core-math-2026-08-22.md:769-801`.
+/// The positive canonical quiet NaN of `T`, from the encoding table in
+/// `spec/core-math-2026-08-22.md#special-values`.
 fn canonicalNaNOf(comptime T: type) T {
     return @bitCast(@as(Bits(T), if (T == f32) 0x7fc0_0000 else 0x7ff8_0000_0000_0000));
 }
@@ -470,20 +470,26 @@ fn eqOf(comptime V: type, a: V, b: V) bool {
 /// The components of `a` as the lanes of a `@Vector`, and the lanes of a
 /// `@Vector` as the components of a `Vec`.
 ///
-/// Both directions are the language coercion between an array and a `@Vector`
-/// of the same length and element type, which maps element `i` to lane `i` and
-/// back. `@bitCast` between the same two types would instead reinterpret the
-/// bytes one value happens to occupy: an array has a well-defined byte layout
-/// but a vector has none, so on a big-endian target that pun reversed the
-/// lanes of every `Vec` conversion.
+/// Each component is assigned and accessed by logical lane index, without
+/// relying on the target's vector storage representation.
 fn toVectorOf(comptime V: type, a: V) @Vector(componentCount(V), Component(V)) {
-    const lanes: [componentCount(V)]Component(V) = toArrayOf(V, a);
-    return lanes;
+    const width = comptime componentCount(V);
+    // SAFETY: Every logical lane is assigned before return.
+    var out: @Vector(width, Component(V)) = undefined;
+    inline for (0..width) |index| {
+        out[index] = @field(a, component_names[index]);
+    }
+    return out;
 }
 
 fn fromVectorOf(comptime V: type, v: @Vector(componentCount(V), Component(V))) V {
-    const lanes: [componentCount(V)]Component(V) = v;
-    return fromArrayOf(V, lanes);
+    const width = comptime componentCount(V);
+    // SAFETY: Every component field is assigned before return.
+    var out: V = undefined;
+    inline for (0..width) |index| {
+        @field(out, component_names[index]) = v[index];
+    }
+    return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -547,7 +553,10 @@ pub const Vec2f = struct {
         return scaleVecOf(Vec2f, self, other);
     }
 
-    /// Every component divided by `divisor`.
+    /// Every component divided by `divisor`. The division is IEEE, so a zero
+    /// divisor gives a signed infinity where the numerator survives and the
+    /// positive canonical quiet NaN where it does not; `normalize` is the
+    /// operation that reports a zero length by returning the input instead.
     pub fn divScalar(self: Vec2f, divisor: f32) Vec2f {
         return divScalarOf(Vec2f, self, divisor);
     }
@@ -582,7 +591,10 @@ pub const Vec2f = struct {
         return normalizeOf(Vec2f, self);
     }
 
-    /// Linear interpolation toward `other` for a `t` in `[0, 1]`.
+    /// Linear interpolation toward `other` for a `t` in `[0, 1]`, which is a
+    /// precondition and is not enforced. `t` of exactly `0` and `t` of exactly
+    /// `1` return the receiver and `other` verbatim rather than the rounded
+    /// general form.
     pub fn lerp(self: Vec2f, other: Vec2f, t: f32) Vec2f {
         return lerpOf(Vec2f, self, other, t);
     }
@@ -687,7 +699,10 @@ pub const Vec3f = struct {
         return scaleVecOf(Vec3f, self, other);
     }
 
-    /// Every component divided by `divisor`.
+    /// Every component divided by `divisor`. The division is IEEE, so a zero
+    /// divisor gives a signed infinity where the numerator survives and the
+    /// positive canonical quiet NaN where it does not; `normalize` is the
+    /// operation that reports a zero length by returning the input instead.
     pub fn divScalar(self: Vec3f, divisor: f32) Vec3f {
         return divScalarOf(Vec3f, self, divisor);
     }
@@ -727,7 +742,10 @@ pub const Vec3f = struct {
         return normalizeOf(Vec3f, self);
     }
 
-    /// Linear interpolation toward `other` for a `t` in `[0, 1]`.
+    /// Linear interpolation toward `other` for a `t` in `[0, 1]`, which is a
+    /// precondition and is not enforced. `t` of exactly `0` and `t` of exactly
+    /// `1` return the two endpoints verbatim rather than the rounded general
+    /// form.
     pub fn lerp(self: Vec3f, other: Vec3f, t: f32) Vec3f {
         return lerpOf(Vec3f, self, other, t);
     }
@@ -834,7 +852,10 @@ pub const Vec4f = struct {
         return scaleVecOf(Vec4f, self, other);
     }
 
-    /// Every component divided by `divisor`.
+    /// Every component divided by `divisor`. The division is IEEE, so a zero
+    /// divisor gives a signed infinity where the numerator survives and the
+    /// positive canonical quiet NaN where it does not; `normalize` is the
+    /// operation that reports a zero length by returning the input instead.
     pub fn divScalar(self: Vec4f, divisor: f32) Vec4f {
         return divScalarOf(Vec4f, self, divisor);
     }
@@ -869,7 +890,10 @@ pub const Vec4f = struct {
         return normalizeOf(Vec4f, self);
     }
 
-    /// Linear interpolation toward `other` for a `t` in `[0, 1]`.
+    /// Linear interpolation toward `other` for a `t` in `[0, 1]`, which is a
+    /// precondition and is not enforced. `t` of exactly `0` and `t` of exactly
+    /// `1` return the two endpoints verbatim rather than the rounded general
+    /// form.
     pub fn lerp(self: Vec4f, other: Vec4f, t: f32) Vec4f {
         return lerpOf(Vec4f, self, other, t);
     }
@@ -972,7 +996,10 @@ pub const Vec2d = struct {
         return scaleVecOf(Vec2d, self, other);
     }
 
-    /// Every component divided by `divisor`.
+    /// Every component divided by `divisor`. The division is IEEE, so a zero
+    /// divisor gives a signed infinity where the numerator survives and the
+    /// positive canonical quiet NaN where it does not; `normalize` is the
+    /// operation that reports a zero length by returning the input instead.
     pub fn divScalar(self: Vec2d, divisor: f64) Vec2d {
         return divScalarOf(Vec2d, self, divisor);
     }
@@ -1007,7 +1034,10 @@ pub const Vec2d = struct {
         return normalizeOf(Vec2d, self);
     }
 
-    /// Linear interpolation toward `other` for a `t` in `[0, 1]`.
+    /// Linear interpolation toward `other` for a `t` in `[0, 1]`, which is a
+    /// precondition and is not enforced. `t` of exactly `0` and `t` of exactly
+    /// `1` return the two endpoints verbatim rather than the rounded general
+    /// form.
     pub fn lerp(self: Vec2d, other: Vec2d, t: f64) Vec2d {
         return lerpOf(Vec2d, self, other, t);
     }
@@ -1112,7 +1142,10 @@ pub const Vec3d = struct {
         return scaleVecOf(Vec3d, self, other);
     }
 
-    /// Every component divided by `divisor`.
+    /// Every component divided by `divisor`. The division is IEEE, so a zero
+    /// divisor gives a signed infinity where the numerator survives and the
+    /// positive canonical quiet NaN where it does not; `normalize` is the
+    /// operation that reports a zero length by returning the input instead.
     pub fn divScalar(self: Vec3d, divisor: f64) Vec3d {
         return divScalarOf(Vec3d, self, divisor);
     }
@@ -1152,7 +1185,10 @@ pub const Vec3d = struct {
         return normalizeOf(Vec3d, self);
     }
 
-    /// Linear interpolation toward `other` for a `t` in `[0, 1]`.
+    /// Linear interpolation toward `other` for a `t` in `[0, 1]`, which is a
+    /// precondition and is not enforced. `t` of exactly `0` and `t` of exactly
+    /// `1` return the two endpoints verbatim rather than the rounded general
+    /// form.
     pub fn lerp(self: Vec3d, other: Vec3d, t: f64) Vec3d {
         return lerpOf(Vec3d, self, other, t);
     }
@@ -1259,7 +1295,10 @@ pub const Vec4d = struct {
         return scaleVecOf(Vec4d, self, other);
     }
 
-    /// Every component divided by `divisor`.
+    /// Every component divided by `divisor`. The division is IEEE, so a zero
+    /// divisor gives a signed infinity where the numerator survives and the
+    /// positive canonical quiet NaN where it does not; `normalize` is the
+    /// operation that reports a zero length by returning the input instead.
     pub fn divScalar(self: Vec4d, divisor: f64) Vec4d {
         return divScalarOf(Vec4d, self, divisor);
     }
@@ -1294,7 +1333,10 @@ pub const Vec4d = struct {
         return normalizeOf(Vec4d, self);
     }
 
-    /// Linear interpolation toward `other` for a `t` in `[0, 1]`.
+    /// Linear interpolation toward `other` for a `t` in `[0, 1]`, which is a
+    /// precondition and is not enforced. `t` of exactly `0` and `t` of exactly
+    /// `1` return the two endpoints verbatim rather than the rounded general
+    /// form.
     pub fn lerp(self: Vec4d, other: Vec4d, t: f64) Vec4d {
         return lerpOf(Vec4d, self, other, t);
     }

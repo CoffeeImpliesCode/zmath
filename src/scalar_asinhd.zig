@@ -222,6 +222,13 @@ fn asAsinhRefine(x: f64, z_high: f64, z_low: f64, a: f64) f64 {
 }
 
 /// Correctly rounded inverse hyperbolic sine for binary64 values.
+///
+/// Defined on the whole real line. Either signed zero and either infinity are
+/// returned unchanged, and a NaN input is returned with its quiet bit set, its
+/// sign and payload kept. The result carries the sign of `value`.
+///
+/// The returned float is the whole result: no error code, floating-point
+/// exception flag, or retained status reports anything else.
 pub fn asinhd(value: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(value);

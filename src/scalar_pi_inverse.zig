@@ -375,6 +375,14 @@ pub fn atan2pid(y: f64, x: f64) c23.Atan2Result(f64) {
     };
 }
 
+/// Test-only access to the forced-ambiguity hook of the binary64 `atan2pi`
+/// kernel, mirroring `scalar_atan2.zig`. It is not part of the supported
+/// surface: `scalar.zig` re-exports the `atan2pi` entry points themselves and
+/// not this namespace, so no published consumer reaches it.
+///
+/// `forcedAmbiguity` drives the same unresolved result a caller would see on an
+/// ambiguous input, so a test can reach the `resolved = false` branch without
+/// searching for an input that lands there.
 pub const testing = struct {
     pub fn forcedAmbiguity(y: f64, x: f64) c23.Atan2Result(f64) {
         // SAFETY: The C call writes `value` before returning nonzero; zero exits before the read.

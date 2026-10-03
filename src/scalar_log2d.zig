@@ -582,6 +582,16 @@ inline fn log2dFinite(value: f64, input_bits: u64) f64 {
 //
 // This code is derived from CORE-MATH and used under the MIT License.
 
+/// The binary logarithm of a `binary64` value.
+///
+/// A negative `value`, `-infinity` included, is out of domain and gives the
+/// positive canonical quiet NaN (0x7ff8_0000_0000_0000). The boundary `+0` and
+/// `-0` are in domain and give `-infinity`; `+infinity` gives `+infinity`. A NaN
+/// input is returned with its quiet bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn log2d(value: f64) f64 {
     const bits: u64 = @bitCast(value);
     if (bits -% 1 >= infinity_bits - 1) {

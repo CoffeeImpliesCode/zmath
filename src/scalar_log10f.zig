@@ -202,6 +202,16 @@ const magnitude_mask: u32 = 0x7fff_ffff;
 const infinity_bits: u32 = 0x7f80_0000;
 const canonical_nan_bits: u32 = 0x7fc0_0000;
 
+/// The base-10 logarithm of a `binary32` value.
+///
+/// A negative `value`, `-infinity` included, is out of domain and gives the
+/// positive canonical quiet NaN (0x7fc0_0000). The boundary `+0` and `-0` are in
+/// domain and give `-infinity`; `+infinity` gives `+infinity`. A NaN input is
+/// returned with its quiet bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn log10f(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);

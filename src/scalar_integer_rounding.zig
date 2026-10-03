@@ -60,50 +60,149 @@ fn roundTiesAway(comptime T: type, value: T) c23.IntegerResult {
     };
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code; the conversion never traps, and
+/// it neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, and the tie-breaking step stays
+/// inside the `i64` range, so `ok` is false only for a NaN, either infinity, or
+/// a finite magnitude outside that window. The `value` field is then 0 and must
+/// not be read as a converted result. `llrinth` returns the same `i64` width.
 pub fn lrinth(value: f16) c23.IntegerResult {
     return roundNearestEven(f16, value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code; the conversion never traps, and
+/// it neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, and the tie-breaking step stays
+/// inside the `i64` range, so `ok` is false only for a NaN, either infinity, or
+/// a finite magnitude outside that window. The `value` field is then 0 and must
+/// not be read as a converted result. `llrintf` returns the same `i64` width.
 pub fn lrintf(value: f32) c23.IntegerResult {
     return roundNearestEven(f32, value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code; the conversion never traps, and
+/// it neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, and the tie-breaking step stays
+/// inside the `i64` range, so `ok` is false only for a NaN, either infinity, or
+/// a finite magnitude outside that window. The `value` field is then 0 and must
+/// not be read as a converted result. `llrintd` returns the same `i64` width.
 pub fn lrintd(value: f64) c23.IntegerResult {
     return roundNearestEven(f64, value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code; the conversion never traps, and
+/// it neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, and the tie-breaking step stays
+/// inside the `i64` range, so `ok` is false only for a NaN, either infinity, or
+/// a finite magnitude outside that window. The `value` field is then 0 and must
+/// not be read as a converted result. The `ll` prefix names the C23 spelling
+/// only; `lrinth` returns the same `i64` width.
 pub fn llrinth(value: f16) c23.IntegerResult {
     return roundNearestEven(f16, value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code; the conversion never traps, and
+/// it neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, and the tie-breaking step stays
+/// inside the `i64` range, so `ok` is false only for a NaN, either infinity, or
+/// a finite magnitude outside that window. The `value` field is then 0 and must
+/// not be read as a converted result. The `ll` prefix names the C23 spelling
+/// only; `lrintf` returns the same `i64` width.
 pub fn llrintf(value: f32) c23.IntegerResult {
     return roundNearestEven(f32, value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code; the conversion never traps, and
+/// it neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, and the tie-breaking step stays
+/// inside the `i64` range, so `ok` is false only for a NaN, either infinity, or
+/// a finite magnitude outside that window. The `value` field is then 0 and must
+/// not be read as a converted result. The `ll` prefix names the C23 spelling
+/// only; `lrintd` returns the same `i64` width.
 pub fn llrintd(value: f64) c23.IntegerResult {
     return roundNearestEven(f64, value);
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code; the conversion never traps, and it
+/// neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, so `ok` is false only for a
+/// NaN, either infinity, or a finite magnitude outside that window. The `value`
+/// field is then 0 and must not be read as a converted result. `llroundh`
+/// returns the same `i64` width.
 pub fn lroundh(value: f16) c23.IntegerResult {
     return roundTiesAway(f16, value);
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code; the conversion never traps, and it
+/// neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, so `ok` is false only for a
+/// NaN, either infinity, or a finite magnitude outside that window. The `value`
+/// field is then 0 and must not be read as a converted result. `llroundf`
+/// returns the same `i64` width.
 pub fn lroundf(value: f32) c23.IntegerResult {
     return roundTiesAway(f32, value);
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code; the conversion never traps, and it
+/// neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, so `ok` is false only for a
+/// NaN, either infinity, or a finite magnitude outside that window. The `value`
+/// field is then 0 and must not be read as a converted result. `llroundd`
+/// returns the same `i64` width.
 pub fn lroundd(value: f64) c23.IntegerResult {
     return roundTiesAway(f64, value);
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code; the conversion never traps, and it
+/// neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, so `ok` is false only for a
+/// NaN, either infinity, or a finite magnitude outside that window. The `value`
+/// field is then 0 and must not be read as a converted result. `llroundh`
+/// returns the same `i64` width.
 pub fn llroundh(value: f16) c23.IntegerResult {
     return roundTiesAway(f16, value);
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code; the conversion never traps, and it
+/// neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, so `ok` is false only for a
+/// NaN, either infinity, or a finite magnitude outside that window. The `value`
+/// field is then 0 and must not be read as a converted result. The `ll` prefix
+/// names the C23 spelling only; `lroundf` returns the same `i64` width.
 pub fn llroundf(value: f32) c23.IntegerResult {
     return roundTiesAway(f32, value);
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code; the conversion never traps, and it
+/// neither reads nor changes the floating-point environment.
+///
+/// Every input in `[-0x1p63, 0x1p63)` converts, so `ok` is false only for a
+/// NaN, either infinity, or a finite magnitude outside that window. The `value`
+/// field is then 0 and must not be read as a converted result. The `ll` prefix
+/// names the C23 spelling only; `lroundd` returns the same `i64` width.
 pub fn llroundd(value: f64) c23.IntegerResult {
     return roundTiesAway(f64, value);
 }

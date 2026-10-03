@@ -100,6 +100,16 @@ const log_table = [129]f64{
     0x1.62e42fefa39efp-1,
 };
 
+/// Inverse hyperbolic sine of a `binary32` value, `asinh(value)`, defined on
+/// the whole real line.
+///
+/// An infinity is returned unchanged, and a NaN input is returned with its
+/// quiet bit set, its sign and payload kept. Magnitudes up to 0.000422864, and
+/// either signed zero, are returned unchanged; the result carries the sign of
+/// `value`.
+///
+/// The returned float is the whole result: no error code, floating-point
+/// exception flag, or retained status reports anything else.
 pub fn asinhf(value: f32) f32 {
     @setFloatMode(.strict);
     const input_bits: u32 = @bitCast(value);

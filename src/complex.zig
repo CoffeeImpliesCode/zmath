@@ -47,15 +47,57 @@
 //! | `asinhf` `asinhd` | `Complex` | imaginary axis outside `[-i, +i]` | real signed by `z.re`, imaginary in `[-pi/2, +pi/2]` | `z = 0` gives `(0, 0)` | canonical in both parts | canonical in both parts | none | none | none |
 //! | `acoshf` `acoshd` | `Complex` | real axis below `+1` | real in `[+0, +inf)`, imaginary in `[0, +pi]` | `z = 1` gives `(+0, +0)` | canonical in both parts | canonical in both parts | none | none | none |
 //! | `atanhf` `atanhd` | `Complex` | real axis outside `[-1, +1]` | real in `(-1, +1)`, imaginary in `(-pi/2, +pi/2]` | `z = 0` gives `(0, 0)` | canonical in both parts | canonical in both parts | `z = 1` gives `(+inf, +0)` and `z = -1` gives `(-inf, +0)` | none | none |
+//!
+//! Nothing here allocates and nothing is retained, so there is nothing for a
+//! caller to release: every answer is a value the caller owns, and a copy of
+//! one is independent.
+//!
+//! ## A shortest use
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn polarOnce() void {
+//!     const z = zmath.complex.Complexd{ .re = 3, .im = 4 };
+//!     // The magnitude and the argument come from the accepted hypot and atan2
+//!     // kernels rather than from a square root and a division.
+//!     std.debug.assert(zmath.complex.absd(z) == 5);
+//!     std.debug.assert(
+//!         @abs(zmath.complex.argd(z) - std.math.atan(@as(f64, 4.0 / 3.0))) < 1e-15,
+//!     );
+//!
+//!     // exp(z.re) * (cos z.im + i sin z.im), so exp(i pi) is minus one.
+//!     const e = zmath.complex.expd(.{ .re = 0, .im = std.math.pi });
+//!     std.debug.assert(@abs(e.re + 1) < 1e-15 and @abs(e.im) < 1e-15);
+//!
+//!     // A pole is a value, not a failure: the nonzero numerator over a zero
+//!     // divisor has an infinite real part and an undefined direction.
+//!     const pole = zmath.complex.divd(z, .{ .re = 0, .im = 0 });
+//!     std.debug.assert(std.math.isInf(pole.re) and std.math.isNan(pole.im));
+//! }
+//! ```
 
 const ieee = @import("ieee.zig");
 const scalar = @import("scalar.zig");
 const scalar_div = @import("scalar_div.zig");
 
-/// A complex value in binary32.
+/// A complex value in binary32: `re` is the real component and `im` the
+/// imaginary one.
+///
+/// Both fields are public and writable, every bit pattern is a valid value of
+/// either, and a copy is independent. Nothing constrains the value, so a caller
+/// that stores a NaN or an infinity owns what the operation table in this
+/// module then does with it.
 pub const Complexf = struct { re: f32, im: f32 };
 
-/// A complex value in binary64.
+/// A complex value in binary64: `re` is the real component and `im` the
+/// imaginary one.
+///
+/// Both fields are public and writable, every bit pattern is a valid value of
+/// either, and a copy is independent. Nothing constrains the value, so a caller
+/// that stores a NaN or an infinity owns what the operation table in this
+/// module then does with it.
 pub const Complexd = struct { re: f64, im: f64 };
 
 // ---------------------------------------------------------------------------

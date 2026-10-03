@@ -245,72 +245,132 @@ fn compoundnCore(
 }
 
 /// Computes C23 pown for binary16 values.
+/// Requires round-to-nearest, ties-to-even. Exponents outside [-64, 64]
+/// return `.ok = false` with canonical NaN; all in-range cases set `.ok = true`,
+/// including overflow, underflow, and quieted NaNs. Exponent zero returns one
+/// except for a signaling-NaN base. Negative results require an odd exponent;
+/// a negative exponent takes the reciprocal, including signed zero poles.
 pub fn pownh(base: f16, exponent: i64) c23.PowerResult(f16) {
     @setFloatMode(.strict);
     return pownCore(common.H, base, exponent);
 }
 
 /// Computes C23 pown for binary32 values.
+/// Requires round-to-nearest, ties-to-even. Exponents outside [-64, 64]
+/// return `.ok = false` with canonical NaN; all in-range cases set `.ok = true`,
+/// including overflow, underflow, and quieted NaNs. Exponent zero returns one
+/// except for a signaling-NaN base. Negative results require an odd exponent;
+/// a negative exponent takes the reciprocal, including signed zero poles.
 pub fn pownf(base: f32, exponent: i64) c23.PowerResult(f32) {
     @setFloatMode(.strict);
     return pownCore(common.F, base, exponent);
 }
 
 /// Computes C23 pown for binary64 values.
+/// Requires round-to-nearest, ties-to-even. Exponents outside [-64, 64]
+/// return `.ok = false` with canonical NaN; all in-range cases set `.ok = true`,
+/// including overflow, underflow, and quieted NaNs. Exponent zero returns one
+/// except for a signaling-NaN base. Negative results require an odd exponent;
+/// a negative exponent takes the reciprocal, including signed zero poles.
 pub fn pownd(base: f64, exponent: i64) c23.PowerResult(f64) {
     @setFloatMode(.strict);
     return pownCore(common.D, base, exponent);
 }
 
 /// Computes C23 powr for binary16 values.
+/// Requires round-to-nearest, ties-to-even. Negative bases, zero to zero,
+/// one to an infinite exponent, and infinity to zero produce canonical NaN.
+/// These domain cases precede NaN propagation; other NaNs are quieted, with
+/// the base taking precedence. Negative zero is treated as positive zero.
 pub fn powrh(base: f16, exponent: f16) f16 {
     @setFloatMode(.strict);
     return powrCore(common.H, base, exponent);
 }
 
 /// Computes C23 powr for binary32 values.
+/// Requires round-to-nearest, ties-to-even. Negative bases, zero to zero,
+/// one to an infinite exponent, and infinity to zero produce canonical NaN.
+/// These domain cases precede NaN propagation; other NaNs are quieted, with
+/// the base taking precedence. Negative zero is treated as positive zero.
 pub fn powrf(base: f32, exponent: f32) f32 {
     @setFloatMode(.strict);
     return powrCore(common.F, base, exponent);
 }
 
 /// Computes C23 powr for binary64 values.
+/// Requires round-to-nearest, ties-to-even. Negative bases, zero to zero,
+/// one to an infinite exponent, and infinity to zero produce canonical NaN.
+/// These domain cases precede NaN propagation; other NaNs are quieted, with
+/// the base taking precedence. Negative zero is treated as positive zero.
 pub fn powrd(base: f64, exponent: f64) f64 {
     @setFloatMode(.strict);
     return powrCore(common.D, base, exponent);
 }
 
 /// Computes C23 compoundn, (1 + x)^n, for binary16 values.
+/// Requires round-to-nearest, ties-to-even. Exponents outside [-64, 64]
+/// return `.ok = false` with canonical NaN. In-range domain failures (`value < -1`)
+/// return canonical NaN with `.ok = true`; quieted NaNs and infinities also
+/// keep `.ok = true`. Exponent zero returns one for `value >= -1` and quiet NaN,
+/// but a signaling NaN is quieted first. At -1, negative exponents yield +infinity.
 pub fn compoundnh(value: f16, exponent: i64) c23.PowerResult(f16) {
     @setFloatMode(.strict);
     return compoundnCore(common.H, value, exponent);
 }
 
 /// Computes C23 compoundn, (1 + x)^n, for binary32 values.
+/// Requires round-to-nearest, ties-to-even. Exponents outside [-64, 64]
+/// return `.ok = false` with canonical NaN. In-range domain failures (`value < -1`)
+/// return canonical NaN with `.ok = true`; quieted NaNs and infinities also
+/// keep `.ok = true`. Exponent zero returns one for `value >= -1` and quiet NaN,
+/// but a signaling NaN is quieted first. At -1, negative exponents yield +infinity.
 pub fn compoundnf(value: f32, exponent: i64) c23.PowerResult(f32) {
     @setFloatMode(.strict);
     return compoundnCore(common.F, value, exponent);
 }
 
 /// Computes C23 compoundn, (1 + x)^n, for binary64 values.
+/// Requires round-to-nearest, ties-to-even. Exponents outside [-64, 64]
+/// return `.ok = false` with canonical NaN. In-range domain failures (`value < -1`)
+/// return canonical NaN with `.ok = true`; quieted NaNs and infinities also
+/// keep `.ok = true`. Exponent zero returns one for `value >= -1` and quiet NaN,
+/// but a signaling NaN is quieted first. At -1, negative exponents yield +infinity.
 pub fn compoundnd(value: f64, exponent: i64) c23.PowerResult(f64) {
     @setFloatMode(.strict);
     return compoundnCore(common.D, value, exponent);
 }
 
 /// Computes C23 rootn for binary16 values.
+/// Requires round-to-nearest, ties-to-even. Degrees outside [-64, 64] return
+/// `.ok = false` with canonical NaN. Degree zero and a negative nonzero value
+/// with an even degree produce canonical NaN with `.ok = true`; propagated
+/// quieted NaNs, overflow, and underflow also keep `.ok = true`.
+/// A negative degree takes the reciprocal; signed zero keeps its sign only
+/// for an odd degree.
 pub fn rootnh(value: f16, exponent: i64) c23.PowerResult(f16) {
     @setFloatMode(.strict);
     return rootnCore(common.H, value, exponent);
 }
 
 /// Computes C23 rootn for binary32 values.
+/// Requires round-to-nearest, ties-to-even. Degrees outside [-64, 64] return
+/// `.ok = false` with canonical NaN. Degree zero and a negative nonzero value
+/// with an even degree produce canonical NaN with `.ok = true`; propagated
+/// quieted NaNs, overflow, and underflow also keep `.ok = true`.
+/// A negative degree takes the reciprocal; signed zero keeps its sign only
+/// for an odd degree.
 pub fn rootnf(value: f32, exponent: i64) c23.PowerResult(f32) {
     @setFloatMode(.strict);
     return rootnCore(common.F, value, exponent);
 }
 
 /// Computes C23 rootn for binary64 values.
+/// Requires round-to-nearest, ties-to-even. Degrees outside [-64, 64] return
+/// `.ok = false` with canonical NaN. Degree zero and a negative nonzero value
+/// with an even degree produce canonical NaN with `.ok = true`; propagated
+/// quieted NaNs, overflow, and underflow also keep `.ok = true`.
+/// A negative degree takes the reciprocal; signed zero keeps its sign only
+/// for an odd degree.
 pub fn rootnd(value: f64, exponent: i64) c23.PowerResult(f64) {
     @setFloatMode(.strict);
     return rootnCore(common.D, value, exponent);

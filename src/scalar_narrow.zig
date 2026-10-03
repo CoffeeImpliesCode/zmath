@@ -1,3 +1,37 @@
+//! Narrowing operations: the exact source-format result, rounded once to the
+//! destination format.
+//!
+//! Every kernel below forms the exact mathematical result over the source
+//! operands and rounds it once, round-to-nearest ties-to-even, to the
+//! destination format. None of them is a source-format operation followed by a
+//! narrowing conversion: `fadd(1 + 2^-25, -1)` is `2^-25`, where a binary32 add
+//! of the two narrowed operands is `+0`. The fused forms round the whole of
+//! `x * y + z` once, exactly as the two-operand forms round their single
+//! expression.
+//!
+//! The result is a bare float and the only channel. Nothing is reported
+//! through `errno`, through a floating-point exception flag, or through any
+//! retained status, and no kernel reads or changes the process floating-point
+//! environment: the rounding direction is fixed here, not selected by the
+//! ambient mode.
+//!
+//! A NaN operand is converted to the destination width, keeping its sign and
+//! the top payload bits that fit in the destination and setting the quiet bit,
+//! so a signaling NaN is quieted rather than discarded. When more than one
+//! operand is NaN, the leftmost one is the one converted.
+//!
+//! An operation that is invalid for the destination gives the positive
+//! canonical quiet NaN of that format, `0x7e00` for binary16 and `0x7fc00000`
+//! for binary32, and each declaration below names the input shape that is
+//! invalid for its own operation. A result that rounds above the largest
+//! finite destination value is an infinity of the same sign instead. No square
+//! root does that, and a square root is never negative.
+//!
+//! An exact zero result takes the IEC sign. A sum that cancels is `+0` unless
+//! both addends carry the same sign, which keeps it, and in a subtraction the
+//! second addend is `-y`. A product and a quotient take the sign of the
+//! product, a fused multiply-add keeps a sign only when the product and the
+//! addend share it, and a square root of a signed zero keeps the input sign.
 const common = @import("scalar_narrow_common.zig");
 
 fn firstNaN2(
@@ -171,6 +205,9 @@ fn sourceBits(comptime source: common.Format, value: anytype) u64 {
     return common.toBits(source, value);
 }
 
+/// The binary64 sum of `x` and `y`, rounded once to binary32 rather than
+/// computed on the two narrowed operands. Opposite-signed infinities are the
+/// invalid case.
 pub fn fadd(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -184,6 +221,9 @@ pub fn fadd(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 difference of `x` and `y`, rounded once to binary32 rather
+/// than computed on the two narrowed operands. An infinity minus itself is
+/// the invalid case.
 pub fn fsub(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -197,6 +237,9 @@ pub fn fsub(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 product of `x` and `y`, rounded once to binary32 rather than
+/// computed on the two narrowed operands. An infinite operand together with a
+/// zero operand is the invalid case.
 pub fn fmul(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -209,6 +252,9 @@ pub fn fmul(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 quotient of `x` by `y`, rounded once to binary32 rather than
+/// computed on the two narrowed operands. `0/0` and `inf/inf` are the invalid
+/// cases.
 pub fn fdiv(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -221,6 +267,10 @@ pub fn fdiv(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 value of `x * y + z`, rounded once to binary32 over the whole
+/// expression, so the product is not rounded before the addend joins it. An
+/// infinite operand together with a zero operand, or an infinite product
+/// opposed in sign by an infinite addend, is the invalid case.
 pub fn ffma(x: f64, y: f64, z: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -234,6 +284,9 @@ pub fn ffma(x: f64, y: f64, z: f64) f32 {
     ));
 }
 
+/// The binary64 square root of `x`, rounded once to binary32 rather than taken
+/// of a binary32 rounding of `x`. A negative `x` is the invalid case, and a
+/// negative zero is not.
 pub fn fsqrt(x: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -241,6 +294,8 @@ pub fn fsqrt(x: f64) f32 {
     ));
 }
 
+/// The binary32 sum of `x` and `y`, rounded once to binary16. Opposite-signed
+/// infinities are the invalid case.
 pub fn f16addf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -254,6 +309,8 @@ pub fn f16addf32(x: f32, y: f32) f16 {
     ));
 }
 
+/// The binary32 difference of `x` and `y`, rounded once to binary16. An
+/// infinity minus itself is the invalid case.
 pub fn f16subf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -267,6 +324,8 @@ pub fn f16subf32(x: f32, y: f32) f16 {
     ));
 }
 
+/// The binary32 product of `x` and `y`, rounded once to binary16. An infinite
+/// operand together with a zero operand is the invalid case.
 pub fn f16mulf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -279,6 +338,8 @@ pub fn f16mulf32(x: f32, y: f32) f16 {
     ));
 }
 
+/// The binary32 quotient of `x` by `y`, rounded once to binary16. `0/0` and
+/// `inf/inf` are the invalid cases.
 pub fn f16divf32(x: f32, y: f32) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -291,6 +352,10 @@ pub fn f16divf32(x: f32, y: f32) f16 {
     ));
 }
 
+/// The binary32 value of `x * y + z`, rounded once to binary16 over the whole
+/// expression, so the product is not rounded before the addend joins it. An
+/// infinite operand together with a zero operand, or an infinite product
+/// opposed in sign by an infinite addend, is the invalid case.
 pub fn f16fmaf32(x: f32, y: f32, z: f32) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -304,6 +369,8 @@ pub fn f16fmaf32(x: f32, y: f32, z: f32) f16 {
     ));
 }
 
+/// The binary32 square root of `x`, rounded once to binary16. A negative `x`
+/// is the invalid case, and a negative zero is not.
 pub fn f16sqrtf32(x: f32) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -311,6 +378,8 @@ pub fn f16sqrtf32(x: f32) f16 {
     ));
 }
 
+/// The binary64 sum of `x` and `y`, rounded once to binary16. Opposite-signed
+/// infinities are the invalid case.
 pub fn f16addf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -324,6 +393,8 @@ pub fn f16addf64(x: f64, y: f64) f16 {
     ));
 }
 
+/// The binary64 difference of `x` and `y`, rounded once to binary16. An
+/// infinity minus itself is the invalid case.
 pub fn f16subf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -337,6 +408,8 @@ pub fn f16subf64(x: f64, y: f64) f16 {
     ));
 }
 
+/// The binary64 product of `x` and `y`, rounded once to binary16. An infinite
+/// operand together with a zero operand is the invalid case.
 pub fn f16mulf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -349,6 +422,8 @@ pub fn f16mulf64(x: f64, y: f64) f16 {
     ));
 }
 
+/// The binary64 quotient of `x` by `y`, rounded once to binary16. `0/0` and
+/// `inf/inf` are the invalid cases.
 pub fn f16divf64(x: f64, y: f64) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -361,6 +436,10 @@ pub fn f16divf64(x: f64, y: f64) f16 {
     ));
 }
 
+/// The binary64 value of `x * y + z`, rounded once to binary16 over the whole
+/// expression, so the product is not rounded before the addend joins it. An
+/// infinite operand together with a zero operand, or an infinite product
+/// opposed in sign by an infinite addend, is the invalid case.
 pub fn f16fmaf64(x: f64, y: f64, z: f64) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -374,6 +453,8 @@ pub fn f16fmaf64(x: f64, y: f64, z: f64) f16 {
     ));
 }
 
+/// The binary64 square root of `x`, rounded once to binary16. A negative `x`
+/// is the invalid case, and a negative zero is not.
 pub fn f16sqrtf64(x: f64) f16 {
     return @bitCast(common.fromBits(
         common.binary16_format,
@@ -381,6 +462,8 @@ pub fn f16sqrtf64(x: f64) f16 {
     ));
 }
 
+/// The binary64 sum of `x` and `y`, rounded once to binary32. Opposite-signed
+/// infinities are the invalid case.
 pub fn f32addf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -394,6 +477,8 @@ pub fn f32addf64(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 difference of `x` and `y`, rounded once to binary32. An
+/// infinity minus itself is the invalid case.
 pub fn f32subf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -407,6 +492,8 @@ pub fn f32subf64(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 product of `x` and `y`, rounded once to binary32. An infinite
+/// operand together with a zero operand is the invalid case.
 pub fn f32mulf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -419,6 +506,8 @@ pub fn f32mulf64(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 quotient of `x` by `y`, rounded once to binary32. `0/0` and
+/// `inf/inf` are the invalid cases.
 pub fn f32divf64(x: f64, y: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -431,6 +520,10 @@ pub fn f32divf64(x: f64, y: f64) f32 {
     ));
 }
 
+/// The binary64 value of `x * y + z`, rounded once to binary32 over the whole
+/// expression, so the product is not rounded before the addend joins it. An
+/// infinite operand together with a zero operand, or an infinite product
+/// opposed in sign by an infinite addend, is the invalid case.
 pub fn f32fmaf64(x: f64, y: f64, z: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,
@@ -444,6 +537,8 @@ pub fn f32fmaf64(x: f64, y: f64, z: f64) f32 {
     ));
 }
 
+/// The binary64 square root of `x`, rounded once to binary32. A negative `x`
+/// is the invalid case, and a negative zero is not.
 pub fn f32sqrtf64(x: f64) f32 {
     return @bitCast(common.fromBits(
         common.binary32_format,

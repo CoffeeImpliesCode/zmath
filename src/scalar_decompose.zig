@@ -214,31 +214,43 @@ pub fn modfd(value: f64) c23.ModfResult(f64) {
 }
 
 /// Returns the binary exponent of a binary16 value as an i32.
+///
+/// Either zero returns `minInt(i32)`. Infinity or NaN returns `maxInt(i32)`.
 pub fn ilogbh(value: f16) i32 {
     return integerLogb(H, i32, value);
 }
 
 /// Returns the binary exponent of a binary32 value as an i32.
+///
+/// Either zero returns `minInt(i32)`. Infinity or NaN returns `maxInt(i32)`.
 pub fn ilogbf(value: f32) i32 {
     return integerLogb(F, i32, value);
 }
 
 /// Returns the binary exponent of a binary64 value as an i32.
+///
+/// Either zero returns `minInt(i32)`. Infinity or NaN returns `maxInt(i32)`.
 pub fn ilogbd(value: f64) i32 {
     return integerLogb(D, i32, value);
 }
 
 /// Returns the binary exponent of a binary16 value as an i64.
+///
+/// Either zero returns `minInt(i64)`. Infinity or NaN returns `maxInt(i64)`.
 pub fn llogbh(value: f16) i64 {
     return integerLogb(H, i64, value);
 }
 
 /// Returns the binary exponent of a binary32 value as an i64.
+///
+/// Either zero returns `minInt(i64)`. Infinity or NaN returns `maxInt(i64)`.
 pub fn llogbf(value: f32) i64 {
     return integerLogb(F, i64, value);
 }
 
 /// Returns the binary exponent of a binary64 value as an i64.
+///
+/// Either zero returns `minInt(i64)`. Infinity or NaN returns `maxInt(i64)`.
 pub fn llogbd(value: f64) i64 {
     return integerLogb(D, i64, value);
 }

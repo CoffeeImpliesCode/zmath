@@ -13,8 +13,8 @@ their shared result types, and the C23 source surface defined in
 417 public entry points covering the elementwise scalar operations, including the result-struct,
 integer-argument, integer-returning, boolean-returning, and narrowing ones. The same module also
 owns the linear-algebra `Vec*` value types from [Vectors and quaternions](#vectors-and-quaternions);
-the two layers share the module path and nothing else, and every `@Vector` entry point ends in `v`
-while no `Vec*` name does.
+the two layers share the module path and nothing else. Portable-vector operations use
+`v` names; operations with per-lane secondary arguments use `vLanes`.
 
 ## Scope
 
@@ -67,6 +67,66 @@ complex + vector + quaternion + matrix -> algebra
 ```
 
 Geometry and algebra do not depend on each other.
+
+## Use as a Zig dependency
+
+The supported consumer route is the `zmath` module from `b.dependency`.
+Use Zig 0.16.0. A local checkout dependency has this manifest member:
+
+```zig
+.dependencies = .{
+    .zmath = .{ .path = "../zmath" },
+},
+```
+
+After creating your executable, add the module in `build.zig`:
+
+```zig
+const dependency = b.dependency("zmath", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zmath", dependency.module("zmath"));
+```
+
+Here, `target` and `optimize` come from the standard build options.
+Import the module as `@import("zmath")` in your source.
+The module carries its private C kernels and their link settings.
+The C headers are implementation files, not a supported standalone C API.
+On x86 and x86-64, the selected CPU must include FMA.
+
+This complete consumer entry point exercises a value result and a checked failure:
+
+```zig
+const std = @import("std");
+const zmath = @import("zmath");
+
+pub fn main() !void {
+    const split = zmath.frexp(@as(f32, 8));
+    std.debug.assert(split.fraction == 0.5 and split.exponent == 4);
+
+    const geometry = zmath.geometry;
+    const largest = try geometry.Vector2f.init(std.math.floatMax(f32), 0);
+    if (largest.add(largest)) |_| {
+        return error.ExpectedOverflow;
+    } else |err| switch (err) {
+        error.NonFiniteResult => {},
+        error.NonFiniteInput => return err,
+    }
+}
+```
+
+Checked geometry returns an error instead of a partial result.
+No cleanup call is needed for these fixed-size values.
+Treat `NonFiniteInput` as invalid supplied coordinates.
+Treat `NonFiniteResult` as an arithmetic range failure. Rescale the problem or use a wider format.
+Other numerical APIs use IEEE values, status fields, or `null` as documented at their owning declarations.
+
+`zig build` installs the demonstration, not a compiled library artifact.
+`zig build docs` generates documentation from the public module.
+Serve the installed `docs` directory through HTTP so the browser can load its WebAssembly and source archive.
+Fetched packages include this contract, `PROJECT.md`, and the scalar corpus contract.
+Local plans, session notes, and development-environment files are not part of that package.
 
 ## Vector API
 
@@ -566,7 +626,7 @@ For a NaN, `value` follows the common same-width NaN policy.
 
 `lgamma` follows the pure-value and caller-RNE profile.
 It returns only `value` and `sign` and exposes no `errno` or floating-point exception status.
-It does not inspect, clear, report, set, or restore floating-point exception flags.
+It does not inspect, clear, report, or restore floating-point exception flags.
 Incidental processor flags remain outside this contract.
 The API has no global `signgam` value and no hidden mutable gamma-sign state.
 
@@ -1151,10 +1211,11 @@ The API has no dynamic matrix, expression template, or tensor type.
 
 The implementation supplies the size-paired forms of the three named operations rather than only
 `Mat3f`, `Mat4d`, and `Mat4f`: `determinantMat2f` through `determinantMat5d`, `inverseMat2f`
-through `inverseMat4d`, and `mulMat4fVec4f` with `mulMat4dVec4d`. The singularity threshold for
-`inverse` is published as `inverse_pivot_threshold_f` and `inverse_pivot_threshold_d`, derived as
-the unit roundoff of the format times the element-growth bound of the reduction, so a caller can
-see and change it rather than discover an implicit epsilon.
+through `inverseMat4d`, and `mulMat4fVec4f` with `mulMat4dVec4d`.
+The fixed relative pivot thresholds are `inverse_pivot_threshold_f = 0x1p-21`
+and `inverse_pivot_threshold_d = 0x1p-50`.
+They derive from unit roundoff and the reduction's element-growth bound.
+Callers can inspect these constants. The API has no per-call threshold option.
 
 `inverse` writes only the cells a later step or the result can still read. The
 reduction holds `[ value | identity ]` in one row-major work array of a comptime
@@ -1196,8 +1257,12 @@ functions: `lu` and `cholesky` produce a factorization, `solveLu` and `solveChol
 `?Vec2f` through `?Vec4d`, `solveLuMultiple` and `solveCholeskyMultiple` carry a right-hand side
 matrix, and `reconstructLu`, `determinantLu`, `reconstructCholesky`, and `determinantCholesky`
 read a factorization back. `lu` and `cholesky` return `null` for a singular, non-positive-definite,
-or non-finite input, as applicable, and a solve returns `null` for a zero or non-finite stored
-pivot.
+or non-finite input, as applicable. A solve returns `null` for a zero or non-finite
+stored pivot. It does not reject non-finite computed entries: finite right-hand sides
+can overflow to a successful result containing infinity or NaN.
+Single right-hand sides must have the matrix's exact `vector_type`.
+Multiple right-hand sides must have the factorization's row count and scalar type.
+The result is a new value. A failure writes no partial result into caller storage.
 
 The implementation extends this to every named size in both precisions: `LuMat2f` through
 `LuMat4d` and `CholeskyMat2f` through `CholeskyMat4d`, twelve factorization types rather than the
@@ -1225,16 +1290,39 @@ Predicates use one explicit policy:
 pub const PredicatePolicy = enum { fast, adaptive_exact };
 ```
 
-`fast` reports the sign of the scalar computation. `adaptive_exact` reports the exact sign for finite f32 or f64 inputs. Predicates do not use an implicit epsilon. Every geometry operation rejects non-finite input with `error.NonFiniteInput`.
+`fast` reports the sign of the rounded scalar polynomial: infinity retains its sign,
+while NaN returns `error.NonFiniteResult`.
+`adaptive_exact` reports the exact polynomial sign for finite `f32` or `f64` inputs.
+It can resolve a sign when `fast` rounds to zero or fails.
+Floating constructions can still fail under either policy.
+Predicates do not use an implicit epsilon.
+Checked geometry rejects non-finite arguments and receiver fields with `error.NonFiniteInput`.
+It rejects non-finite computed results or required construction intermediates with `error.NonFiniteResult`.
+These checks apply in every build mode and return no partial result.
+Infallible queries and conversions (`isFinite`, `eq`, `toArray`) and `Bivector4.neg`
+do not perform checked validation and can inspect or preserve non-finite fields.
+
+Geometry fields are writable. Constructors establish finite coordinates, unit directions or normals,
+nonnegative radii, and ordered bounds where applicable.
+Callers must preserve the geometric invariants after direct field writes.
+Checked calls validate finiteness. They do not re-run every constructor invariant check.
 
 The implementation adds three tags beyond the nine listed above, because the nine do not name
-every result the families can produce. `box` carries an AABB against an AABB, which is an AABB
-and not a point set. `circle` and `hypersphere` carry a flat cutting a ball, which is again a ball
-rather than a finite point set. Applicability still follows the dimension: 2D has no flat, so its
-union has neither `plane` nor `hyperplane` nor `circle`; 3D has no three-flat, so it has no
-`hyperplane`. A coincident pair of INFINITE flats returns the tag naming its own span, because
-"the intersection is this line" is the more useful answer than "coincident"; `coincident` is
-reserved for identical segments, balls, and boxes.
+every result the families can produce. `box` carries the common AABB of two AABBs.
+`circle` and `hypersphere` carry center/radius summaries of a flat's ball cross-section.
+Use the original flat to recover its placement and orientation; these payloads alone
+do not represent an oriented disk or three-dimensional ball in ambient space.
+Applicability follows the dimension. The 2D union has no flat tags.
+The 3D union has no three-flat tag.
+A coincident pair of two-sided infinite flats returns its span tag.
+Identical rays, segments, balls, and boxes return `coincident`.
+A ray's supporting line is not its whole common set.
+`contained` identifies which entire operand is the common set.
+A solid ball intersected by a ray returns its entire closed chord as `segment`,
+including an inside ray's origin; a zero-length chord is `point`.
+Proper ball/ball overlaps retain `two_points` boundary summaries. In 2D these are
+the circumference crossings, not the common solid lens. In 3D and 4D they are
+selected boundary points, not the complete boundary or solid intersection.
 
 `adaptive_exact` is exact integer arithmetic, not an error-bounded approximation with a fast path.
 Every finite `f64` is `m * 2^e` with `|m| < 2^53` and `-1074 <= e <= 971`, so scaling by `2^1074`
@@ -1302,17 +1390,17 @@ nothing, which is the degenerate-metric rule: the `Pga` basis vector `e0` has a
 zero entry on the diagonal, so a `Pga` dot product still ignores it exactly as the
 full product does. `dot` stays symmetric and `norm` stays `dot(self, self)`.
 
-`inverseChecked` reuses the product it has already formed. It computes the sandwich
-conjugate, forms `conjugate_part.geometricProduct(self)` once, scans that product
-for a nonzero coefficient above grade `0`, and then reads its grade-0 part as the
-sandwich scalar instead of building a second product to read the same scalar from.
-The residue scan has to read the whole product anyway, so the grade-0 part is
-already in hand. `conjugate_part.scale(1 / sandwich)` is then the same expression
-`inverse` builds from its own second product, and the refusals are unchanged: a
-non-finite coefficient in `self`, a nonzero coefficient above grade `0` in the
-product, and a zero or non-finite sandwich scalar each return `null`. The
-precondition `inverse` documents is untouched, and `inverseChecked` remains the
-test for it.
+`inverseChecked` uses the even Clifford conjugate, forms its product with `self`,
+and checks that product for a finite, nonzero scalar sandwich. It rejects non-finite
+input and a non-scalar sandwich. This is not a general invertibility test: an
+odd-only blade returns `null`. Final scaled coefficients are not checked and can
+overflow. The unchecked `inverse` requires the same scalar-sandwich precondition.
+
+`evenPart` retains all even grades, including grade 6 where supported.
+`unitRotor`, `unitVersor`, and `unitFlat` normalize candidate values; they do not
+prove rotor membership, versor membership, or blade decomposability. The caller
+must establish those properties. A single grade or an even grade alone is not
+such a proof.
 
 ## Tests and benchmarks
 
@@ -1381,16 +1469,14 @@ The x86/x86-64 `+fma` floor is unchanged.
 The sibling `zmath-testing` project owns integration tests, oracle generation, typed corpus replay, and benchmarks.
 It is the acceptance authority and is colocated as `../zmath-testing`.
 Run the following commands there, not in this repository.
-The current publication has 347 descriptors and 72,035,642 records.
-See [PLAN.md](PLAN.md) for measured evidence and remaining scope.
+Obtain `zmath-testing` separately before running those commands.
+Its schema-5 manifest records the accepted publication and remaining numerical scope.
 
-That authority covers the scalar manifest. Evidence gathered for the implemented
-consumer surfaces is a separate thing and carries none of it. The optimization
-round that reworked those surfaces is gated by paired reference comparison over
-bounded named inputs rather than by a publication, and its gate is bounded
-globally at 4096 evaluations per canonical f32 operation counted across every lane,
-consumer, repetition, and reference together, not once per policy and not once per
-fixture. Bounded consumer evidence is not a publication under
+The scalar manifest remains the acceptance authority. The previous consumer
+optimization round used a separate paired-reference gate over bounded named
+inputs. Its limit was 4096 evaluations per canonical f32 operation across all
+lanes, consumers, repetitions, and reference runs. Bounded consumer evidence is
+not a publication under
 [Typed scalar corpus manifest](#typed-scalar-corpus-manifest): it changes no
 descriptor row, status, oracle, ULP bound, or stored record, it is not a campaign
 the corpus loader accepts, and it establishes neither corpus coverage nor
@@ -1399,6 +1485,42 @@ that a reworked path reproduced the reference it was compared against over the
 inputs it was compared on, and it says nothing about the rest of an
 operation-format domain. The bound is what makes the round checkable without a
 publication, and it relaxes no threshold stated elsewhere in this document.
+
+The [API-surface performance round](../zmath-testing/docs/reference-performance-analysis.md#api-surface-round-2026-10-03)
+uses the separate `bench-api-round` tool in `zmath-testing`. It publishes 7428
+named cases across all ten namespaces. Portable lanes cover widths 2, 4, and 8.
+Compile-time queries and identical canonical routes have explicit inventory entries.
+This is bounded API coverage, not whole-domain numerical acceptance.
+
+Build both source versions with the same harness, compiler, target, CPU, and mode:
+
+```sh
+source "$HOME/.local/lib/host-scratch.sh"
+export PERF_BUILDID_DIR="$XDG_CACHE_HOME/perf"
+zig build bench-api-round -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe \
+  --cache-dir "$ZIG_LOCAL_CACHE_DIR" --prefix "$TMPDIR/zmath-api"
+```
+
+The executable is `bin/zmath-api-round` under that prefix. Run paired measurements
+through `bench/run_api_round.py`, not an unaccounted direct numerical invocation:
+
+```sh
+python3 bench/run_api_round.py \
+  --baseline-exe "$BASELINE_EXE" --candidate-exe "$CANDIDATE_EXE" \
+  --out-dir "$TMPDIR/api-round-new" --ledger "$TMPDIR/api-round-global-ledger.jsonl" \
+  --calls 4 --pairs 1 --cpu 0 --plan-only
+```
+
+Select an allowed CPU. Use a new output directory for each measured attempt.
+Remove `--plan-only` only after the plan fits the shared ledger.
+The plan runs zero-math listings. It launches no measurement or profiler.
+The measurement limit is 1,048,576 evaluations per canonical accepted f32 kernel.
+Every measured lane, alias, consumer, reference run, profile, and failed attempt shares it.
+Correctness tests and untimed consumer smoke checks are separate from this ledger.
+This campaign limit changes no manifest threshold or numerical contract.
+Use repeatable `--bundle` and `--case` filters for focused cohorts.
+The SDK-independent benchmark, unit-test, and documentation steps need no comparison
+SDK. The separate `compare` step still requires its declared environment.
 
 The scalar tools use only target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe` for manifest-qualified evidence.
 These build steps install the typed tools:

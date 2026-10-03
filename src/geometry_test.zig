@@ -31,11 +31,8 @@ fn expectPoint(actual: anytype, expected: @TypeOf(actual)) !void {
     try std.testing.expect(actual.eq(expected));
 }
 
-/// The two points of a `two_points` intersection, against an expected PAIR in
-/// EITHER order. The common set is the chord, and which end the construction
-/// reaches first is no part of any contract, so a test that pinned the order
-/// would be pinning an accident. A tolerance of zero is an exact comparison
-/// of the pair, whatever order the two points arrive in.
+/// Compares a `two_points` boundary summary in either endpoint order.
+/// A zero tolerance compares the pair exactly, without prescribing its order.
 fn expectCrossingPair(result: anytype, first: anytype, second: anytype, tolerance: anytype) !void {
     if (std.meta.activeTag(result) != .two_points) {
         std.debug.print("expected two_points, got {any}\n", .{std.meta.activeTag(result)});
@@ -369,14 +366,17 @@ test "a NaN in any argument is NonFiniteInput" {
 // Length, clamps, and projections
 // ---------------------------------------------------------------------------
 
-test "length cannot overflow while the components cannot and cannot flush a subnormal" {
+test "the folded length survives what the squared length cannot, and says so" {
     // `sqrt(x*x + y*y + z*z)` overflows here, because 1e30 squared is past the
     // binary32 range. The folded `hypot` cannot, because it never forms the
     // square.
     const large = try g.Vector3f.init(1.0e30, 1.0e30, 1.0e30);
     try std.testing.expect(std.math.isFinite(try large.length()));
     try expectSign(f32, try large.length(), 1.7320508e30, 1.0e24);
-    try std.testing.expect(std.math.isInf(try large.lengthSquared()));
+    // The squared length is the one that leaves the format, and it says so
+    // rather than handing back an infinity the caller would then normalize
+    // into a zero direction.
+    try std.testing.expectError(error.NonFiniteResult, large.lengthSquared());
 
     const large64 = try g.Vector4d.init(1.0e150, 1.0e150, 1.0e150, 1.0e150);
     try std.testing.expect(std.math.isFinite(try large64.length()));
@@ -915,16 +915,17 @@ test "a ball against a segment is none, a point, a segment, or the whole segment
     try expectSign(f32, flat_through.segment.b.x, 1.0, 1e-6);
 }
 
-test "a ball against a ray is none, one point, or two points" {
+test "a ball against a ray is none, a point, or a closed segment" {
     const policy = g.PredicatePolicy.adaptive_exact;
     const unit = try g.Sphere3d.init(try g.Point3d.init(0, 0, 0), 1.0);
 
-    // A ray straight through the centre: two common points.
+    // A ray straight through the centre shares the whole closed chord.
     const through = try g.Ray3d.init(try g.Point3d.init(-5, 0, 0), try g.Vector3d.init(1, 0, 0));
     const both = try unit.intersectRay(through, policy);
-    try expectTag(g.Intersection3d, both, .two_points);
-    try expectSign(f64, both.two_points[0].x, -1.0, 1e-12);
-    try expectSign(f64, both.two_points[1].x, 1.0, 1e-12);
+    try expectTag(g.Intersection3d, both, .segment);
+    try expectSign(f64, both.segment.a.x, -1.0, 1e-12);
+    try expectSign(f64, both.segment.b.x, 1.0, 1e-12);
+    try expectPoint(try both.segment.at(0.5), try g.Point3d.init(0, 0, 0));
 
     // A ray that starts inside and leaves. The common set is the whole run
     // from the origin to the exit, so it is a SEGMENT and not the exit
@@ -1939,7 +1940,7 @@ test "CONSTRUCTED: a ray misses a ball whose offset difference rounded onto it" 
     try std.testing.expectEqual(@as(f64, 9007199254740992.0), 18014398509481984.0 - 9007199254740991.0);
 
     try expectTag(g.Intersection3d, try ball.intersectRay(ray, .adaptive_exact), .none);
-    try expectTag(g.Intersection3d, try ball.intersectRay(ray, .fast), .two_points);
+    try expectTag(g.Intersection3d, try ball.intersectRay(ray, .fast), .segment);
 }
 
 test "CONSTRUCTED: two parallel hyperplanes a rounded difference called one flat" {
@@ -1957,8 +1958,10 @@ test "CONSTRUCTED: two parallel hyperplanes a rounded difference called one flat
     // so the second origin is strictly off the first flat, the two hyperplanes
     // are DISTINCT, and the common set is empty. Each of the first two
     // differences is past the binary64 range, so the plain evaluation forms
-    // two infinities of OPPOSITE sign; their sum is not a real number, and a
-    // distance with no sign reads as a point on the flat.
+    // two infinities of OPPOSITE sign; their sum is not a real number at all.
+    // That sum is the case `fast` cannot answer: a NaN has no sign, and
+    // reporting `zero` for it would claim the origin lies exactly on the
+    // flat. The call therefore fails rather than naming the whole flat.
     const max = std.math.floatMax(f64);
     const flat = try g.Hyperplane4d.init(try g.Point4d.init(-max, -max, 0, 0), try g.Vector4d.init(1, -1, 1, -1));
     const shifted = try g.Hyperplane4d.init(try g.Point4d.init(max, max, 0, 1), try g.Vector4d.init(1, -1, 1, -1));
@@ -1974,8 +1977,12 @@ test "CONSTRUCTED: two parallel hyperplanes a rounded difference called one flat
     // And the difference the plain evaluation forms for each coordinate.
     try std.testing.expect(std.math.isInf(max - -max));
 
+    // The exact policy forms no floating-point difference here, so it answers
+    // with a real sign and the geometry comes out right.
     try expectTag(g.Intersection4d, try flat.intersect(shifted, .adaptive_exact), .none);
-    try expectTag(g.Intersection4d, try flat.intersect(shifted, .fast), .hyperplane);
+    // The plain policy says it cannot answer, and it says which reason: the
+    // arithmetic left the format rather than the caller's input being bad.
+    try std.testing.expectError(error.NonFiniteResult, flat.intersect(shifted, .fast));
 }
 
 test "the coplanarity gate a policy drives is the one the higher dimensions use" {
@@ -2061,4 +2068,1425 @@ test "eq normalizes NaN and keeps the zeros apart" {
     try std.testing.expect(!quiet.isFinite());
     try std.testing.expect((try g.Point4f.init(0, 0, 0, 0)).eq(try g.Point4f.init(0, 0, 0, 0)));
     try std.testing.expect((try g.Segment2f.init(try g.Point2f.init(0, 0), try g.Point2f.init(1, 1))).isFinite());
+}
+
+// Checked geometry must reject non-finite arithmetic, not return a value that
+// violates the next operation's input contract.
+test "API alignment: finite arithmetic reports NonFiniteResult" {
+    inline for (.{
+        .{ g.Vector2f, g.Point2f, f32 },
+        .{ g.Vector2d, g.Point2d, f64 },
+    }) |Case| {
+        const V = Case[0];
+        const P = Case[1];
+        const T = Case[2];
+        const largest = std.math.floatMax(T);
+        const value = try V.init(largest, 0);
+        try std.testing.expectError(error.NonFiniteResult, value.add(value));
+        try std.testing.expectError(error.NonFiniteResult, value.scale(2));
+        try std.testing.expectError(error.NonFiniteResult, value.dot(value));
+        try std.testing.expectError(error.NonFiniteResult, value.lengthSquared());
+        try std.testing.expectError(
+            error.NonFiniteResult,
+            value.distance(try P.init(-largest, 0)),
+        );
+        const ordinary = try (try V.init(3, 4)).add(try V.init(1, -1));
+        try std.testing.expectEqual(@as(T, 4), ordinary.x);
+        try std.testing.expectEqual(@as(T, 3), ordinary.y);
+    }
+}
+
+// A receiver is input too. Public fields can change after construction, and
+// checked methods must reject the whole value before predicates consume it.
+test "API alignment: composite receivers reject non-finite fields" {
+    const origin = try g.Point2f.init(0, 0);
+    var circle = try g.Circle2f.init(origin, 1);
+    circle.radius = inf32();
+    const other = try g.Circle2f.init(try g.Point2f.init(5, 0), 1);
+    for ([_]g.PredicatePolicy{ .fast, .adaptive_exact }) |policy| {
+        try std.testing.expectError(error.NonFiniteInput, circle.intersect(other, policy));
+        try std.testing.expectError(error.NonFiniteInput, circle.contains(origin, policy));
+    }
+    var plane = try g.Plane3f.init(
+        try g.Point3f.init(0, 0, 0),
+        try g.Vector3f.init(0, 0, 1),
+    );
+    plane.normal.z = inf32();
+    try std.testing.expectError(
+        error.NonFiniteInput,
+        plane.signedDistance(try g.Point3f.init(0, 0, 1)),
+    );
+    var segment = try g.Segment2f.init(origin, try g.Point2f.init(1, 0));
+    segment.b.x = inf32();
+    try std.testing.expectError(error.NonFiniteInput, segment.length());
+    try std.testing.expectError(error.NonFiniteInput, segment.at(0));
+    try std.testing.expectError(error.NonFiniteInput, segment.at(0.5));
+    try std.testing.expectError(error.NonFiniteInput, segment.at(1));
+    var line = try g.Line2f.init(origin, try g.Vector2f.init(1, 0));
+    line.direction.x = inf32();
+    try std.testing.expectError(error.NonFiniteInput, line.at(1));
+    var ray = try g.Ray2f.init(origin, try g.Vector2f.init(1, 0));
+    ray.direction.x = inf32();
+    try std.testing.expectError(error.NonFiniteInput, ray.at(0));
+    try std.testing.expectError(error.NonFiniteInput, ray.at(1));
+}
+
+// A half-line is not its supporting line. Exercise both the direct 2D path
+// and the projected 3D/4D paths, in both precisions and both policies.
+test "API alignment: coincident rays stay half-lines" {
+    inline for (.{
+        .{ g.Point2f, g.Vector2f, g.Ray2f, g.Line2f, g.Intersection2f, f32 },
+        .{ g.Point2d, g.Vector2d, g.Ray2d, g.Line2d, g.Intersection2d, f64 },
+        .{ g.Point3f, g.Vector3f, g.Ray3f, g.Line3f, g.Intersection3f, f32 },
+        .{ g.Point3d, g.Vector3d, g.Ray3d, g.Line3d, g.Intersection3d, f64 },
+        .{ g.Point4f, g.Vector4f, g.Ray4f, g.Line4f, g.Intersection4f, f32 },
+        .{ g.Point4d, g.Vector4d, g.Ray4d, g.Line4d, g.Intersection4d, f64 },
+    }) |Case| {
+        const P = Case[0];
+        const V = Case[1];
+        const R = Case[2];
+        const L = Case[3];
+        const I = Case[4];
+        const T = Case[5];
+        const dim = @typeInfo(P).@"struct".fields.len;
+        const coordinates = [_]T{0} ** dim;
+        var direction = coordinates;
+        direction[0] = 1;
+        const point = try P.fromArray(coordinates);
+        const vector = try V.fromArray(direction);
+        const ray = try R.init(point, vector);
+        const line = try L.init(point, vector);
+        for ([_]g.PredicatePolicy{ .fast, .adaptive_exact }) |policy| {
+            try expectTag(I, try ray.intersect(ray, policy), .coincident);
+            try expectTag(I, try line.intersect(line, policy), .line);
+        }
+    }
+}
+
+// A ray inside its own line is contained; only a pair of lines that are one
+// line may answer `line`. The whole-set tags are exercised in every dimension
+// and both policies, because the answer is a property of the set and not of
+// the dimension the engine projected into.
+test "API alignment: line, ray, and segment report the set they actually share" {
+    inline for (.{
+        .{ g.Point2f, g.Vector2f, g.Ray2f, g.Line2f, g.Segment2f, g.Intersection2f, f32 },
+        .{ g.Point3d, g.Vector3d, g.Ray3d, g.Line3d, g.Segment3d, g.Intersection3d, f64 },
+        .{ g.Point4d, g.Vector4d, g.Ray4d, g.Line4d, g.Segment4d, g.Intersection4d, f64 },
+    }) |Case| {
+        const P = Case[0];
+        const V = Case[1];
+        const R = Case[2];
+        const L = Case[3];
+        const S = Case[4];
+        const I = Case[5];
+        const T = Case[6];
+        const dim = @typeInfo(P).@"struct".fields.len;
+        const axis = blk: {
+            var row = [_]T{0} ** dim;
+            row[0] = 1;
+            break :blk row;
+        };
+        const back = blk: {
+            var row = [_]T{0} ** dim;
+            row[0] = -1;
+            break :blk row;
+        };
+        const twice = blk: {
+            var row = [_]T{0} ** dim;
+            row[0] = 2;
+            break :blk row;
+        };
+        const origin = try P.fromArray([_]T{0} ** dim);
+        const direction = try V.fromArray(axis);
+        const ray = try R.init(origin, direction);
+        const line = try L.init(origin, direction);
+        const on_ray = try S.init(try P.fromArray(axis), try P.fromArray(twice));
+        const same_segment = try S.init(try P.fromArray(axis), try P.fromArray(twice));
+        const backward = try R.init(origin, try V.fromArray(back));
+
+        for ([_]g.PredicatePolicy{ .fast, .adaptive_exact }) |policy| {
+            // Two lines that are one line: the common set runs both ways.
+            try expectTag(I, try line.intersect(line, policy), .line);
+            // A ray with its own copy: the common set is a half-line, and
+            // naming it a line would name points the pair does not share.
+            try expectTag(I, try ray.intersect(ray, policy), .coincident);
+            // The ray is the whole common set with its supporting line.
+            const ray_in_line = try ray.intersectLine(line, policy);
+            try expectTag(I, ray_in_line, .contained);
+            try std.testing.expectEqual(g.ContainedSide.first, ray_in_line.contained);
+            // A segment wholly on the ray is the segment, whole.
+            const covered = try ray.intersectSegment(on_ray, policy);
+            try expectTag(I, covered, .contained);
+            try std.testing.expectEqual(g.ContainedSide.second, covered.contained);
+            const segment_in_line = try on_ray.intersectLine(line, policy);
+            try expectTag(I, segment_in_line, .contained);
+            try std.testing.expectEqual(g.ContainedSide.first, segment_in_line.contained);
+            // An identical pair of segments is the same bounded set.
+            try expectTag(I, try on_ray.intersect(same_segment, policy), .coincident);
+            // Two rays leaving the same end in opposite directions share
+            // that end and nothing else.
+            const shared_end = try ray.intersect(backward, policy);
+            try expectTag(I, shared_end, .point);
+            try std.testing.expect(shared_end.point.eq(origin));
+        }
+    }
+}
+
+// A NaN is not a zero. The plain evaluation of a two-dimensional determinant
+// can subtract an infinity from an infinity, and the exact value of the same
+// form is exactly zero; the plain policy must not report the zero the exact
+// policy can prove.
+test "API alignment: a NaN evaluation is never reported as a zero sign" {
+    const largest = std.math.floatMax(f64);
+
+    // Both products of the determinant overflow in the same direction, so the
+    // plain evaluation forms `-inf - -inf`. `b` and `c` are the same point, so
+    // the exact value of that form is exactly zero.
+    const a = try g.Point2d.init(0, 0);
+    const b = try g.Point2d.init(largest, -largest);
+    const c = try g.Point2d.init(largest, -largest);
+    try std.testing.expectError(error.NonFiniteResult, g.Point2d.orientation(a, b, c, .fast));
+    try std.testing.expectEqual(g.Sign.zero, try g.Point2d.orientation(a, b, c, .adaptive_exact));
+
+    // The same shape in three dimensions: the cross product's third component
+    // is `-inf - inf`, and the scalar product multiplies it by zero.
+    const p0 = try g.Point3d.init(0, 0, 0);
+    const p1 = try g.Point3d.init(largest, largest, 0);
+    const p2 = try g.Point3d.init(largest, -largest, 0);
+    const p3 = try g.Point3d.init(1, 0, 0);
+    try std.testing.expectError(error.NonFiniteResult, g.Point3d.orientation(p0, p1, p2, p3, .fast));
+    try std.testing.expectEqual(g.Sign.zero, try g.Point3d.orientation(p0, p1, p2, p3, .adaptive_exact));
+}
+
+// A ball whose offset and radius square both overflow leaves a residual that
+// is an infinity less an infinity. The exact policy decides the same question
+// on integers and says the point is outside.
+test "API alignment: a fast containment is not decided by a NaN residual" {
+    const largest = std.math.floatMax(f64);
+    const circle = try g.Circle2d.init(try g.Point2d.init(-largest, 0), largest);
+    const far_point = try g.Point2d.init(largest, 0);
+    // The exact residual is `4 * largest^2 - largest^2 = 3 * largest^2`.
+    try std.testing.expectError(error.NonFiniteResult, circle.contains(far_point, .fast));
+    try std.testing.expect(!(try circle.contains(far_point, .adaptive_exact)));
+}
+
+// Every value in this module is by value with public writable fields, so the
+// receiver is input as much as the argument is. Each family below is poisoned
+// after its constructor accepted it, and every operation that reads it must
+// refuse it.
+test "API alignment: every composite receiver is gated before it is consumed" {
+    const policy = g.PredicatePolicy.adaptive_exact;
+    const origin2 = try g.Point2f.init(0, 0);
+    const step = try g.Vector2f.init(1, 0);
+    const clean_line = try g.Line2f.init(origin2, step);
+    const clean_ray = try g.Ray2f.init(origin2, step);
+    const clean_segment = try g.Segment2f.init(origin2, try g.Point2f.init(2, 0));
+    const probe = try g.Point2f.init(1, 0);
+
+    var segment = clean_segment;
+    segment.a.x = nan32();
+    try std.testing.expectError(error.NonFiniteInput, segment.at(0));
+    try std.testing.expectError(error.NonFiniteInput, segment.length());
+    try std.testing.expectError(error.NonFiniteInput, segment.closestPointTo(probe));
+    try std.testing.expectError(error.NonFiniteInput, segment.intersect(clean_segment, policy));
+    try std.testing.expectError(error.NonFiniteInput, segment.intersectLine(clean_line, policy));
+    try std.testing.expectError(error.NonFiniteInput, segment.intersectRay(clean_ray, policy));
+
+    var line = clean_line;
+    line.origin.x = nan32();
+    try std.testing.expectError(error.NonFiniteInput, line.at(1));
+    try std.testing.expectError(error.NonFiniteInput, line.closestPointTo(probe));
+    try std.testing.expectError(error.NonFiniteInput, line.intersect(clean_line, policy));
+
+    var ray = clean_ray;
+    ray.direction.y = inf32();
+    try std.testing.expectError(error.NonFiniteInput, ray.at(0));
+    try std.testing.expectError(error.NonFiniteInput, ray.at(1));
+    try std.testing.expectError(error.NonFiniteInput, ray.intersect(clean_ray, policy));
+    try std.testing.expectError(error.NonFiniteInput, ray.intersectLine(clean_line, policy));
+    try std.testing.expectError(error.NonFiniteInput, ray.intersectSegment(clean_segment, policy));
+
+    const origin3 = try g.Point3f.init(0, 0, 0);
+    const ball = try g.Sphere3f.init(origin3, 1);
+    const plane3 = try g.Plane3f.init(origin3, try g.Vector3f.init(0, 0, 1));
+    const segment3 = try g.Segment3f.init(try g.Point3f.init(-1, 0, 0), try g.Point3f.init(1, 0, 0));
+    const ray3 = try g.Ray3f.init(try g.Point3f.init(-2, 0, 0), try g.Vector3f.init(1, 0, 0));
+    var sphere = ball;
+    sphere.center.z = inf32();
+    try std.testing.expectError(error.NonFiniteInput, sphere.contains(origin3, policy));
+    try std.testing.expectError(error.NonFiniteInput, sphere.intersect(ball, policy));
+    try std.testing.expectError(error.NonFiniteInput, sphere.intersectSegment(segment3, policy));
+    try std.testing.expectError(error.NonFiniteInput, sphere.intersectRay(ray3, policy));
+    try std.testing.expectError(error.NonFiniteInput, sphere.intersectPlane(plane3, policy));
+    try std.testing.expect(!sphere.isFinite());
+
+    var plane = plane3;
+    plane.normal.z = nan32();
+    try std.testing.expectError(error.NonFiniteInput, plane.intersect(plane3, policy));
+    try std.testing.expectError(error.NonFiniteInput, plane.intersectSegment(segment3, policy));
+    try std.testing.expectError(error.NonFiniteInput, plane.intersectSphere(ball, policy));
+
+    const origin4 = try g.Point4f.init(0, 0, 0, 0);
+    const hyper = try g.Hyperplane4f.init(origin4, try g.Vector4f.init(0, 0, 0, 1));
+    const hypersphere = try g.Hypersphere4f.init(origin4, 1);
+    const segment4 = try g.Segment4f.init(try g.Point4f.init(-1, 0, 0, 0), try g.Point4f.init(1, 0, 0, 0));
+    var flat = hyper;
+    flat.origin.w = inf32();
+    try std.testing.expectError(error.NonFiniteInput, flat.signedDistance(try g.Point4f.init(0, 0, 0, 1)));
+    try std.testing.expectError(error.NonFiniteInput, flat.intersect(hyper, policy));
+    try std.testing.expectError(error.NonFiniteInput, flat.intersectSegment(segment4, policy));
+    try std.testing.expectError(error.NonFiniteInput, flat.intersectSphere(hypersphere, policy));
+
+    var deep = hypersphere;
+    deep.radius = inf32();
+    try std.testing.expectError(error.NonFiniteInput, deep.contains(origin4, policy));
+    try std.testing.expectError(error.NonFiniteInput, deep.intersect(hypersphere, policy));
+    try std.testing.expectError(error.NonFiniteInput, deep.intersectHyperplane(hyper, policy));
+
+    const clean_box = try g.Aabb2f.init(origin2, try g.Point2f.init(1, 1));
+    var box = clean_box;
+    box.maximum.y = inf32();
+    try std.testing.expectError(error.NonFiniteInput, box.contains(probe));
+    try std.testing.expectError(error.NonFiniteInput, box.expand(probe));
+    try std.testing.expectError(error.NonFiniteInput, box.intersects(clean_box));
+    try std.testing.expectError(error.NonFiniteInput, box.center());
+    try std.testing.expectError(error.NonFiniteInput, box.extent());
+    try std.testing.expectError(error.NonFiniteInput, box.area());
+    try std.testing.expectError(error.NonFiniteInput, box.intersect(clean_box));
+    try std.testing.expect(!box.isFinite());
+
+    // A bivector carries no invariant beyond finiteness, and `neg` is
+    // arithmetic on the stored bits, so the check a caller needs after
+    // writing a field is `isFinite`.
+    var blade = try g.Bivector4f.init(1, 0, 0, 0, 0, 0);
+    blade.xy = inf32();
+    try std.testing.expect(!blade.isFinite());
+    try std.testing.expect(std.math.isInf(blade.neg().xy));
+
+    // A poisoned vector and a poisoned point are refused the same way, and
+    // `eq` still answers, because it compares bits rather than numbers.
+    var vector = step;
+    vector.x = nan32();
+    try std.testing.expectError(error.NonFiniteInput, vector.add(step));
+    try std.testing.expectError(error.NonFiniteInput, vector.normalize());
+    var point = origin2;
+    point.y = inf32();
+    try std.testing.expectError(error.NonFiniteInput, point.add(step));
+    try std.testing.expect(!point.eq(origin2));
+}
+
+// A norm past the top of the range has no direction, and dividing by an
+// infinite length would hand back the zero vector as though a zero vector had
+// one.
+test "API alignment: an overflowing norm cannot become a direction" {
+    const largest = std.math.floatMax(f32);
+    const wide = try g.Vector2f.init(largest, largest);
+    // `hypot` of two components at the top of the range is `sqrt(2)` times
+    // either of them, which is not a binary32 number.
+    try std.testing.expectError(error.NonFiniteResult, wide.length());
+    try std.testing.expectError(error.NonFiniteResult, wide.normalize());
+    try std.testing.expectError(
+        error.NonFiniteResult,
+        g.Line2f.init(try g.Point2f.init(0, 0), wide),
+    );
+    // The check is on the overflow and not on the size: the ordinary large
+    // vector whose squares overflow keeps its folded norm.
+    const big = try g.Vector3f.init(1.0e30, 1.0e30, 1.0e30);
+    try expectSign(f32, try big.length(), 1.7320508e30, 1.0e24);
+}
+
+test "API alignment: an overflowing translation, product, and distance are reported" {
+    const largest = std.math.floatMax(f32);
+    const corner = try g.Point2f.init(largest, 0);
+    const step = try g.Vector2f.init(largest, 0);
+    try std.testing.expectError(error.NonFiniteResult, corner.add(step));
+    try std.testing.expectError(error.NonFiniteResult, corner.sub(try g.Vector2f.init(-largest, 0)));
+    const cancellation = try corner.sub(step);
+    try std.testing.expectEqual(@as(f32, 0), cancellation.x);
+    try std.testing.expectEqual(@as(f32, 0), cancellation.y);
+    try std.testing.expectError(
+        error.NonFiniteResult,
+        step.distance(try g.Point2f.init(-largest, 0)),
+    );
+    try std.testing.expectError(
+        error.NonFiniteResult,
+        (try g.Line2f.init(corner, try g.Vector2f.init(1, 0))).at(largest),
+    );
+
+    const ordinary = try (try g.Point2f.init(1, 2)).add(try g.Vector2f.init(3, 4));
+    try std.testing.expectEqual(@as(f32, 4.0), ordinary.x);
+    try std.testing.expectEqual(@as(f32, 6.0), ordinary.y);
+}
+
+test "API alignment: an overflowing cross and wedge coefficient are reported" {
+    const largest = std.math.floatMax(f32);
+    const up = try g.Vector3f.init(0, largest, 0);
+    const across = try g.Vector3f.init(0, 0, largest);
+    try std.testing.expectError(error.NonFiniteResult, up.cross(across));
+    // The same product in the four-dimensional exterior form.
+    const blade_a = try g.Vector4f.init(0, largest, 0, 0);
+    const blade_b = try g.Vector4f.init(0, 0, largest, 0);
+    try std.testing.expectError(error.NonFiniteResult, blade_a.wedge(blade_b));
+    // An ordinary pair still crosses and still wedges.
+    const x = try g.Vector3f.init(1, 0, 0);
+    const y = try g.Vector3f.init(0, 1, 0);
+    try std.testing.expectEqual(@as(f32, 1.0), (try x.cross(y)).z);
+}
+
+test "API alignment: an overflowing box measure is reported" {
+    const largest = std.math.floatMax(f32);
+    const wide = try g.Aabb2f.init(
+        try g.Point2f.init(0, 0),
+        try g.Point2f.init(largest, largest),
+    );
+    // The extents are finite; their product is not.
+    try std.testing.expectEqual([2]f32{ largest, largest }, try wide.extent());
+    try std.testing.expectError(error.NonFiniteResult, wide.area());
+
+    const spanning = try g.Aabb2f.init(
+        try g.Point2f.init(-largest, -largest),
+        try g.Point2f.init(largest, largest),
+    );
+    // The difference itself leaves the format here.
+    try std.testing.expectError(error.NonFiniteResult, spanning.extent());
+    try std.testing.expectError(error.NonFiniteResult, spanning.area());
+
+    const far_corner = try g.Aabb2f.init(
+        try g.Point2f.init(largest * 0.9, largest * 0.9),
+        try g.Point2f.init(largest, largest),
+    );
+    // The centre is `(minimum + maximum) / 2`, and that sum leaves the format
+    // even though the halved value would not.
+    try std.testing.expectError(error.NonFiniteResult, far_corner.center());
+
+    // The ordinary measures are untouched by any of this.
+    const ordinary = try g.Aabb3f.init(
+        try g.Point3f.init(0, 0, 0),
+        try g.Point3f.init(2, 3, 4),
+    );
+    try std.testing.expectEqual(@as(f32, 24.0), try ordinary.volume());
+    try std.testing.expectEqual(@as(f32, 52.0), try ordinary.doubledSurfaceArea());
+}
+
+test "API alignment: an overflowing chord and signed distance are reported" {
+    const largest = std.math.floatMax(f32);
+    // Two discs of the largest radius a unit apart: the radii sum past the
+    // top of the range, so the chord has no margin to divide and the
+    // projection along the line of centres has an infinity to subtract.
+    const left = try g.Circle2f.init(try g.Point2f.init(0, 0), largest);
+    const right = try g.Circle2f.init(try g.Point2f.init(1, 0), largest);
+    for ([_]g.PredicatePolicy{ .fast, .adaptive_exact }) |policy| {
+        try std.testing.expectError(error.NonFiniteResult, left.intersect(right, policy));
+    }
+
+    // Three terms of `largest / sqrt(3)` are past the top of the range.
+    const plane = try g.Plane3f.init(
+        try g.Point3f.init(0, 0, 0),
+        try g.Vector3f.init(1, 1, 1),
+    );
+    try std.testing.expectError(
+        error.NonFiniteResult,
+        plane.signedDistance(try g.Point3f.init(largest, largest, largest)),
+    );
+    // Four terms of `floatMax(f64) / 2` are, in binary64.
+    const wide: f64 = std.math.floatMax(f64);
+    const hyper = try g.Hyperplane4d.init(
+        try g.Point4d.init(0, 0, 0, 0),
+        try g.Vector4d.init(1, 1, 1, 1),
+    );
+    try std.testing.expectError(
+        error.NonFiniteResult,
+        hyper.signedDistance(try g.Point4d.init(wide, wide, wide, wide)),
+    );
+    // The same plane still answers at an ordinary distance.
+    try expectSign(f32, try plane.signedDistance(try g.Point3f.init(3, 0, 0)), 1.7320508, 1.0e-4);
+}
+
+test "API alignment: a segment whose own span leaves the format is reported" {
+    const largest = std.math.floatMax(f32);
+    const far = try g.Segment2f.init(
+        try g.Point2f.init(-largest, 0),
+        try g.Point2f.init(largest, 0),
+    );
+    try std.testing.expectError(error.NonFiniteResult, far.length());
+    // The projection divides by the squared span, which leaves the format
+    // even when the offset does not.
+    try std.testing.expectError(
+        error.NonFiniteResult,
+        far.closestPointTo(try g.Point2f.init(0, 1)),
+    );
+    // The supporting line of the same pair still answers, because its
+    // direction is unit and the difference it forms is the offset.
+    const line = try g.Line2f.init(try g.Point2f.init(-largest, 0), try g.Vector2f.init(1, 0));
+    const foot = try line.closestPointTo(try g.Point2f.init(0, 1));
+    try expectSign(f32, foot.y, 0.0, 0.0);
+    try expectSign(f32, foot.x, 0.0, 0.0);
+}
+
+// A box intersection is the WHOLE common box. Touching is not emptiness, and
+// a box that meets its argument on one axis is a box degenerate on that axis
+// rather than a point or a face.
+test "API alignment: a box intersection is the whole common box, never a part" {
+    const high = try g.Point3f.init(2, 2, 2);
+    const unit = try g.Aabb3f.init(try g.Point3f.init(0, 0, 0), high);
+
+    // Cut off above on one axis only: the common box is full on the other two
+    // and degenerate on this one.
+    const slab = try g.Aabb3f.init(try g.Point3f.init(1.5, 0.5, 0.5), try g.Point3f.init(4, 1.5, 1.5));
+    const slab_touch = try unit.intersect(slab);
+    try expectTag(g.Intersection3f, slab_touch, .box);
+    try std.testing.expect(slab_touch.box.minimum.eq(try g.Point3f.init(1.5, 0.5, 0.5)));
+    try std.testing.expect(slab_touch.box.maximum.eq(try g.Point3f.init(2, 1.5, 1.5)));
+    try std.testing.expect(try unit.intersects(slab));
+
+    // The same cut off on all three axes: a box that is one corner.
+    const corner = try g.Aabb3f.init(try g.Point3f.init(1.5, 1.5, 1.5), try g.Point3f.init(4, 4, 4));
+    const corner_touch = try unit.intersect(corner);
+    try expectTag(g.Intersection3f, corner_touch, .box);
+    try std.testing.expect(corner_touch.box.minimum.eq(try g.Point3f.init(1.5, 1.5, 1.5)));
+    try std.testing.expect(corner_touch.box.maximum.eq(high));
+
+    // Empty on the third axis alone, however much the other two agree.
+    const above = try g.Aabb3f.init(try g.Point3f.init(0, 0, 3), try g.Point3f.init(2, 2, 4));
+    try expectTag(g.Intersection3f, try unit.intersect(above), .none);
+    try std.testing.expect(!(try unit.intersects(above)));
+
+    // One box wholly inside another, in both orders, and the identical pair.
+    const inner = try g.Aabb3f.init(try g.Point3f.init(0.5, 0.5, 0.5), try g.Point3f.init(1, 1, 1));
+    const held = try unit.intersect(inner);
+    try expectTag(g.Intersection3f, held, .contained);
+    try std.testing.expectEqual(g.ContainedSide.second, held.contained);
+    try std.testing.expectEqual(g.ContainedSide.first, (try inner.intersect(unit)).contained);
+    try expectTag(g.Intersection3f, try unit.intersect(unit), .coincident);
+
+    // A degenerate box is legal. Inside another box it IS the whole common
+    // set, so the answer is containment rather than a degenerate box.
+    const single = try g.Aabb3f.init(high, high);
+    const at_corner = try unit.intersect(single);
+    try expectTag(g.Intersection3f, at_corner, .contained);
+    try std.testing.expectEqual(g.ContainedSide.second, at_corner.contained);
+    try std.testing.expect(try unit.contains(high));
+    try std.testing.expectEqual([3]f32{ 0, 0, 0 }, try single.extent());
+}
+
+test "API alignment: subnormal directions remain unit" {
+    inline for (.{ .{ g.Vector2f, f32 }, .{ g.Vector2d, f64 } }) |Case| {
+        const V = Case[0];
+        const T = Case[1];
+        const U = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const tiny: T = @bitCast(@as(U, 1));
+        const direction = try (try V.init(tiny, tiny)).normalize();
+        try std.testing.expect(@abs(try direction.length() - 1) < 0.00001);
+        try std.testing.expectEqual(direction.x, direction.y);
+    }
+}
+
+test "API alignment: outside ray shares the complete solid-ball chord" {
+    const center = try g.Point2f.init(0, 0);
+    const ball = try g.Circle2f.init(center, 1);
+    const ray = try g.Ray2f.init(try g.Point2f.init(-2, 0), try g.Vector2f.init(1, 0));
+    for ([_]g.PredicatePolicy{ .fast, .adaptive_exact }) |policy| {
+        const common = try ball.intersectRay(ray, policy);
+        try expectTag(g.Intersection2f, common, .segment);
+        try expectPoint(common.segment.a, try g.Point2f.init(-1, 0));
+        try expectPoint(common.segment.b, try g.Point2f.init(1, 0));
+        try expectPoint(try common.segment.at(0.5), center);
+    }
+}
+
+/// Runtime corner storage prevents constant folding of the midpoint.
+fn boxCenter(comptime B: type, lo: anytype, hi: anytype) !@FieldType(B, "minimum") {
+    const P = @FieldType(B, "minimum");
+    const T = ScalarOf(P);
+    const dim = comptime fieldCountOf(P);
+    var lows: [dim]T = [1]T{lo} ** dim;
+    var highs: [dim]T = [1]T{hi} ** dim;
+    std.mem.doNotOptimizeAway(&lows);
+    std.mem.doNotOptimizeAway(&highs);
+    return (try B.init(try pointOf(P, dim, lows), try pointOf(P, dim, highs))).center();
+}
+
+/// The corner of a uniform box: `value` on every axis.
+fn uniformPoint(comptime P: type, value: anytype) !P {
+    const T = ScalarOf(P);
+    const dim = comptime fieldCountOf(P);
+    const components: [dim]T = [1]T{value} ** dim;
+    return pointOf(P, dim, components);
+}
+
+test "API alignment: a box center keeps a subnormal midpoint and both zeros" {
+    inline for (.{ g.Aabb2f, g.Aabb3f, g.Aabb4f, g.Aabb2d, g.Aabb3d, g.Aabb4d }) |B| {
+        const P = @FieldType(B, "minimum");
+        const T = ScalarOf(P);
+        const Bits = @Int(.unsigned, @bitSizeOf(T));
+        const unit: T = @bitCast(@as(Bits, 1));
+        const two: T = @bitCast(@as(Bits, 2));
+        const negative_zero: T = -0.0;
+        const largest = std.math.floatMax(T);
+        // Exact subnormal midpoint.
+        try expectPoint(try boxCenter(B, unit, unit), try uniformPoint(P, unit));
+        // Half of three subnormal units rounds to the even two.
+        try expectPoint(try boxCenter(B, unit, two), try uniformPoint(P, two));
+        // Negative subnormal midpoint.
+        try expectPoint(try boxCenter(B, -unit, -unit), try uniformPoint(P, -unit));
+        // Negative zero stays negative; mixed zero signs produce positive zero.
+        try expectPoint(
+            try boxCenter(B, negative_zero, negative_zero),
+            try uniformPoint(P, negative_zero),
+        );
+        try expectPoint(try boxCenter(B, negative_zero, 0.0), try uniformPoint(P, 0.0));
+        // The rounded sum overflows before halving.
+        try std.testing.expectError(error.NonFiniteResult, boxCenter(B, largest, largest));
+    }
+}
+
+test "API alignment: wedge overflow follows separate rounded products" {
+    const largest = std.math.floatMax(f32);
+    const a = try g.Vector4f.init(largest, largest, 0, 0);
+    const b = try g.Vector4f.init(1, 2, 0, 0);
+    // A fused first product could return largest; the strict graph overflows.
+    try std.testing.expectError(error.NonFiniteResult, a.wedge(b));
+}
+
+// ---------------------------------------------------------------------------
+// An INDEPENDENT exact opinion about every `adaptive_exact` predicate
+// ---------------------------------------------------------------------------
+
+/// How many limbs the reference integer below carries.
+///
+/// A finite binary64 sits at most `2^2045` above its significand, so one
+/// coordinate on a common per-case scale is at most `53 + 2045 = 2098` bits
+/// wide. The degree-four determinant over four of them is twenty-four terms of
+/// a product of four, so it is below `24 * 2^8392 < 2^8397`; the degree-two
+/// forms that rescale by `2^2148` stay below `2^8398`. 160 limbs is 10240
+/// bits, so every value this test builds fits whole and nothing here ever
+/// truncates - which is checked rather than assumed, below.
+const reference_words = 160;
+
+/// An exact signed integer, written HERE rather than taken from the module.
+///
+/// A second opinion that reuses the arithmetic under test is not a second
+/// opinion, so this is a fresh implementation over `u64` limbs with `u128`
+/// intermediates, and it never calls `Big` or anything else of the module's.
+/// It has its own rule about which limbs are live - only the first `used` -
+/// and it keeps that rule by writing every limb it claims, which is what makes
+/// it usable as the reference for a module that now clears its working set
+/// only over the region it will look at.
+const Reference = struct {
+    negative: bool,
+    used: usize,
+    limbs: [reference_words]u64,
+
+    fn zero() Reference {
+        return .{ .negative = false, .used = 0, .limbs = [_]u64{0} ** reference_words };
+    }
+
+    fn sign(a: Reference) g.Sign {
+        if (a.used == 0) return .zero;
+        return if (a.negative) .negative else .positive;
+    }
+
+    fn trim(out: *Reference) void {
+        while (out.used > 0 and out.limbs[out.used - 1] == 0) out.used -= 1;
+        if (out.used == 0) out.negative = false;
+    }
+
+    /// `-(significand * 2^shift)` or `+(significand * 2^shift)`.
+    fn fromShifted(negative: bool, significand: u64, shift: usize) Reference {
+        std.debug.assert(significand != 0);
+        var out = Reference.zero();
+        const word = shift / 64;
+        std.debug.assert(word + 2 <= reference_words);
+        const bits: u6 = @intCast(shift % 64);
+        const placed: u128 = @as(u128, significand) << bits;
+        out.limbs[word] = @truncate(placed);
+        out.limbs[word + 1] = @truncate(placed >> 64);
+        out.used = word + 2;
+        out.negative = negative;
+        out.trim();
+        return out;
+    }
+
+    fn compare(a: Reference, b: Reference) std.math.Order {
+        if (a.used != b.used) return if (a.used > b.used) .gt else .lt;
+        var index: usize = a.used;
+        while (index > 0) {
+            index -= 1;
+            if (a.limbs[index] != b.limbs[index]) {
+                return if (a.limbs[index] > b.limbs[index]) .gt else .lt;
+            }
+        }
+        return .eq;
+    }
+
+    fn magnitudeAdd(out: *Reference, a: Reference, b: Reference) void {
+        const width = @max(a.used, b.used) + 1;
+        std.debug.assert(width <= reference_words);
+        var carry: u64 = 0;
+        var index: usize = 0;
+        while (index < width) : (index += 1) {
+            const left: u128 = if (index < a.used) a.limbs[index] else 0;
+            const right: u128 = if (index < b.used) b.limbs[index] else 0;
+            const total = left + right + @as(u128, carry);
+            out.limbs[index] = @truncate(total);
+            carry = @intCast(total >> 64);
+        }
+        out.used = width;
+        out.negative = false;
+        out.trim();
+    }
+
+    /// `|a| - |b|`, which the caller has already ordered.
+    fn magnitudeDrop(out: *Reference, a: Reference, b: Reference) void {
+        var borrow: u64 = 0;
+        var index: usize = 0;
+        while (index < a.used) : (index += 1) {
+            const left: u128 = a.limbs[index];
+            const right: u128 = if (index < b.used) b.limbs[index] else 0;
+            const total = left -% right -% @as(u128, borrow);
+            out.limbs[index] = @truncate(total);
+            borrow = @intCast((total >> 64) & 1);
+        }
+        std.debug.assert(borrow == 0);
+        out.used = a.used;
+        out.negative = false;
+        out.trim();
+    }
+
+    fn add(out: *Reference, a: Reference, b: Reference) void {
+        const a_negative = a.negative;
+        const b_negative = b.negative;
+        if (a.used == 0) {
+            out.* = b;
+            return;
+        }
+        if (b.used == 0) {
+            out.* = a;
+            return;
+        }
+        if (a_negative == b_negative) {
+            magnitudeAdd(out, a, b);
+            out.negative = a_negative and out.used != 0;
+            return;
+        }
+        const order = Reference.compare(a, b);
+        if (order == .eq) {
+            out.* = Reference.zero();
+            return;
+        }
+        if (order == .gt) {
+            magnitudeDrop(out, a, b);
+            out.negative = a_negative and out.used != 0;
+            return;
+        }
+        magnitudeDrop(out, b, a);
+        out.negative = b_negative and out.used != 0;
+    }
+
+    fn sub(out: *Reference, a: Reference, b: Reference) void {
+        var flipped = b;
+        flipped.negative = !flipped.negative;
+        Reference.add(out, a, flipped);
+    }
+
+    fn mul(out: *Reference, a: Reference, b: Reference) void {
+        if (a.used == 0 or b.used == 0) {
+            out.* = Reference.zero();
+            return;
+        }
+        std.debug.assert(a.used + b.used <= reference_words);
+        var result = Reference.zero();
+        var i: usize = 0;
+        while (i < a.used) : (i += 1) {
+            if (a.limbs[i] == 0) continue;
+            var carry: u128 = 0;
+            var j: usize = 0;
+            while (j < b.used) : (j += 1) {
+                const total = @as(u128, a.limbs[i]) * @as(u128, b.limbs[j]) +
+                    @as(u128, result.limbs[i + j]) + carry;
+                result.limbs[i + j] = @truncate(total);
+                carry = total >> 64;
+            }
+            result.limbs[i + b.used] = @truncate(carry);
+        }
+        result.used = a.used + b.used;
+        result.negative = a.negative != b.negative;
+        result.trim();
+        out.* = result;
+    }
+
+    fn shiftedLeft(out: *Reference, a: Reference, bits: usize) void {
+        if (a.used == 0 or bits == 0) {
+            out.* = a;
+            return;
+        }
+        const words = bits / 64;
+        const shift: u6 = @intCast(bits % 64);
+        std.debug.assert(a.used + words + 1 <= reference_words);
+        var result = Reference.zero();
+        var index: usize = 0;
+        while (index < a.used) : (index += 1) {
+            const placed: u128 = @as(u128, a.limbs[index]) << shift;
+            result.limbs[index + words] |= @truncate(placed);
+            result.limbs[index + words + 1] |= @as(u64, @truncate(placed >> 64));
+        }
+        result.used = a.used + words + 1;
+        result.negative = a.negative;
+        result.trim();
+        out.* = result;
+    }
+};
+
+/// Decode each format directly from its IEEE bits, without the module's
+/// conversion code. The magnitude is `significand * 2^(offset - 1074)`.
+/// Binary32 offsets include `1074 - 149` so both formats share this scale.
+const Parts = struct { negative: bool, significand: u64, offset: usize };
+
+fn partsOf(comptime T: type, value: T) Parts {
+    switch (T) {
+        f32 => {
+            const bits: u32 = @bitCast(value);
+            const exponent_field: u32 = (bits >> 23) & 0xff;
+            const fraction: u64 = bits & 0x007f_ffff;
+            std.debug.assert(exponent_field != 0xff);
+            const negative = (bits >> 31) != 0;
+            if (exponent_field == 0 and fraction == 0) {
+                return .{ .negative = negative, .significand = 0, .offset = 925 };
+            }
+            if (exponent_field == 0) return .{ .negative = negative, .significand = fraction, .offset = 925 };
+            return .{
+                .negative = negative,
+                .significand = fraction | (@as(u64, 1) << 23),
+                .offset = @as(usize, exponent_field - 1) + 925,
+            };
+        },
+        f64 => {
+            const bits: u64 = @bitCast(value);
+            const exponent_field: u64 = (bits >> 52) & 0x7ff;
+            const fraction: u64 = bits & 0x000f_ffff_ffff_ffff;
+            std.debug.assert(exponent_field != 0x7ff);
+            const negative = (bits >> 63) != 0;
+            if (exponent_field == 0 and fraction == 0) return .{ .negative = negative, .significand = 0, .offset = 0 };
+            if (exponent_field == 0) return .{ .negative = negative, .significand = fraction, .offset = 0 };
+            return .{
+                .negative = negative,
+                .significand = fraction | (@as(u64, 1) << 52),
+                .offset = @intCast(exponent_field - 1),
+            };
+        },
+        else => @compileError("zmath geometry is f32 or f64"),
+    }
+}
+
+/// Use the smallest nonzero offset as one case's common scale. Each coordinate
+/// is then an integer. A degree-`k` form carries the positive factor
+/// `2^(k * (1074 - base))`, so its sign is unchanged.
+fn baseOf(comptime T: type, values: []const T) usize {
+    var base: usize = std.math.maxInt(usize);
+    for (values) |value| {
+        const parts = partsOf(T, value);
+        if (parts.significand == 0) continue;
+        base = @min(base, parts.offset);
+    }
+    return if (base == std.math.maxInt(usize)) 0 else base;
+}
+
+fn scaledAt(comptime T: type, value: T, base: usize) Reference {
+    const parts = partsOf(T, value);
+    if (parts.significand == 0) return Reference.zero();
+    std.debug.assert(parts.offset >= base);
+    return Reference.fromShifted(parts.negative, parts.significand, parts.offset - base);
+}
+
+/// The published point type's scalar, read off its first field so a test can
+/// pick the matching corpus without naming the type again.
+fn ScalarOf(comptime P: type) type {
+    return @typeInfo(P).@"struct".fields[0].type;
+}
+
+fn fieldCountOf(comptime P: type) usize {
+    return @typeInfo(P).@"struct".fields.len;
+}
+
+/// One published point, built from the first `dim` components of a four-wide
+/// row. The condition is `comptime`, so only the branch that matches is
+/// analyzed and the arity of `init` is never wrong for the type in hand.
+fn pointOf(comptime P: type, comptime dim: usize, v: anytype) !P {
+    if (comptime dim == 2) return P.init(v[0], v[1]);
+    if (comptime dim == 3) return P.init(v[0], v[1], v[2]);
+    return P.init(v[0], v[1], v[2], v[3]);
+}
+
+fn vectorOf(comptime V: type, comptime dim: usize, v: anytype) !V {
+    if (comptime dim == 2) return V.init(v[0], v[1]);
+    if (comptime dim == 3) return V.init(v[0], v[1], v[2]);
+    return V.init(v[0], v[1], v[2], v[3]);
+}
+
+/// The corpus every predicate below is driven over: ordinary magnitudes and
+/// signs, exact zeros of both signs, powers of two whose low limbs are all
+/// zero, rows that are exactly collinear and rows one unit in the last place
+/// away from it, the smallest subnormal of the format, three subnormals of
+/// different sizes, and coordinates at the very top of the range next to
+/// coordinates a thousand decades below it.
+fn corpusOf(comptime T: type) [16][4]T {
+    const unsigned = @Int(.unsigned, @bitSizeOf(T));
+    const smallest: T = @bitCast(@as(unsigned, 1));
+    const largest: T = std.math.floatMax(T);
+    const wide_high: T = if (T == f32) 3.0e38 else 1.0e308;
+    const wide_low: T = if (T == f32) 1.0e-38 else 1.0e-308;
+    const sub_a: T = if (T == f32) 1.0e-40 else 1.0e-320;
+    const sub_b: T = if (T == f32) 3.0e-40 else 3.0e-320;
+    const sub_c: T = if (T == f32) 7.0e-40 else 7.0e-320;
+    const eps: T = if (T == f32) 1.19209290e-7 else 2.220446049250313e-16;
+    const mid: T = if (T == f32) 1.0e7 else 1.0e15;
+    return .{
+        .{ 0, 0, 0, 0 },
+        .{ 1, 0, 0, 0 },
+        .{ 0, 1, 0, 0 },
+        .{ 1, 1, 1, 1 },
+        .{ 0.5, -0.25, 0.125, -0.0625 },
+        .{ 3, -7, 11, -13 },
+        .{ -2.5, 4.25, -6.125, 8.0625 },
+        .{ wide_high, -wide_low, wide_high, -wide_low },
+        .{ 2, 4, 8, 16 },
+        .{ smallest, 0, -smallest, 0 },
+        .{ largest, -largest, largest / 2, -largest / 2 },
+        .{ sub_a, sub_b, -sub_c, sub_a / 2 },
+        .{ 1, 1 + eps, 1, 1 - eps },
+        .{ mid, mid + 2, mid, -mid },
+        .{ 0.1, 0.2, 0.3, 0.4 },
+        .{ -0.0, 0.0, 1, -1 },
+    };
+}
+
+/// `sign((b - a) x (c - a))`, exactly, on one scale.
+fn orient2Reference(comptime T: type, a: [2]T, b: [2]T, c: [2]T) g.Sign {
+    const all = [_]T{ a[0], a[1], b[0], b[1], c[0], c[1] };
+    const base = baseOf(T, all[0..]);
+    const ax = scaledAt(T, a[0], base);
+    const ay = scaledAt(T, a[1], base);
+    const bx = scaledAt(T, b[0], base);
+    const by = scaledAt(T, b[1], base);
+    const cx = scaledAt(T, c[0], base);
+    const cy = scaledAt(T, c[1], base);
+    // SAFETY: Reference.sub writes metadata and active limbs before multiplication.
+    var left: Reference = undefined;
+    // SAFETY: Reference.sub writes metadata and active limbs before multiplication.
+    var right: Reference = undefined;
+    // SAFETY: Reference.sub writes metadata and active limbs before multiplication.
+    var inner: Reference = undefined;
+    // SAFETY: Reference.sub writes metadata and active limbs before sign extraction.
+    var total: Reference = undefined;
+    Reference.sub(&left, bx, ax);
+    Reference.sub(&inner, cy, ay);
+    Reference.mul(&left, left, inner);
+    Reference.sub(&right, by, ay);
+    Reference.sub(&inner, cx, ax);
+    Reference.mul(&right, right, inner);
+    Reference.sub(&total, left, right);
+    return Reference.sign(total);
+}
+
+/// `sign(dot(cross(b - a, c - a), d - a))`, exactly, on one scale.
+fn orient3Reference(comptime T: type, a: [3]T, b: [3]T, c: [3]T, d: [3]T) g.Sign {
+    const all = [_]T{
+        a[0], a[1], a[2], b[0], b[1], b[2],
+        c[0], c[1], c[2], d[0], d[1], d[2],
+    };
+    const base = baseOf(T, all[0..]);
+    var u: [3]Reference = undefined;
+    var v: [3]Reference = undefined;
+    var w: [3]Reference = undefined;
+    inline for (0..3) |index| {
+        const anchor = scaledAt(T, a[index], base);
+        Reference.sub(&u[index], scaledAt(T, b[index], base), anchor);
+        Reference.sub(&v[index], scaledAt(T, c[index], base), anchor);
+        Reference.sub(&w[index], scaledAt(T, d[index], base), anchor);
+    }
+    // SAFETY: Reference.mul writes metadata and active limbs before subtraction.
+    var nx: Reference = undefined;
+    // SAFETY: Reference.mul writes metadata and active limbs before subtraction.
+    var scratch: Reference = undefined;
+    // SAFETY: Reference.mul writes metadata and active limbs before accumulation.
+    var total: Reference = undefined;
+    Reference.mul(&nx, u[1], v[2]);
+    Reference.mul(&scratch, u[2], v[1]);
+    Reference.sub(&nx, nx, scratch);
+    Reference.mul(&total, nx, w[0]);
+    Reference.mul(&nx, u[2], v[0]);
+    Reference.mul(&scratch, u[0], v[2]);
+    Reference.sub(&nx, nx, scratch);
+    Reference.mul(&scratch, nx, w[1]);
+    Reference.add(&total, total, scratch);
+    Reference.mul(&nx, u[0], v[1]);
+    Reference.mul(&scratch, u[1], v[0]);
+    Reference.sub(&nx, nx, scratch);
+    Reference.mul(&scratch, nx, w[2]);
+    Reference.add(&total, total, scratch);
+    return Reference.sign(total);
+}
+
+/// The three-by-three minor of the LAST THREE rows over the three columns
+/// that are not `skip`, in the textbook grouping.
+fn minor3Reference(out: *Reference, rows: [4][4]Reference, skip: usize) void {
+    var kept: [3]usize = undefined;
+    var next: usize = 0;
+    for (0..4) |column| {
+        if (column == skip) continue;
+        kept[next] = column;
+        next += 1;
+    }
+    // SAFETY: Reference.mul writes metadata and active limbs before subtraction.
+    var left: Reference = undefined;
+    // SAFETY: Reference.mul writes metadata and active limbs before subtraction.
+    var right: Reference = undefined;
+    // SAFETY: Reference.sub writes metadata and active limbs before multiplication.
+    var inner: Reference = undefined;
+    Reference.mul(&left, rows[2][kept[1]], rows[3][kept[2]]);
+    Reference.mul(&right, rows[2][kept[2]], rows[3][kept[1]]);
+    Reference.sub(&inner, left, right);
+    Reference.mul(out, rows[1][kept[0]], inner);
+    Reference.mul(&left, rows[2][kept[0]], rows[3][kept[2]]);
+    Reference.mul(&right, rows[2][kept[2]], rows[3][kept[0]]);
+    Reference.sub(&inner, left, right);
+    Reference.mul(&right, rows[1][kept[1]], inner);
+    Reference.sub(out, out.*, right);
+    Reference.mul(&left, rows[2][kept[0]], rows[3][kept[1]]);
+    Reference.mul(&right, rows[2][kept[1]], rows[3][kept[0]]);
+    Reference.sub(&inner, left, right);
+    Reference.mul(&right, rows[1][kept[2]], inner);
+    Reference.add(out, out.*, right);
+}
+
+/// The exact four-by-four determinant, the Laplace expansion along the first
+/// row whose cofactor signs alternate.
+fn orient4Reference(comptime T: type, a: [4]T, b: [4]T, c: [4]T, d: [4]T) g.Sign {
+    const all = [_]T{
+        a[0], a[1], a[2], a[3], b[0], b[1], b[2], b[3],
+        c[0], c[1], c[2], c[3], d[0], d[1], d[2], d[3],
+    };
+    const base = baseOf(T, all[0..]);
+    var rows: [4][4]Reference = undefined;
+    inline for (0..4) |row| {
+        inline for (0..4) |column| {
+            const source = switch (row) {
+                0 => a,
+                1 => b,
+                2 => c,
+                else => d,
+            };
+            rows[row][column] = scaledAt(T, source[column], base);
+        }
+    }
+    // SAFETY: Reference.mul writes metadata and active limbs before accumulation.
+    var total: Reference = undefined;
+    // SAFETY: minor3Reference writes metadata and active limbs before multiplication.
+    var minor: Reference = undefined;
+    // SAFETY: Reference.mul writes metadata and active limbs before accumulation.
+    var term: Reference = undefined;
+    minor3Reference(&minor, rows, 0);
+    Reference.mul(&total, rows[0][0], minor);
+    var index: usize = 1;
+    while (index < 4) : (index += 1) {
+        minor3Reference(&minor, rows, index);
+        Reference.mul(&term, rows[0][index], minor);
+        if (index % 2 == 0) Reference.add(&total, total, term) else Reference.sub(&total, total, term);
+    }
+    return Reference.sign(total);
+}
+
+/// `sign(dot(p - c, p - c) - r * r)`, exactly, on one scale.
+fn containmentReference(comptime T: type, comptime dim: usize, centre: [dim]T, radius: T, point: [dim]T) g.Sign {
+    var all: [2 * dim + 1]T = undefined;
+    inline for (0..dim) |index| {
+        all[index] = centre[index];
+        all[dim + index] = point[index];
+    }
+    all[2 * dim] = radius;
+    const base = baseOf(T, all[0..]);
+    var offset: [dim]Reference = undefined;
+    inline for (0..dim) |index| {
+        Reference.sub(&offset[index], scaledAt(T, point[index], base), scaledAt(T, centre[index], base));
+    }
+    // SAFETY: The first non-empty component iteration assigns total before accumulation.
+    var total: Reference = undefined;
+    // SAFETY: Reference.mul writes metadata and active limbs before accumulation.
+    var term: Reference = undefined;
+    inline for (0..dim) |index| {
+        Reference.mul(&term, offset[index], offset[index]);
+        if (index == 0) {
+            total = term;
+        } else {
+            Reference.add(&total, total, term);
+        }
+    }
+    var scale = scaledAt(T, radius, base);
+    Reference.mul(&scale, scale, scale);
+    Reference.sub(&total, total, scale);
+    return Reference.sign(total);
+}
+
+/// `sign(dot(s, s) - t * t)` for `s = second - first`, exactly. This is the
+/// one form both tangency comparisons use, once with `t = r1 + r2` and once
+/// with `t = r1 - r2`, and it is also the squared separation itself when `t`
+/// is zero.
+fn tangencyReference(comptime T: type, comptime dim: usize, first: [dim]T, second: [dim]T, t: T) g.Sign {
+    var all: [2 * dim + 1]T = undefined;
+    inline for (0..dim) |index| {
+        all[index] = first[index];
+        all[dim + index] = second[index];
+    }
+    all[2 * dim] = t;
+    const base = baseOf(T, all[0..]);
+    var separation: [dim]Reference = undefined;
+    inline for (0..dim) |index| {
+        Reference.sub(&separation[index], scaledAt(T, second[index], base), scaledAt(T, first[index], base));
+    }
+    // SAFETY: The first non-empty component iteration assigns total before accumulation.
+    var total: Reference = undefined;
+    // SAFETY: Reference.mul writes metadata and active limbs before accumulation.
+    var term: Reference = undefined;
+    inline for (0..dim) |index| {
+        Reference.mul(&term, separation[index], separation[index]);
+        if (index == 0) {
+            total = term;
+        } else {
+            Reference.add(&total, total, term);
+        }
+    }
+    var scale = scaledAt(T, t, base);
+    Reference.mul(&scale, scale, scale);
+    Reference.sub(&total, total, scale);
+    return Reference.sign(total);
+}
+
+/// `sign(dot(w, direction) * dot(w, direction) - (dot(w, w) - r * r) * 2^k)`,
+/// exactly, where `k = 2 * (base - 1074)` is the factor that puts the
+/// projection's square and the constant term on one scale.
+///
+/// With `P` and `C` the integer projection and constant at scale
+/// `2^(base - 1074)`, the answer is `sign(P^2 * 2^k - C)`. Only one of `k` and
+/// `-k` is ever positive, so multiplying both terms by the other power of two
+/// keeps every shift a non-negative one and the arithmetic stays integral.
+fn rayDiscriminantReference(
+    comptime T: type,
+    comptime dim: usize,
+    centre: [dim]T,
+    origin: [dim]T,
+    direction: [dim]T,
+    r: T,
+) g.Sign {
+    var all: [3 * dim + 1]T = undefined;
+    inline for (0..dim) |index| {
+        all[index] = centre[index];
+        all[dim + index] = origin[index];
+        all[2 * dim + index] = direction[index];
+    }
+    all[3 * dim] = r;
+    const base = baseOf(T, all[0..]);
+    var w: [dim]Reference = undefined;
+    // SAFETY: The first non-empty component iteration assigns projection before accumulation.
+    var projection: Reference = undefined;
+    // SAFETY: Reference.mul writes metadata and active limbs before accumulation.
+    var term: Reference = undefined;
+    inline for (0..dim) |index| {
+        Reference.sub(&w[index], scaledAt(T, origin[index], base), scaledAt(T, centre[index], base));
+        const unit = scaledAt(T, direction[index], base);
+        Reference.mul(&term, w[index], unit);
+        if (index == 0) {
+            projection = term;
+        } else {
+            Reference.add(&projection, projection, term);
+        }
+    }
+    // SAFETY: The first non-empty component iteration assigns squared before accumulation.
+    var squared: Reference = undefined;
+    inline for (0..dim) |index| {
+        Reference.mul(&term, w[index], w[index]);
+        if (index == 0) {
+            squared = term;
+        } else {
+            Reference.add(&squared, squared, term);
+        }
+    }
+    var scale = scaledAt(T, r, base);
+    Reference.mul(&scale, scale, scale);
+    Reference.sub(&squared, squared, scale);
+    Reference.mul(&projection, projection, projection);
+    const up: usize = if (2 * base > 2148) 2 * base - 2148 else 0;
+    const down: usize = if (2148 > 2 * base) 2148 - 2 * base else 0;
+    Reference.shiftedLeft(&projection, projection, up);
+    Reference.shiftedLeft(&squared, squared, down);
+    Reference.sub(&projection, projection, squared);
+    return Reference.sign(projection);
+}
+
+test "adaptive_exact orientation in two dimensions agrees with an independent exact area" {
+    inline for (.{ g.Point2f, g.Point2d }) |P| {
+        const T = ScalarOf(P);
+        const corpus = corpusOf(T);
+        for (0..corpus.len) |i| {
+            const j = (i + 1) % corpus.len;
+            const k = (i + 2) % corpus.len;
+            const expected = orient2Reference(
+                T,
+                .{ corpus[i][0], corpus[i][1] },
+                .{ corpus[j][0], corpus[j][1] },
+                .{ corpus[k][0], corpus[k][1] },
+            );
+            const given = try P.orientation(
+                try P.init(corpus[i][0], corpus[i][1]),
+                try P.init(corpus[j][0], corpus[j][1]),
+                try P.init(corpus[k][0], corpus[k][1]),
+                .adaptive_exact,
+            );
+            if (given != expected) {
+                std.debug.print("2D row {d}: expected {any}, got {any}\n", .{ i, expected, given });
+                return error.ExactOrientationDisagrees;
+            }
+        }
+    }
+}
+
+test "adaptive_exact orientation in three dimensions agrees with an independent exact volume" {
+    inline for (.{ g.Point3f, g.Point3d }) |P| {
+        const T = ScalarOf(P);
+        const corpus = corpusOf(T);
+        for (0..corpus.len) |i| {
+            const j = (i + 1) % corpus.len;
+            const k = (i + 2) % corpus.len;
+            const l = (i + 3) % corpus.len;
+            const expected = orient3Reference(
+                T,
+                .{ corpus[i][0], corpus[i][1], corpus[i][2] },
+                .{ corpus[j][0], corpus[j][1], corpus[j][2] },
+                .{ corpus[k][0], corpus[k][1], corpus[k][2] },
+                .{ corpus[l][0], corpus[l][1], corpus[l][2] },
+            );
+            const given = try P.orientation(
+                try P.init(corpus[i][0], corpus[i][1], corpus[i][2]),
+                try P.init(corpus[j][0], corpus[j][1], corpus[j][2]),
+                try P.init(corpus[k][0], corpus[k][1], corpus[k][2]),
+                try P.init(corpus[l][0], corpus[l][1], corpus[l][2]),
+                .adaptive_exact,
+            );
+            if (given != expected) {
+                std.debug.print("3D row {d}: expected {any}, got {any}\n", .{ i, expected, given });
+                return error.ExactOrientationDisagrees;
+            }
+        }
+    }
+}
+
+test "adaptive_exact orientation in four dimensions agrees with an independent exact determinant" {
+    inline for (.{ g.Point4f, g.Point4d }) |P| {
+        const T = ScalarOf(P);
+        const corpus = corpusOf(T);
+        for (0..corpus.len) |i| {
+            const j = (i + 1) % corpus.len;
+            const k = (i + 2) % corpus.len;
+            const l = (i + 3) % corpus.len;
+            const expected = orient4Reference(T, corpus[i], corpus[j], corpus[k], corpus[l]);
+            const given = try P.orientation(
+                try P.init(corpus[i][0], corpus[i][1], corpus[i][2], corpus[i][3]),
+                try P.init(corpus[j][0], corpus[j][1], corpus[j][2], corpus[j][3]),
+                try P.init(corpus[k][0], corpus[k][1], corpus[k][2], corpus[k][3]),
+                try P.init(corpus[l][0], corpus[l][1], corpus[l][2], corpus[l][3]),
+                .adaptive_exact,
+            );
+            if (given != expected) {
+                std.debug.print("4D row {d}: expected {any}, got {any}\n", .{ i, expected, given });
+                return error.ExactOrientationDisagrees;
+            }
+        }
+    }
+}
+
+test "adaptive_exact ball containment agrees with an independent exact squared distance" {
+    inline for (.{
+        g.Circle2f, g.Circle2d, g.Sphere3f, g.Sphere3d, g.Hypersphere4f, g.Hypersphere4d,
+    }) |Ball| {
+        const T = @FieldType(Ball, "radius");
+        const P = @FieldType(Ball, "center");
+        const dim = comptime fieldCountOf(P);
+        const corpus = corpusOf(T);
+        for ([_]T{ 1, 0.5 }) |radius| {
+            for (0..corpus.len) |i| {
+                for (0..corpus.len) |j| {
+                    const expected = containmentReference(T, dim, corpus[i][0..dim].*, radius, corpus[j][0..dim].*);
+                    const ball = try Ball.init(try pointOf(P, dim, corpus[i]), radius);
+                    const given = try ball.contains(try pointOf(P, dim, corpus[j]), .adaptive_exact);
+                    // The boundary is INSIDE, so zero counts with the negative
+                    // side and only a strictly positive exact value is outside.
+                    const wanted = expected != .positive;
+                    if (given != wanted) {
+                        std.debug.print(
+                            "ball {d}/{d}/{any}: expected {any}, got {any}\n",
+                            .{ i, j, radius, wanted, given },
+                        );
+                        return error.ExactContainmentDisagrees;
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "adaptive_exact ball tangency agrees with an independent exact separation" {
+    inline for (.{
+        g.Circle2f, g.Circle2d, g.Sphere3f, g.Sphere3d, g.Hypersphere4f, g.Hypersphere4d,
+    }) |Ball| {
+        const T = @FieldType(Ball, "radius");
+        const P = @FieldType(Ball, "center");
+        const dim = comptime fieldCountOf(P);
+        const corpus = corpusOf(T);
+        for (0..corpus.len) |i| {
+            const j = (i + 1) % corpus.len;
+            // The module answers `.coincident` before it consults either exact
+            // sign, and it decides that on the centres and the radii alone: a
+            // separation that is exactly zero with equal radii is one ball.
+            var centres_equal = true;
+            inline for (0..dim) |index| {
+                if (corpus[i][index] != corpus[j][index]) centres_equal = false;
+            }
+            for ([_]T{ 0.5, 1 }) |first_radius| {
+                for ([_]T{ 0.5, 1 }) |second_radius| {
+                    // Both comparisons are the same exact form over the same
+                    // separation: once against `r1 + r2`, once against `r1 - r2`.
+                    // The radii and their sum and difference are exact here, so
+                    // the only thing the reference has to get right is the
+                    // separation itself.
+                    const outer = tangencyReference(
+                        T,
+                        dim,
+                        corpus[i][0..dim].*,
+                        corpus[j][0..dim].*,
+                        first_radius + second_radius,
+                    );
+                    const inner = tangencyReference(
+                        T,
+                        dim,
+                        corpus[i][0..dim].*,
+                        corpus[j][0..dim].*,
+                        first_radius - second_radius,
+                    );
+                    const ball = try Ball.init(try pointOf(P, dim, corpus[i]), first_radius);
+                    const other = try Ball.init(try pointOf(P, dim, corpus[j]), second_radius);
+                    const common = ball.intersect(other, .adaptive_exact) catch |err| {
+                        // A construction that leaves the format is reported,
+                        // and a reported failure has no tag to compare against.
+                        if (err == error.NonFiniteResult) continue;
+                        return err;
+                    };
+                    const tag = std.meta.Tag(@TypeOf(common));
+                    const given = std.meta.activeTag(common);
+                    if (centres_equal and first_radius == second_radius) {
+                        try std.testing.expectEqual(tag.coincident, given);
+                    } else if (outer == .positive) {
+                        try std.testing.expectEqual(tag.none, given);
+                    } else if (outer == .zero or inner == .zero) {
+                        try std.testing.expectEqual(tag.point, given);
+                    } else if (inner == .negative) {
+                        try std.testing.expectEqual(tag.contained, given);
+                    } else {
+                        try std.testing.expectEqual(tag.two_points, given);
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "adaptive_exact ray-against-ball agrees with an independent exact quadratic" {
+    inline for (.{
+        .{ g.Circle2f, g.Ray2f },
+        .{ g.Circle2d, g.Ray2d },
+        .{ g.Sphere3f, g.Ray3f },
+        .{ g.Sphere3d, g.Ray3d },
+        .{ g.Hypersphere4f, g.Ray4f },
+        .{ g.Hypersphere4d, g.Ray4d },
+    }) |Case| {
+        const Ball: type = Case[0];
+        const Ray: type = Case[1];
+        const P = @FieldType(Ball, "center");
+        const V = @FieldType(Ray, "direction");
+        const T = @FieldType(Ball, "radius");
+        const dim = comptime fieldCountOf(P);
+        const corpus = corpusOf(T);
+        const radius: T = 1;
+        for (0..corpus.len) |i| {
+            for ([_]usize{ 1, 5 }) |origin_step| {
+                for ([_]usize{ 3, 9 }) |direction_step| {
+                    const k = (i + origin_step) % corpus.len;
+                    const j = (i + direction_step) % corpus.len;
+                    const ball = try Ball.init(try pointOf(P, dim, corpus[i]), radius);
+                    // The reference reads the direction the ray STORED, which
+                    // is the normalized one the predicate is given.
+                    const ray = Ray.init(
+                        try pointOf(P, dim, corpus[k]),
+                        try vectorOf(V, dim, corpus[j]),
+                    ) catch |err| {
+                        // A zero direction is not a ray and an overflowing
+                        // normalization left the format: neither is a
+                        // disagreement about a sign.
+                        if (err == error.Degenerate or
+                            err == error.NonFiniteInput or
+                            err == error.NonFiniteResult) continue;
+                        return err;
+                    };
+                    const common = ball.intersectRay(ray, .adaptive_exact) catch |err| {
+                        if (err == error.NonFiniteResult) continue;
+                        return err;
+                    };
+                    const given = std.meta.activeTag(common);
+                    const discriminant = rayDiscriminantReference(
+                        T,
+                        dim,
+                        corpus[i][0..dim].*,
+                        corpus[k][0..dim].*,
+                        ray.direction.toArray(),
+                        radius,
+                    );
+                    if (discriminant == .negative) {
+                        // A negative discriminant settles the question before
+                        // any construction runs, so nothing can be common.
+                        if (given != .none) {
+                            std.debug.print("ray {d}/{d}/{d}: negative discriminant, tag {any}\n", .{ i, k, j, given });
+                            return error.ExactRayDisagrees;
+                        }
+                    } else if (containmentReference(
+                        T,
+                        dim,
+                        corpus[i][0..dim].*,
+                        radius,
+                        corpus[k][0..dim].*,
+                    ) == .negative) {
+                        // The origin is strictly inside, so the common set is
+                        // the run from the origin out to the surface: the far
+                        // root is positive exactly because the perpendicular
+                        // distance is below the radius.
+                        if (given != .segment) {
+                            std.debug.print("ray {d}/{d}/{d}: origin inside, tag {any}\n", .{ i, k, j, given });
+                            return error.ExactRayDisagrees;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+test "exact orientation keeps mixed normal and subnormal collinearity" {
+    inline for (.{ g.Point2f, g.Point2d }) |P| {
+        const T = ScalarOf(P);
+        const Bits = @Int(.unsigned, @bitSizeOf(T));
+        const tiny: T = @bitCast(@as(Bits, 1));
+        var coordinates = [_]T{ 1, 2, tiny, tiny * 2 };
+        std.mem.doNotOptimizeAway(&coordinates);
+        const origin = try P.init(0, 0);
+        const normal = try P.init(coordinates[0], coordinates[1]);
+        const subnormal = try P.init(coordinates[2], coordinates[3]);
+        try std.testing.expectEqual(g.Sign.zero, try P.orientation(origin, normal, subnormal, .adaptive_exact));
+    }
 }

@@ -4,7 +4,8 @@ const common = @import("scalar_c23_common.zig");
 /// The bounded C23 power families use at most 68,800 exact bits for a
 /// binary64 minimum subnormal raised to the 64th power.  The extra capacity is
 /// deliberate: it also covers one-bit rounding shifts and the compoundn
-/// expansion of `1 + x` before exponentiation.
+/// expansion of `1 + x` before exponentiation.  Rootn needs far less and
+/// carries its own bound in `rootStorageLimbs`.
 pub const limb_count: usize = 2048;
 pub const capacity_bits: usize = limb_count * 64;
 pub const max_degree: i64 = 64;
@@ -15,10 +16,34 @@ comptime {
     if (max_exact_bits + 2 > capacity_bits) @compileError("exact power bound exceeds limb capacity");
 }
 
-fn Arithmetic(comptime storage_limbs: usize) type {
-    return struct {
-        const storage_bits = storage_limbs * 64;
+/// The fixed-limb storage of one `Arithmetic` instantiation, and how its
+/// scaled comparisons align two integers that carry different shifts.
+const Layout = struct {
+    limbs: usize,
+    /// `true` when `compareScaled` aligns unequal shifts with
+    /// `compareVirtualShift` instead of materializing the shifted operand.
+    /// The power families compare a numerator against a shifted denominator
+    /// and keep that measured path; the root families compare integers whose
+    /// shifts differ by an exponent-sized amount, which their narrower storage
+    /// cannot hold, so they always align without materializing.
+    virtual_alignment: bool,
+};
 
+/// The exact arithmetic shared by both families, at one storage width.
+/// `pownFinite` and `compoundFinite` instantiate it at `storageLimbs`, and
+/// `rootFinite` at the narrower `rootStorageLimbs`.
+fn Arithmetic(comptime storage_limbs: usize) type {
+    return ArithmeticLayout(.{
+        .limbs = storage_limbs,
+        .virtual_alignment = storage_limbs == limb_count,
+    });
+}
+
+fn ArithmeticLayout(comptime layout: Layout) type {
+    const storage_limbs = layout.limbs;
+    const storage_bits = storage_limbs * 64;
+
+    return struct {
         const Big = struct {
             // Exactly limbs[0..len] are initialized; limbs[len..] are never read.
             limbs: [storage_limbs]u64,
@@ -499,7 +524,10 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             if (left_top < right_top) return -1;
             if (left_top > right_top) return 1;
 
-            if (left_shift != right_shift and storage_limbs == limb_count) {
+            if (left_shift != right_shift and layout.virtual_alignment) {
+                // The shift difference is an exponent-sized amount, so it is
+                // aligned logically instead of being materialized into storage
+                // that only holds the active prefixes.
                 return compareVirtualShift(left, left_shift, right, right_shift);
             }
             if (left_shift > right_shift) {
@@ -533,8 +561,14 @@ fn Arithmetic(comptime storage_limbs: usize) type {
             const right_extra: usize = @intCast(right_shift - common_shift);
             const left_limbs = left.len + left_extra / 64 + @intFromBool(left_extra & 63 != 0);
             const right_limbs = right.len + right_extra / 64 + @intFromBool(right_extra & 63 != 0);
-            // Each side carries the shift the materialized path would have
-            // applied to one side only, so the same storage bound still holds.
+            // `compareScaled` only aligns a pair that reaches the same leading
+            // bit, so on both sides `bits + own shift` equals the other side's
+            // bit length.  Each aligned length is therefore its own operand's
+            // width plus at most a limb of rounding, never the exponent-sized
+            // shift difference.  The walk reads each side through
+            // `shiftedLimb`, which answers from the initialized prefix alone,
+            // so the wider logical range costs no storage and reads nothing
+            // past `len`.
             std.debug.assert(left_limbs <= storage_limbs);
             std.debug.assert(right_limbs <= storage_limbs);
 
@@ -1101,6 +1135,32 @@ fn storageLimbs(comptime Format: type) usize {
     return limits.limbs;
 }
 
+/// Limb slack of the root bound, covering what the formula cannot state exactly:
+/// the carry limb that ends a schoolbook row, and the single extra limb a
+/// sub-limb shift adds to an aligned comparison.
+const root_limb_slack: usize = 4;
+
+/// A conservative root-only storage bound, not a minimum allocation.
+/// Reserve `2 * precision` bits for a midpoint significand, then its power
+/// through `max_degree`, plus an input significand for reciprocal comparisons.
+/// Adjacent encoded candidates actually have decoded exponent gaps of at most
+/// one, so their midpoint significands are narrower than this allowance.
+/// Candidate powers and overflow-threshold products also fit this bound.
+fn rootStorageLimbs(comptime Format: type) usize {
+    const precision: usize = Arithmetic(storageLimbs(Format)).formatInfo(Format).precision_bits;
+    const degree: usize = @intCast(max_degree);
+    const power_bits = 2 * precision * degree;
+    const product_bits = power_bits + precision;
+    const limbs = (product_bits + 63) / 64 + root_limb_slack;
+    comptime {
+        // The binding row is the aligned comparison, which walks each side's
+        // length plus the shift of the side that carries it, up to two limbs of
+        // rounding beyond `product_bits`.
+        if (limbs * 64 < product_bits + 2 * 64) @compileError("exact root storage bound exceeded");
+    }
+    return limbs;
+}
+
 /// Rounds an integer power of a finite positive base once to the target format.
 pub fn pownFinite(comptime Format: type, base: Format.Float, exponent: i64) Format.Float {
     return Arithmetic(storageLimbs(Format)).pownFinite(Format, base, exponent);
@@ -1112,8 +1172,14 @@ pub fn compoundFinite(comptime Format: type, value: Format.Float, exponent: i64)
 }
 
 /// Rounds a finite positive root by exact candidate and midpoint comparisons.
+/// Binary32 and binary64 use narrower storage and virtual alignment. Binary16
+/// retains its measured 32-limb path, including its specialized multiplication.
 pub fn rootFinite(comptime Format: type, value: Format.Float, exponent: i64) Format.Float {
-    return Arithmetic(storageLimbs(Format)).rootFinite(Format, value, exponent);
+    if (Format == common.H) return Arithmetic(storageLimbs(Format)).rootFinite(Format, value, exponent);
+    return ArithmeticLayout(.{
+        .limbs = rootStorageLimbs(Format),
+        .virtual_alignment = true,
+    }).rootFinite(Format, value, exponent);
 }
 
 test "exact division retains a small quotient and remainder across many limbs" {
@@ -1625,4 +1691,68 @@ test "binary64 exact arithmetic compareScaled orders shifted integer pairs" {
     try std.testing.expectEqual(@as(i8, 0), Exact.compareScaled(&zero, -3, &zero, -3));
     try std.testing.expectEqual(@as(i8, -1), Exact.compareScaled(&zero, 3, &one, -5));
     try std.testing.expectEqual(@as(i8, 1), Exact.compareScaled(&one, -5, &zero, 3));
+}
+
+test "rootn answers its boundary inputs from its own narrower storage width" {
+    // Exercise extreme finite inputs, maximal bounded degrees, reciprocal
+    // roots, and the exact overflow threshold. The limb allowance is
+    // conservative; these operands need not occupy every reserved limb.
+    // Binary32 and binary64 also compare against the full power layout.
+    const Check = struct {
+        fn agreeWithPowerStorage(
+            comptime Format: type,
+            value_bits: Format.Bits,
+            degree: i64,
+        ) !void {
+            const value = Format.fromBits(value_bits);
+            try std.testing.expectEqual(
+                Format.toBits(Arithmetic(storageLimbs(Format)).rootFinite(Format, value, degree)),
+                Format.toBits(rootFinite(Format, value, degree)),
+            );
+        }
+
+        fn expectExact(
+            comptime Format: type,
+            value_bits: Format.Bits,
+            degree: i64,
+            expected_bits: Format.Bits,
+        ) !void {
+            try std.testing.expectEqual(
+                expected_bits,
+                Format.toBits(rootFinite(Format, Format.fromBits(value_bits), degree)),
+            );
+            if (Format != common.H) try agreeWithPowerStorage(Format, value_bits, degree);
+        }
+    };
+
+    // binary64: `2^-1024` is a subnormal whose 64th roots are exact, and both
+    // searches compare a full-width power against the input at the smallest
+    // exponents a binary64 can hold.
+    try Check.expectExact(common.D, 0x0004_0000_0000_0000, 64, 0x3ef0_0000_0000_0000);
+    try Check.expectExact(common.D, 0x0004_0000_0000_0000, -64, 0x40f0_0000_0000_0000);
+    // The smallest subnormal is its own root, its reciprocal root overflows
+    // through the exact overflow threshold, and the largest finite value is its
+    // own root.
+    try Check.expectExact(common.D, 0x0000_0000_0000_0001, 1, 0x0000_0000_0000_0001);
+    try Check.expectExact(common.D, 0x0000_0000_0000_0001, -1, 0x7ff0_0000_0000_0000);
+    try Check.expectExact(common.D, 0x7fef_ffff_ffff_ffff, 1, 0x7fef_ffff_ffff_ffff);
+    // The smallest subnormal at the largest degree again, in both directions.
+    // These roots are irrational, so the search settles them with the midpoint
+    // comparison after a full-width midpoint power.
+    try Check.agreeWithPowerStorage(common.D, 0x0000_0000_0000_0001, 64);
+    try Check.agreeWithPowerStorage(common.D, 0x0000_0000_0000_0001, -64);
+
+    // binary32: `2^-128` is a subnormal whose 32nd roots are exact.
+    try Check.expectExact(common.F, 0x0020_0000, 32, 0x3d80_0000);
+    try Check.expectExact(common.F, 0x0020_0000, -32, 0x4180_0000);
+    try Check.expectExact(common.F, 0x0000_0001, 1, 0x0000_0001);
+    try Check.expectExact(common.F, 0x0000_0001, -1, 0x7f80_0000);
+    try Check.agreeWithPowerStorage(common.F, 0x0000_0001, 32);
+    try Check.agreeWithPowerStorage(common.F, 0x0000_0001, -32);
+
+    // binary16: `2^-16` is a subnormal whose 16th roots are exact.
+    try Check.expectExact(common.H, 0x0100, 16, 0x3800);
+    try Check.expectExact(common.H, 0x0100, -16, 0x4000);
+    try Check.expectExact(common.H, 0x0001, 1, 0x0001);
+    try Check.expectExact(common.H, 0x0001, -1, 0x7c00);
 }

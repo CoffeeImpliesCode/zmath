@@ -34,6 +34,16 @@ const quiet_nan_bit: u16 = 0x0200;
 const minus_infinity_bits: u16 = 0xfc00;
 const domain_nan_bits: u16 = 0x7e00;
 
+/// The binary logarithm of a `binary16` value.
+///
+/// A negative `value`, `-infinity` included, is out of domain and gives the
+/// positive canonical quiet NaN (0x7e00). The boundary `+0` and `-0` are in
+/// domain and give `-infinity`; `+infinity` gives `+infinity`. A NaN input is
+/// returned with its quiet bit set, its sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The returned
+/// float is the whole result: no error code, floating-point exception flag, or
+/// retained status reports the domain error.
 pub fn log2h(value: f16) f16 {
     const bits: u16 = @bitCast(value);
     const magnitude = bits & magnitude_mask;

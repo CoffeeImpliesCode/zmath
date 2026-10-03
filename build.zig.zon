@@ -75,8 +75,8 @@
         "build.zig.zon",
         "cross-test.profile.sh",
         "src",
-        // For example...
-        //"LICENSE",
-        //"README.md",
+        "API.md",
+        "PROJECT.md",
+        "spec/core-math-2026-08-22.md",
     },
 }

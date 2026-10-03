@@ -1,3 +1,14 @@
+//! The C23 IEC 60559 operations every fixed supported format can perform:
+//! signaling-NaN canonicalization, NaN construction from a diagnostic tag, and
+//! the `nextUp`, `nextDown` and `nextToward` steps.
+//!
+//! This module is private plumbing for `ieee.zig`, which re-exports every entry
+//! point below as `zmath.ieee.<name><h,f,d>`. It builds its results from target
+//! bits rather than host arithmetic, so a NaN keeps its sign and payload and no
+//! call depends on the ambient floating-point environment. Nothing here
+//! allocates and nothing is retained: `tag` is borrowed for the duration of the
+//! call that reads it.
+
 const common = @import("scalar_c23_common.zig");
 const types = @import("scalar_c23_types.zig");
 
@@ -116,62 +127,115 @@ fn nextToward(
     return nextDown(Format, sign_mask, value);
 }
 
+/// Returns `value` with any signaling NaN quieted, as a `CanonicalizeResult`
+/// whose `ok` is true on every path.
+///
+/// The sign and the diagnostic payload survive, so a quiet NaN comes back
+/// bit-for-bit unchanged and only the quiet bit is ever set.
 pub fn canonicalizeh(value: f16) types.CanonicalizeResult(f16) {
     return canonicalize(common.H, value);
 }
 
+/// Returns `value` with any signaling NaN quieted, at binary32 width.
+///
+/// `ok` is true on every path, as it is for `canonicalizeh`.
 pub fn canonicalizef(value: f32) types.CanonicalizeResult(f32) {
     return canonicalize(common.F, value);
 }
 
+/// Returns `value` with any signaling NaN quieted, at binary64 width.
+///
+/// `ok` is true on every path, as it is for `canonicalizeh`.
 pub fn canonicalized(value: f64) types.CanonicalizeResult(f64) {
     return canonicalize(common.D, value);
 }
 
+/// Builds a positive quiet NaN whose diagnostic payload is `tag` read as
+/// hexadecimal digits.
+///
+/// `tag` is borrowed for the duration of this call only and is copied into the
+/// result, so the caller may reuse or free the slice as soon as the call
+/// returns. An empty `tag`, a character outside `0-9`, `A-F` and `a-f`, and a
+/// value larger than the 9-bit binary16 payload field each produce the positive
+/// canonical quiet NaN instead, so a caller cannot tell a rejected tag from an
+/// intended payload of zero.
 pub fn nanh(tag: []const u8) f16 {
     return nan(common.H, 0x01ff, tag);
 }
 
+/// Builds a positive quiet NaN from a hexadecimal diagnostic payload `tag`, with
+/// the same grammar and the same positive canonical quiet NaN fallback as
+/// `nanh` and a 22-bit payload field.
 pub fn nanf(tag: []const u8) f32 {
     return nan(common.F, 0x003f_ffff, tag);
 }
 
+/// Builds a positive quiet NaN from a hexadecimal diagnostic payload `tag`, with
+/// the same grammar and the same positive canonical quiet NaN fallback as
+/// `nanh` and a 51-bit payload field.
 pub fn nand(tag: []const u8) f64 {
     return nan(common.D, double_payload_mask, tag);
 }
 
+/// Returns the next representable binary16 value after `value` in the direction
+/// of `toward`, which is a binary64 target rather than the result type.
+///
+/// A NaN `value` comes back with its quiet bit set and its sign and payload
+/// kept. A NaN `toward` is narrowed to binary16 with its sign and the
+/// high-order payload bits that fit kept and its quiet bit set. `value` equal to
+/// `toward` returns `value`, except at zero, where the sign of `toward` wins.
 pub fn nextTowardh(value: f16, toward: f64) f16 {
     return nextToward(common.H, 0x8000, 0x01ff, 42, value, toward);
 }
 
+/// Returns the next representable binary32 value after `value` in the direction
+/// of `toward`, with the narrowing rules of `nextTowardh` at binary32 width.
 pub fn nextTowardf(value: f32, toward: f64) f32 {
     return nextToward(common.F, 0x8000_0000, 0x003f_ffff, 29, value, toward);
 }
 
+/// Returns the next representable binary64 value after `value` in the direction
+/// of `toward`. Both operands are binary64 here, so no narrowing is involved.
 pub fn nextTowardd(value: f64, toward: f64) f64 {
     return nextToward(common.D, double_sign_mask, double_payload_mask, 0, value, toward);
 }
 
+/// Returns the next representable binary16 value above `value`.
+///
+/// `+infinity` returns unchanged, a NaN comes back with its quiet bit set and
+/// its sign and payload kept, and `-0.0` gives the smallest positive subnormal.
 pub fn nextUph(value: f16) f16 {
     return nextUp(common.H, 0x8000, value);
 }
 
+/// Returns the next representable binary32 value above `value`, with the same
+/// infinity, NaN and signed-zero rules as `nextUph`.
 pub fn nextUpf(value: f32) f32 {
     return nextUp(common.F, 0x8000_0000, value);
 }
 
+/// Returns the next representable binary64 value above `value`, with the same
+/// infinity, NaN and signed-zero rules as `nextUph`.
 pub fn nextUpd(value: f64) f64 {
     return nextUp(common.D, double_sign_mask, value);
 }
 
+/// Returns the next representable binary16 value below `value`.
+///
+/// `-infinity` returns unchanged, a NaN comes back with its quiet bit set and
+/// its sign and payload kept, and `+0.0` gives the smallest negative subnormal.
 pub fn nextDownh(value: f16) f16 {
     return nextDown(common.H, 0x8000, value);
 }
 
+/// Returns the next representable binary32 value below `value`, with the same
+/// infinity, NaN and signed-zero rules as `nextDownh`.
 pub fn nextDownf(value: f32) f32 {
     return nextDown(common.F, 0x8000_0000, value);
 }
 
+/// Returns the next representable binary64 value below `value`, with the same
+/// infinity, NaN and signed-zero rules as `nextDownh`.
 pub fn nextDownd(value: f64) f64 {
     return nextDown(common.D, double_sign_mask, value);
 }

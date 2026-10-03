@@ -113,101 +113,215 @@ fn roundBits(comptime Config: type, comptime mode: IntegralRound, bits: Config.B
     return (bits & Config.sign_mask) | rounded_magnitude;
 }
 
+/// Rounds `value` toward positive infinity. The direction is fixed in code and
+/// does not depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn ceilh(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
     return common.H.fromBits(roundBits(HConfig, .toward_positive, bits));
 }
 
+/// Rounds `value` toward positive infinity. The direction is fixed in code and
+/// does not depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn ceilf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
     return common.F.fromBits(roundBits(FConfig, .toward_positive, bits));
 }
 
+/// Rounds `value` toward positive infinity. The direction is fixed in code and
+/// does not depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn ceild(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
     return common.D.fromBits(roundBits(DConfig, .toward_positive, bits));
 }
 
+/// Rounds `value` toward negative infinity. The direction is fixed in code and
+/// does not depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn floorh(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
     return common.H.fromBits(roundBits(HConfig, .toward_negative, bits));
 }
 
+/// Rounds `value` toward negative infinity. The direction is fixed in code and
+/// does not depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn floorf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
     return common.F.fromBits(roundBits(FConfig, .toward_negative, bits));
 }
 
+/// Rounds `value` toward negative infinity. The direction is fixed in code and
+/// does not depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn floord(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
     return common.D.fromBits(roundBits(DConfig, .toward_negative, bits));
 }
 
+/// Rounds `value` toward zero. The direction is fixed in code and does not
+/// depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn trunch(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
     return common.H.fromBits(roundBits(HConfig, .toward_zero, bits));
 }
 
+/// Rounds `value` toward zero. The direction is fixed in code and does not
+/// depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn truncf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
     return common.F.fromBits(roundBits(FConfig, .toward_zero, bits));
 }
 
+/// Rounds `value` toward zero. The direction is fixed in code and does not
+/// depend on the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn truncd(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
     return common.D.fromBits(roundBits(DConfig, .toward_zero, bits));
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code and does not depend on the ambient
+/// rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn nearbyinth(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
     return common.H.fromBits(roundBits(HConfig, .nearest_even, bits));
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code and does not depend on the ambient
+/// rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn nearbyintf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
     return common.F.fromBits(roundBits(FConfig, .nearest_even, bits));
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour. The direction is fixed in code and does not depend on the ambient
+/// rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn nearbyintd(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
     return common.D.fromBits(roundBits(DConfig, .nearest_even, bits));
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour, by calling `nearbyinth`. Unlike the C function of the same name
+/// it never consults the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn rinth(value: f16) f16 {
     return nearbyinth(value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour, by calling `nearbyintf`. Unlike the C function of the same name
+/// it never consults the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn rintf(value: f32) f32 {
     return nearbyintf(value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour, by calling `nearbyintd`. Unlike the C function of the same name
+/// it never consults the ambient rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn rintd(value: f64) f64 {
     return nearbyintd(value);
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code and does not depend on the ambient
+/// rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn roundh(value: f16) f16 {
     const bits: HConfig.Bits = common.H.toBits(value);
     return common.H.fromBits(roundBits(HConfig, .nearest_from_zero, bits));
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code and does not depend on the ambient
+/// rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn roundf(value: f32) f32 {
     const bits: FConfig.Bits = common.F.toBits(value);
     return common.F.fromBits(roundBits(FConfig, .nearest_from_zero, bits));
 }
 
+/// Rounds `value` to the nearest integer, sending a halfway case away from
+/// zero. The direction is fixed in code and does not depend on the ambient
+/// rounding mode.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn roundd(value: f64) f64 {
     const bits: DConfig.Bits = common.D.toBits(value);
     return common.D.fromBits(roundBits(DConfig, .nearest_from_zero, bits));
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour, by calling `nearbyinth`. The ambient rounding mode is not read.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn roundevenh(value: f16) f16 {
     return nearbyinth(value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour, by calling `nearbyintf`. The ambient rounding mode is not read.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn roundevenf(value: f32) f32 {
     return nearbyintf(value);
 }
 
+/// Rounds `value` to the nearest integer, resolving a halfway case to the even
+/// neighbour, by calling `nearbyintd`. The ambient rounding mode is not read.
+///
+/// An infinity and a zero of either sign are returned unchanged; a NaN is
+/// returned with its quiet bit set, keeping its sign and payload.
 pub fn roundevend(value: f64) f64 {
     return nearbyintd(value);
 }

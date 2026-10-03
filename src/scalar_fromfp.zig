@@ -1,3 +1,13 @@
+//! Integral-valued floating conversions with explicit rounding and width.
+//!
+//! The direction selects this operation's result, not the process environment.
+//! Rounding precedes the range check. Positive widths are not capped.
+//! Signed ranges are `[-2^(width-1), 2^(width-1))`.
+//! Unsigned ranges are `[0, 2^width)`.
+//! Width zero, non-finite input, or an out-of-range rounded value returns the
+//! input format's positive canonical quiet NaN. Success retains the input
+//! floating type. The `x` spellings add no inexactness channel.
+
 const std = @import("std");
 const common = @import("scalar_c23_common.zig");
 const c23 = @import("scalar_c23_types.zig");
@@ -172,61 +182,85 @@ const F = BinaryFormat(common.F, 23, 8, 127);
 const D = BinaryFormat(common.D, 52, 11, 1023);
 
 /// Converts a binary16 value to an integral value using the selected C23 direction.
+///
+/// Uses the signed width and failure rules in the module contract.
 pub fn fromfph(value: f16, round: c23.FromFpRound, width: u32) f16 {
     return H.convert(value, round, width, false);
 }
 
 /// Converts a binary32 value to an integral value using the selected C23 direction.
+///
+/// Uses the signed width and failure rules in the module contract.
 pub fn fromfpf(value: f32, round: c23.FromFpRound, width: u32) f32 {
     return F.convert(value, round, width, false);
 }
 
 /// Converts a binary64 value to an integral value using the selected C23 direction.
+///
+/// Uses the signed width and failure rules in the module contract.
 pub fn fromfpd(value: f64, round: c23.FromFpRound, width: u32) f64 {
     return D.convert(value, round, width, false);
 }
 
 /// Converts a binary16 value to an unsigned integral value using the selected direction.
+///
+/// Uses the unsigned width and failure rules in the module contract.
 pub fn ufromfph(value: f16, round: c23.FromFpRound, width: u32) f16 {
     return H.convert(value, round, width, true);
 }
 
 /// Converts a binary32 value to an unsigned integral value using the selected direction.
+///
+/// Uses the unsigned width and failure rules in the module contract.
 pub fn ufromfpf(value: f32, round: c23.FromFpRound, width: u32) f32 {
     return F.convert(value, round, width, true);
 }
 
 /// Converts a binary64 value to an unsigned integral value using the selected direction.
+///
+/// Uses the unsigned width and failure rules in the module contract.
 pub fn ufromfpd(value: f64, round: c23.FromFpRound, width: u32) f64 {
     return D.convert(value, round, width, true);
 }
 
 /// Converts a binary16 value with the C23 inexact-reporting spelling.
+///
+/// Identical to `fromfph`, including its signed range and quiet-NaN refusal.
 pub fn fromfpxh(value: f16, round: c23.FromFpRound, width: u32) f16 {
     return H.convert(value, round, width, false);
 }
 
 /// Converts a binary32 value with the C23 inexact-reporting spelling.
+///
+/// Identical to `fromfpf`, including its signed range and quiet-NaN refusal.
 pub fn fromfpxf(value: f32, round: c23.FromFpRound, width: u32) f32 {
     return F.convert(value, round, width, false);
 }
 
 /// Converts a binary64 value with the C23 inexact-reporting spelling.
+///
+/// Identical to `fromfpd`, including its signed range and quiet-NaN refusal.
 pub fn fromfpxd(value: f64, round: c23.FromFpRound, width: u32) f64 {
     return D.convert(value, round, width, false);
 }
 
 /// Converts a binary16 value to an unsigned value with the C23 x spelling.
+///
+/// Identical to `ufromfph`, including its unsigned range and quiet-NaN refusal.
 pub fn ufromfpxh(value: f16, round: c23.FromFpRound, width: u32) f16 {
     return H.convert(value, round, width, true);
 }
 
 /// Converts a binary32 value to an unsigned value with the C23 x spelling.
+///
+/// Identical to `ufromfpf`, including its unsigned range and quiet-NaN refusal.
 pub fn ufromfpxf(value: f32, round: c23.FromFpRound, width: u32) f32 {
     return F.convert(value, round, width, true);
 }
 
 /// Converts a binary64 value to an unsigned value with the C23 x spelling.
+///
+/// Identical to `ufromfpd`, including its unsigned range and quiet-NaN refusal.
 pub fn ufromfpxd(value: f64, round: c23.FromFpRound, width: u32) f64 {
     return D.convert(value, round, width, true);
 }

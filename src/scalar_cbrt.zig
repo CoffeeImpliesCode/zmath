@@ -53,6 +53,16 @@ fn copySignD(value: f64, sign: f64) f64 {
     return @bitCast((value_bits & ~sign_mask_d) | (sign_bits & sign_mask_d));
 }
 
+/// Cube root of a `binary16` value, defined on the whole real line.
+///
+/// A negative argument gives the negative real root, not a NaN, and the result
+/// carries the sign of `value`. Either infinity and either signed zero are
+/// returned unchanged; a NaN input is returned with its quiet bit set, its
+/// sign and payload kept.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The
+/// returned float is the whole result: no error code, floating-point exception
+/// flag, or retained status reports anything else.
 pub fn cbrth(value: f16) f16 {
     @setFloatMode(.strict);
     const bits: u16 = @bitCast(value);
@@ -112,6 +122,12 @@ pub fn cbrth(value: f16) f16 {
     return @floatCast(cbrtf(value_f));
 }
 
+/// Cube root of a `binary32` value, defined on the whole real line.
+///
+/// A negative argument gives the negative real root, and the result carries
+/// the sign of `value`. Either infinity and either signed zero are returned
+/// unchanged; a NaN input is returned with its quiet bit set, its sign and
+/// payload kept.
 pub fn cbrtf(value: f32) f32 {
     @setFloatMode(.strict);
     const bits: u32 = @bitCast(value);
@@ -187,6 +203,12 @@ pub fn cbrtf(value: f32) f32 {
     return @floatCast(rounded_result);
 }
 
+/// Cube root of a `binary64` value, defined on the whole real line.
+///
+/// A negative argument gives the negative real root, and the result carries
+/// the sign of `value`. Either infinity and either signed zero are returned
+/// unchanged; a NaN input is returned with its quiet bit set, its sign and
+/// payload kept.
 pub fn cbrtd(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);

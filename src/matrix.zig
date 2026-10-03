@@ -1,5 +1,5 @@
 //! Fixed-size matrices: the one structural generic in the zmath API
-//! (`API.md:18`) and the module `API.md:913-958` specifies.
+//! (`API.md#scope`) and the module `API.md#matrices` specifies.
 //!
 //! ## Storage and access
 //!
@@ -56,14 +56,15 @@
 //!
 //! ## Special values
 //!
-//! Arithmetic on a real entry follows `spec/core-math-2026-08-22.md:769-801`: a
-//! NaN operand propagates with its sign and diagnostic payload intact and its
-//! quiet bit set, and an invalid operation on non-NaN operands gives the
-//! POSITIVE canonical quiet NaN of the format, which a host unit does not
-//! produce on its own. A complex entry is `zmath.complex` arithmetic, which
-//! already meets the same rules, so this module composes that kernel rather
-//! than restating it. zmath never reads, validates, sets, or restores `fenv`;
-//! the caller must keep round-to-nearest, ties-to-even active.
+//! Arithmetic on a real entry follows the encodings and the NaN rules of
+//! `spec/core-math-2026-08-22.md#special-values`: a NaN operand propagates
+//! with its sign and diagnostic payload intact and its quiet bit set, and an
+//! invalid operation on non-NaN operands gives the POSITIVE canonical quiet
+//! NaN of the format, which a host unit does not produce on its own. A complex
+//! entry is `zmath.complex` arithmetic, which already meets the same rules, so
+//! this module composes that kernel rather than restating it. zmath never
+//! reads, validates, sets, or restores `fenv`; the caller must keep
+//! round-to-nearest, ties-to-even active.
 //!
 //! ## Sizes
 //!
@@ -73,6 +74,33 @@
 //! treats every row alike and knows nothing about the interpretation.
 //!
 //! No operation here allocates. `Mat` is a comptime-bounded array.
+//!
+//! ## A shortest use
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn applyAndReject() void {
+//!     const rect = zmath.matrix.Mat(2, 4, f32).init(.{
+//!         .{ 1, 3, 5, 7 },
+//!         .{ 2, 4, 6, 8 },
+//!     });
+//!     // `init` takes a ROW-MAJOR literal and `data` is COLUMN-MAJOR, so
+//!     // `data[1]` is the second COLUMN and holds row 0 above row 1.
+//!     std.debug.assert(rect.data[1][0] == 3);
+//!
+//!     // A two-row matrix takes a four-lane COLUMN and returns a two-lane one.
+//!     const applied: zmath.vector.Vec2f =
+//!         rect.mulVec(zmath.vector.Vec4f.init(1, 1, 1, 1));
+//!     std.debug.assert(applied.eq(zmath.vector.Vec2f.init(16, 20)));
+//!
+//!     // A zero matrix has no pivot above the threshold, so the inverse is
+//!     // reported as `null` rather than as a zero or a non-finite matrix.
+//!     const inverse = zmath.matrix.inverseMat2f(zmath.matrix.Mat2f.fill(0));
+//!     std.debug.assert(inverse == null);
+//! }
+//! ```
 
 const std = @import("std");
 const complex = @import("complex.zig");
@@ -90,51 +118,22 @@ const Vec4d = vector.Vec4d;
 // ---------------------------------------------------------------------------
 // Entry types
 //
-// `API.md:934` admits exactly four entry types. The set lives in one place,
-// `entry_types`, because the guard below and a test both have to name it, and
-// two spellings of one set would eventually disagree.
+// `Component` is the private entry-type guard. Unsupported types are checked
+// at the actual `Mat` constructor boundary, not through a public test probe.
 // ---------------------------------------------------------------------------
-
-/// The entry types `Mat` accepts: `f32`, `f64`, `Complexf`, and `Complexd`.
-///
-/// This is public so that the restriction in `API.md:934` is observable. A
-/// `@compileError` cannot be asserted from a passing test, so the test asserts
-/// the predicate that the guard consults, and the guard consults nothing else.
-pub const entry_types = [_]type{ f32, f64, Complexf, Complexd };
-
-/// True when `Scalar` is one of `entry_types`.
-///
-/// The guard in `Component` is exactly this predicate, so a type this rejects
-/// is a type `Mat` refuses to instantiate.
-pub fn acceptsEntryType(comptime Scalar: type) bool {
-    inline for (entry_types) |candidate| {
-        if (candidate == Scalar) return true;
-    }
-    return false;
-}
 
 /// The real type each component of a `Scalar` entry has. It is `Scalar` itself
 /// for a real entry. A determinant keeps the entry type, so a complex matrix
 /// has a complex determinant and this is not that type.
 fn Component(comptime Scalar: type) type {
-    if (comptime !acceptsEntryType(Scalar)) {
-        @compileError(
-            "zmath.matrix: '" ++ @typeName(Scalar) ++ "' is not a zmath.matrix entry type. " ++
-                "The entry type is one of zmath.matrix.entry_types.",
-        );
-    }
     return switch (Scalar) {
         f32, f64 => Scalar,
         Complexf, Complexd => RealOf(Scalar),
-        else => @compileError("zmath.matrix: entry_types and this switch disagree"),
+        else => @compileError(
+            "zmath.matrix: unsupported entry type '" ++ @typeName(Scalar) ++
+                "'. Expected f32, f64, Complexf, or Complexd.",
+        ),
     };
-}
-
-comptime {
-    // Every listed type must map to a component type. Without this, a type
-    // could be added to `entry_types` and accepted by the guard while the
-    // switch above had no arm for it.
-    for (entry_types) |listed| _ = Component(listed);
 }
 
 /// The real type inside `Complexf` or `Complexd`.
@@ -167,7 +166,7 @@ fn oneOf(comptime Scalar: type) Scalar {
 // Entry arithmetic
 //
 // A real entry is IEEE arithmetic with the NaN rules of
-// `spec/core-math-2026-08-22.md:769-801`; a complex entry is the matching
+// `spec/core-math-2026-08-22.md#special-values`; a complex entry is the matching
 // `zmath.complex` kernel, which already implements those rules for both of its
 // components. Neither path calls a host libm.
 // ---------------------------------------------------------------------------
@@ -277,7 +276,7 @@ fn isFiniteEntry(comptime Scalar: type, value: Scalar) bool {
 // entry type, and a plain array otherwise. Always taking a plain array would
 // give a caller holding a `Vec3f` a second undocumented spelling of the same
 // three numbers at the call site; inventing `Vec1f` and `Vec5f` would
-// contradict `API.md:18`.
+// contradict `API.md#scope`.
 // ---------------------------------------------------------------------------
 
 /// The component names of the `Vec*` types, in declaration order.
@@ -333,7 +332,7 @@ fn laneSet(comptime V: type, v: *V, comptime index: usize, value: laneType(V)) v
 // Product typing
 //
 // The contract writes `mul` with undeclared `rows`, `columns`, and `Scalar`
-// (`API.md:941-946`), which is shorthand for "the operands carry them". Zig has
+// (`API.md#matrices`), which is shorthand for "the operands carry them". Zig has
 // no syntax for inferring a trailing type parameter, so the operands are taken
 // as `anytype` and the product type is computed and CHECKED here. That keeps
 // the contracted call shape `mul(output_columns, left, right)` with nothing
@@ -396,6 +395,11 @@ fn Product(comptime Left: type, comptime Right: type, comptime n_out_columns: us
 // ---------------------------------------------------------------------------
 
 /// A `n_rows` by `n_columns` matrix of `Scalar` entries, stored column-major.
+///
+/// `Scalar` must be `f32`, `f64`, `Complexf`, or
+/// `Complexd`, and any other entry type is a compile error that names it.
+/// `n_rows` and `n_columns` are each at least one, so the narrowest matrix this
+/// factory builds is 1 by 1 and a zero extent is a compile error too.
 pub fn Mat(
     comptime n_rows: usize,
     comptime n_columns: usize,
@@ -413,7 +417,7 @@ pub fn Mat(
     return struct {
         const Self = @This();
 
-        /// The entry type, one of `entry_types`.
+        /// The matrix entry type.
         pub const Element = Scalar;
         /// The real type each component of an entry has. It is `Element` itself
         /// when the entry is real. A determinant keeps the entry type, so a
@@ -425,8 +429,10 @@ pub fn Mat(
         /// The number of columns. `data` indexes it first, `at` and `set`
         /// second.
         pub const columns: usize = n_columns;
-        /// The vector type `mulVec` returns: `Vec3f` for a three-row `f32`
-        /// matrix, and `[rows]Element` where no named vector type matches.
+        /// The vector type `mulVec` returns, and it is ROW-sized: `Vec3f` for a
+        /// three-row `f32` matrix, and `[rows]Element` wherever no named vector
+        /// type matches, which is every complex matrix and every row count
+        /// outside two to four.
         pub const vector_type = lane;
 
         /// The entries, COLUMN-MAJOR: `data[column][row]`.
@@ -494,9 +500,12 @@ pub fn Mat(
 
         /// The entry at `row` and `column`, that is `data[column][row]`.
         ///
-        /// Both indices are runtime values, so the bounds are checked at
-        /// runtime. A compile error is impossible for a runtime index; the
-        /// panic names the bound instead.
+        /// Both indices are runtime values, so the bound is checked here and an
+        /// index outside the matrix PANICS in every optimize mode, ReleaseFast
+        /// and ReleaseSmall included: this is a `std.debug.panic`, not an
+        /// `assert`, so the check is never compiled away. A compile error is
+        /// impossible for a runtime index, and the message names the bound that
+        /// was violated.
         pub fn at(self: Self, row: usize, column: usize) Scalar {
             if (row >= n_rows) {
                 std.debug.panic(
@@ -513,7 +522,9 @@ pub fn Mat(
             return self.data[column][row];
         }
 
-        /// Writes `value` at `row` and `column`, checked as `at` is.
+        /// Writes `value` at `row` and `column`, checked exactly as `at` is: an
+        /// index outside the matrix panics in every optimize mode, and nothing is
+        /// written on that path.
         pub fn set(self: *Self, row: usize, column: usize, value: Scalar) void {
             if (row >= n_rows) {
                 std.debug.panic(
@@ -597,6 +608,17 @@ pub fn Mat(
         /// Applies the matrix to a COLUMN vector with `columns` components,
         /// returning a `rows`-component vector of `vector_type`.
         ///
+        /// The argument type is fixed at comptime and is NOT `vector_type` when
+        /// the matrix is not square: it is the named vector `Vec2f`, `Vec3f`, or
+        /// `Vec4f`, and the `d` counterparts, when the matrix is real and has
+        /// exactly that many columns, and the plain array `[columns]Element` in
+        /// every other case, which is every `Complexf` and `Complexd` matrix and
+        /// every column count outside two to four. The result stays row-sized,
+        /// so `Mat(2, 4, f32)` takes a `Vec4f` and returns a `Vec2f` while
+        /// `Mat(4, 2, f32)` takes a `Vec2f` and returns a `Vec4f`. A vector of
+        /// the wrong width or the wrong entry type does not convert: that call
+        /// is a compile error.
+        ///
         /// Each row of the result sums its products in increasing contraction
         /// index, starting from the index-zero product, and strictly: no
         /// reassociation and no fused multiply-add. See the module comment for
@@ -634,9 +656,10 @@ pub fn Mat(
         ///
         /// The result is a real number for a real matrix and a complex one for a
         /// complex matrix, so this is the only way to reach a complex
-        /// determinant. The named `determinantMat*` functions are the `f32` and
-        /// `f64` surface the contract asks for, and a complex-suffixed name would
-        /// be a naming convention `API.md:15` does not have.
+        /// determinant. A non-square instantiation is a compile error, not a
+        /// zero and not a `null`. The named `determinantMat*` functions are the
+        /// `f32` and `f64` surface the contract asks for, and a complex-suffixed
+        /// name would be a naming convention `API.md#scope` does not have.
         pub fn determinant(self: Self) Element {
             if (comptime n_rows != n_columns) {
                 @compileError(
@@ -791,7 +814,9 @@ fn cofactorDet(comptime M: type, value: *const M) M.Element {
 pub const inverse_pivot_threshold_f: f32 = 0x1p-21;
 
 /// The binary64 counterpart of `inverse_pivot_threshold_f`: the unit roundoff
-/// `2^-53` times the same growth bound of 8, which is `2^-50`.
+/// `2^-53` times the same growth bound of 8, which is `2^-50`. It is a
+/// published constant and not a per-call option, exactly as its binary32
+/// sibling is: no `inverseMat*d` entry point takes an epsilon.
 pub const inverse_pivot_threshold_d: f64 = 0x1p-50;
 
 fn pivotThresholdOf(comptime Scalar: type) Component(Scalar) {
@@ -916,10 +941,16 @@ fn gaussJordan(comptime M: type, value: M) ?M {
 /// `(A * B) * v` applies `B` first and `A` second, so composition reads
 /// right-to-left. The operands fix the row count, the inner dimension, and the
 /// entry type, which leaves the output width as the only parameter a return
-/// type cannot supply; that is the shape `API.md:941-946` specifies. Each entry
+/// type cannot supply; that is the shape `API.md#matrices` specifies. Each entry
 /// sums its products in increasing inner index, starting from the index-zero
 /// product, and strictly, so it is neither reassociated nor contracted into an
 /// FMA.
+///
+/// Everything about that shape is a compile-time obligation, and each violation
+/// is a compile error naming it: an operand that is not a `Mat`, a right
+/// operand whose row count is not the left operand's column count, an output
+/// width that is not the right operand's column count, and two operands whose
+/// entry types differ. None of those paths computes or mutates anything.
 pub fn mul(
     comptime n_out_columns: usize,
     left: anytype,
@@ -952,8 +983,8 @@ pub fn mul(
 // ---------------------------------------------------------------------------
 // Named operations
 //
-// `API.md:948` puts these on the module rather than on the type, and that is
-// where they are. The size-paired siblings the contract names only three of
+// `API.md#matrices` puts these on the module rather than on the type, and that
+// is where they are. The size-paired siblings the contract names only three of
 // are here too, because `zmath.linalg` consumes the whole family and a caller
 // should not have to reach for `Mat` and recompute a determinant by hand.
 // ---------------------------------------------------------------------------
@@ -999,43 +1030,82 @@ pub fn determinantMat5d(value: Mat5d) f64 {
 }
 
 /// The inverse of a 2 by 2 `f32` matrix, or `null`.
+///
+/// `null` means one of three things: an entry was not finite, a pivot fell at
+/// or below `inverse_pivot_threshold_f` times the largest entry magnitude of the
+/// matrix, or the reduction left a non-finite entry. The threshold is a
+/// published constant and not a per-call option; this entry point takes no
+/// epsilon. The result is a fresh value returned by value: `value` is not
+/// modified, and a `null` leaves no partial result anywhere, because the
+/// reduction holds `[ value | identity ]` in its own comptime-bounded work
+/// array.
 pub fn inverseMat2f(value: Mat2f) ?Mat2f {
     return gaussJordan(Mat2f, value);
 }
 
 /// The inverse of a 2 by 2 `f64` matrix, or `null`.
+///
+/// `null` means one of three things: an entry was not finite, a pivot fell at
+/// or below `inverse_pivot_threshold_d` times the largest entry magnitude of the
+/// matrix, or the reduction left a non-finite entry. The result is a fresh value
+/// returned by value, `value` is not modified, and a `null` leaves no partial
+/// result. See `inverseMat2f` for the same contract in binary32.
 pub fn inverseMat2d(value: Mat2d) ?Mat2d {
     return gaussJordan(Mat2d, value);
 }
 
 /// The inverse of a 3 by 3 `f32` matrix, or `null`.
+///
+/// `null` means one of three things: an entry was not finite, a pivot fell at
+/// or below `inverse_pivot_threshold_f` times the largest entry magnitude of the
+/// matrix, or the reduction left a non-finite entry. The result is a fresh value
+/// returned by value, `value` is not modified, and a `null` leaves no partial
+/// result.
 pub fn inverseMat3f(value: Mat3f) ?Mat3f {
     return gaussJordan(Mat3f, value);
 }
 
 /// The inverse of a 3 by 3 `f64` matrix, or `null`.
+///
+/// `null` means one of three things: an entry was not finite, a pivot fell at
+/// or below `inverse_pivot_threshold_d` times the largest entry magnitude of the
+/// matrix, or the reduction left a non-finite entry. The result is a fresh value
+/// returned by value, `value` is not modified, and a `null` leaves no partial
+/// result.
 pub fn inverseMat3d(value: Mat3d) ?Mat3d {
     return gaussJordan(Mat3d, value);
 }
 
 /// The inverse of a 4 by 4 `f32` matrix, or `null`.
 ///
-/// The same caveats as `inverseMat4d` with a coarser threshold: `null` means
-/// singular to working precision, or an entry is not finite, or the reduction
-/// overflowed the format. binary32 has a unit roundoff of `2^-24`, so the
-/// usable precision of a well-conditioned result is roughly seven decimal
-/// digits and nothing here repairs an ill-conditioned input.
+/// `null` means one of three things: an entry was not finite, a pivot fell at
+/// or below `inverse_pivot_threshold_f` times the largest entry magnitude of the
+/// matrix, or the reduction left a non-finite entry. The result is a fresh value
+/// returned by value, `value` is not modified, and a `null` leaves no partial
+/// result.
+///
+/// The same conditioning caveat as `inverseMat4d` with a coarser threshold:
+/// binary32 has a unit roundoff of `2^-24`, so the usable precision of a
+/// well-conditioned result is roughly seven decimal digits, and nothing here
+/// repairs an ill-conditioned input.
 pub fn inverseMat4f(value: Mat4f) ?Mat4f {
     return gaussJordan(Mat4f, value);
 }
 
 /// The inverse of a 4 by 4 `f64` matrix, or `null`.
 ///
-/// `null` means the matrix is singular to working precision, or an entry is
-/// not finite, or the reduction overflowed the format. The threshold is
-/// `inverse_pivot_threshold_d`. The result is exact only for a well-conditioned
-/// input: an ill-conditioned matrix gives an inverse whose error is governed by
-/// its condition number, not by this module.
+/// `null` means one of three things: an entry was not finite, a pivot fell at
+/// or below `inverse_pivot_threshold_d` times the largest entry magnitude of the
+/// matrix, or the reduction left a non-finite entry. The threshold is a
+/// published constant and not a per-call option; this entry point takes no
+/// epsilon. The result is a fresh value returned by value: `value` is not
+/// modified, and a `null` leaves no partial result anywhere, because the
+/// reduction holds `[ value | identity ]` in its own comptime-bounded work
+/// array.
+///
+/// The result is exact only for a well-conditioned input: an ill-conditioned
+/// matrix gives an inverse whose error is governed by its condition number,
+/// not by this module.
 pub fn inverseMat4d(value: Mat4d) ?Mat4d {
     return gaussJordan(Mat4d, value);
 }

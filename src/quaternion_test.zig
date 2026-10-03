@@ -10,7 +10,7 @@ const Vec3f = vector_value.Vec3f;
 const Vec3d = vector_value.Vec3d;
 
 /// The positive canonical quiet NaN of each format, from
-/// `spec/core-math-2026-08-22.md:769-801`.
+/// `spec/core-math-2026-08-22.md#special-values`.
 const qnan_f: u32 = 0x7fc0_0000;
 const qnan_d: u64 = 0x7ff8_0000_0000_0000;
 
@@ -1228,7 +1228,7 @@ test "the axis accept and reject sets are the length's, not the quotient's" {
 // ---------------------------------------------------------------------------
 // Special values
 //
-// `spec/core-math-2026-08-22.md:769-801` gives two rules and both are exact
+// `spec/core-math-2026-08-22.md#special-values` gives two rules and both are exact
 // bit patterns, so both are asserted as bit patterns. A NaN operand keeps its
 // sign and diagnostic payload with the quiet bit set, and an invalid operation
 // on non-NaN operands gives the POSITIVE canonical quiet NaN. The second rule

@@ -1,23 +1,22 @@
-//! Fixed-size matrix factorizations: the module `API.md:983-994` specifies.
+//! Fixed-size matrix factorizations: the module `API.md#linear-algebra` specifies.
 //!
 //! Two factorizations, each in the sizes 2, 3, and 4 and each in `f32` and
 //! `f64`: an LU with partial pivoting, and a Cholesky of a symmetric positive
-//! definite matrix. Each constructor returns an optional, and each of
-//! `reconstruct`, `determinant`, and `solve` takes the factorization the
-//! constructor produced. `API.md:994` says "a factorization returns `null` for
-//! a singular, non-positive-definite, or non-finite input, as applicable", so
-//! the refusal belongs to the constructor and the three operations cannot
-//! fail on a matrix that was accepted, except in the one case the contract
-//! also makes an optional: a `solve` returns `null` if the stored factors do
-//! not have the usable pivots, which a hand-built factorization type can
-//! violate and a constructor cannot.
+//! definite matrix. Each constructor returns an optional factorization.
+//! It rejects non-finite input, unusable pivots, or failed finite arithmetic.
+//! Cholesky also rejects a matrix that is not symmetric positive definite.
+//! `reconstruct` and `determinant` return values under the documented factor
+//! invariants. Solves return `null` for a zero or non-finite stored pivot.
+//! They do not check computed entries: even valid factors and a finite
+//! right-hand side can produce a successful value containing infinity or NaN.
 //!
 //! ## Specialized operations are module functions
 //!
 //! `solveLu`, `reconstructLu`, `determinantLu`, and their Cholesky siblings
 //! are on the module, not methods on the factorization type, and they are the
 //! same spellings `zmath.matrix` uses for `determinantMat3f` and
-//! `inverseMat4d` (`API.md:971` names that rule for the surface as a whole).
+//! `inverseMat4d` (`API.md#linear-algebra` names that rule for the surface as
+//! a whole).
 //! The constructors take the size and the precision from their ARGUMENT rather
 //! than from their name, because the contract names the TYPES and not the
 //! functions. `lu(a)` for a `Mat3f` has type `?LuMat3f` and `cholesky(a)` for
@@ -91,12 +90,10 @@
 //! determinant one and two negative eigenvalues. The pivot test is the same
 //! relative threshold as the LU one, which makes it strictly stronger than
 //! positivity, and that strength is deliberate for the reason
-//! `zmath.matrix` states: a pivot at or below the threshold has no significant
-//! bits left, so dividing the column by it would amplify rounding noise
-//! instead of recovering a factor. A positive-definite matrix whose smallest
-//! pivot falls at or below the threshold is reported as not positive definite
-//! to working precision, which is the same honest answer an inverse gives for
-//! the analogous matrix.
+//! `zmath.matrix` states: these fixed relative thresholds reject small pivots
+//! before division can amplify rounding error. They are a numerical policy,
+//! not a proof that the matrix is mathematically singular. Cholesky can reject
+//! a positive-definite matrix whose pivot falls at or below the threshold.
 //!
 //! ## Arithmetic
 //!
@@ -107,7 +104,7 @@
 //! the two modules agree, and the reason this module composes
 //! `matrix.mul` for its products instead of writing its own contraction. An
 //! entry of `f32` or `f64` is IEEE arithmetic with the NaN rules of
-//! `spec/core-math-2026-08-22.md:769-801`; both constructors reject a
+//! `spec/core-math-2026-08-22.md#special-values`; both constructors reject a
 //! non-finite input before any arithmetic runs, because a step on a non-finite
 //! entry cannot be undone by a check afterwards. zmath never reads, validates,
 //! sets, or restores `fenv`; the caller must keep round-to-nearest,
@@ -121,6 +118,34 @@
 //! A factorization is a fixed-size struct of fixed-size arrays, and a
 //! multiple solve holds its scratch in two comptime-bounded arrays on the
 //! stack.
+//!
+//! ## A shortest use
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn solveOnce() !void {
+//!     const a = zmath.matrix.Mat3f.init(.{
+//!         .{ 2, 1, 1 },
+//!         .{ 1, 3, 1 },
+//!         .{ 1, 1, 3 },
+//!     });
+//!     const factors = zmath.linalg.lu(a) orelse return error.NoFactorization;
+//!     const x = zmath.linalg.solveLu(
+//!         factors,
+//!         zmath.vector.Vec3f.init(1, 2, 3),
+//!     ) orelse return error.NoPivot;
+//!     // The residual is the check: the solve is right when `a * x` is `b`.
+//!     std.debug.assert(
+//!         a.mulVec(x).sub(zmath.vector.Vec3f.init(1, 2, 3)).lengthSquared() < 1e-8,
+//!     );
+//!
+//!     // A zero matrix has no pivot above the threshold at any step.
+//!     const singular = zmath.linalg.lu(zmath.matrix.Mat3f.fill(0));
+//!     std.debug.assert(singular == null);
+//! }
+//! ```
 
 const std = @import("std");
 const matrix = @import("matrix.zig");
@@ -137,12 +162,15 @@ const Mat4d = matrix.Mat4d;
 // ---------------------------------------------------------------------------
 // Factorization types
 //
-// The names and the field layout are the ones `API.md:988-991` writes. Every
+// The names and the field layout are the ones `API.md#linear-algebra` writes. Every
 // type is spelled out rather than produced by a generic factory, so the source
 // and the contract can be read side by side.
 // ---------------------------------------------------------------------------
 
 /// An LU factorization of a 2 by 2 binary32 matrix, with partial pivoting.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const LuMat2f = struct {
     /// L below the diagonal and U on and above it. L's diagonal is UNIT and is
     /// not stored: the strictly lower triangle is L, and the diagonal and the
@@ -151,13 +179,16 @@ pub const LuMat2f = struct {
     /// The row of the ORIGINAL matrix that each step promoted to be the pivot
     /// row of its own step. A permutation of `0..1`.
     permutation: [2]u8,
-    /// The sign of that permutation: `-1` for an odd number of interchanges
-    /// and `0` for an even one. An `i1` cannot hold `+1`, and zero is the
-    /// identity of the sign multiply, so zero is the neutral value here.
+    /// Permutation parity: `-1` for an odd number of row interchanges,
+    /// `0` for an even number. `determinantLu` interprets zero as positive;
+    /// this field is not a multiplicative sign.
     parity: i1,
 };
 
 /// An LU factorization of a 3 by 3 binary32 matrix, with partial pivoting.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const LuMat3f = struct {
     /// L below the diagonal and U on and above it. L's diagonal is UNIT and is
     /// not stored.
@@ -165,12 +196,15 @@ pub const LuMat3f = struct {
     /// The row of the ORIGINAL matrix that each step promoted to be the pivot
     /// row of its own step. A permutation of `0..2`.
     permutation: [3]u8,
-    /// The sign of that permutation: `-1` for an odd number of interchanges
-    /// and `0` for an even one.
+    /// Permutation parity: `-1` for an odd number of row interchanges,
+    /// `0` for an even number; zero denotes a positive determinant sign.
     parity: i1,
 };
 
 /// An LU factorization of a 4 by 4 binary32 matrix, with partial pivoting.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const LuMat4f = struct {
     /// L below the diagonal and U on and above it. L's diagonal is UNIT and is
     /// not stored.
@@ -178,12 +212,15 @@ pub const LuMat4f = struct {
     /// The row of the ORIGINAL matrix that each step promoted to be the pivot
     /// row of its own step. A permutation of `0..3`.
     permutation: [4]u8,
-    /// The sign of that permutation: `-1` for an odd number of interchanges
-    /// and `0` for an even one.
+    /// Permutation parity: `-1` for an odd number of row interchanges,
+    /// `0` for an even number; zero denotes a positive determinant sign.
     parity: i1,
 };
 
 /// An LU factorization of a 2 by 2 binary64 matrix, with partial pivoting.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const LuMat2d = struct {
     /// L below the diagonal and U on and above it. L's diagonal is UNIT and is
     /// not stored.
@@ -191,12 +228,15 @@ pub const LuMat2d = struct {
     /// The row of the ORIGINAL matrix that each step promoted to be the pivot
     /// row of its own step. A permutation of `0..1`.
     permutation: [2]u8,
-    /// The sign of that permutation: `-1` for an odd number of interchanges
-    /// and `0` for an even one.
+    /// Permutation parity: `-1` for an odd number of row interchanges,
+    /// `0` for an even number; zero denotes a positive determinant sign.
     parity: i1,
 };
 
 /// An LU factorization of a 3 by 3 binary64 matrix, with partial pivoting.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const LuMat3d = struct {
     /// L below the diagonal and U on and above it. L's diagonal is UNIT and is
     /// not stored.
@@ -204,12 +244,15 @@ pub const LuMat3d = struct {
     /// The row of the ORIGINAL matrix that each step promoted to be the pivot
     /// row of its own step. A permutation of `0..2`.
     permutation: [3]u8,
-    /// The sign of that permutation: `-1` for an odd number of interchanges
-    /// and `0` for an even one.
+    /// Permutation parity: `-1` for an odd number of row interchanges,
+    /// `0` for an even number; zero denotes a positive determinant sign.
     parity: i1,
 };
 
 /// An LU factorization of a 4 by 4 binary64 matrix, with partial pivoting.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const LuMat4d = struct {
     /// L below the diagonal and U on and above it. L's diagonal is UNIT and is
     /// not stored.
@@ -217,13 +260,16 @@ pub const LuMat4d = struct {
     /// The row of the ORIGINAL matrix that each step promoted to be the pivot
     /// row of its own step. A permutation of `0..3`.
     permutation: [4]u8,
-    /// The sign of that permutation: `-1` for an odd number of interchanges
-    /// and `0` for an even one.
+    /// Permutation parity: `-1` for an odd number of row interchanges,
+    /// `0` for an even number; zero denotes a positive determinant sign.
     parity: i1,
 };
 
 /// A Cholesky factorization of a 2 by 2 symmetric positive definite binary32
 /// matrix.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const CholeskyMat2f = struct {
     /// The lower triangular factor L, so the original matrix is `L *
     /// transpose(L)`. The strict upper triangle is ZERO, which is what lets a
@@ -233,6 +279,9 @@ pub const CholeskyMat2f = struct {
 
 /// A Cholesky factorization of a 3 by 3 symmetric positive definite binary32
 /// matrix.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const CholeskyMat3f = struct {
     /// The lower triangular factor L, so the original matrix is `L *
     /// transpose(L)`. The strict upper triangle is ZERO.
@@ -241,6 +290,9 @@ pub const CholeskyMat3f = struct {
 
 /// A Cholesky factorization of a 4 by 4 symmetric positive definite binary32
 /// matrix.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const CholeskyMat4f = struct {
     /// The lower triangular factor L, so the original matrix is `L *
     /// transpose(L)`. The strict upper triangle is ZERO.
@@ -249,6 +301,9 @@ pub const CholeskyMat4f = struct {
 
 /// A Cholesky factorization of a 2 by 2 symmetric positive definite binary64
 /// matrix.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const CholeskyMat2d = struct {
     /// The lower triangular factor L, so the original matrix is `L *
     /// transpose(L)`. The strict upper triangle is ZERO.
@@ -257,6 +312,9 @@ pub const CholeskyMat2d = struct {
 
 /// A Cholesky factorization of a 3 by 3 symmetric positive definite binary64
 /// matrix.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const CholeskyMat3d = struct {
     /// The lower triangular factor L, so the original matrix is `L *
     /// transpose(L)`. The strict upper triangle is ZERO.
@@ -265,6 +323,9 @@ pub const CholeskyMat3d = struct {
 
 /// A Cholesky factorization of a 4 by 4 symmetric positive definite binary64
 /// matrix.
+///
+/// Plain data with public fields: a caller can build one by hand, and the solve
+/// operations then report a stored pivot that is zero or not finite as `null`.
 pub const CholeskyMat4d = struct {
     /// The lower triangular factor L, so the original matrix is `L *
     /// transpose(L)`. The strict upper triangle is ZERO.
@@ -728,7 +789,8 @@ fn choleskySolveColumn(comptime M: type, f: anytype, b: [n_of(M)]M.Element) ?[n_
 /// `matrix.inverse_pivot_threshold_d` times the largest entry magnitude of the
 /// input, or the factors themselves ran past the format's range. See the
 /// module comment for the threshold's derivation and for why there is no
-/// epsilon argument.
+/// epsilon argument. The factorization is a value returned by value: `value` is
+/// not modified, and a `null` leaves no partial result anywhere.
 pub fn lu(value: anytype) ?LuOf(@TypeOf(value)) {
     return luFactor(@TypeOf(value), value);
 }
@@ -774,7 +836,19 @@ pub fn determinantLu(f: anytype) MatrixOf(@TypeOf(f)).Element {
 }
 
 /// The solution `x` of `A * x = b`, where `A` is the matrix `f` was factorized
-/// from, or `null` if a stored pivot of U is zero or not finite.
+/// from, or `null`.
+///
+/// `rhs` must be exactly the factorization's `M.vector_type`, so `Vec2f`,
+/// `Vec3f`, `Vec4f`, `Vec2d`, `Vec3d`, or `Vec4d` for the six factorizations
+/// this module publishes. A plain array of the right length does not convert,
+/// and any other type is a compile error naming the type that was wanted.
+///
+/// `null` means a stored pivot of U was zero or not finite, which `lu` cannot
+/// produce and a hand-built factorization can. Both substitutions run on local
+/// values, so `f` is not modified and a `null` leaves no partial result: the
+/// answer is a value.
+/// Computed entries are not checked for finiteness. Arithmetic overflow does
+/// not make the optional null; inspect the returned vector when needed.
 pub fn solveLu(f: anytype, rhs: anytype) ?MatrixOf(@TypeOf(f)).vector_type {
     const M = MatrixOf(@TypeOf(f));
     const V = M.vector_type;
@@ -792,6 +866,16 @@ pub fn solveLu(f: anytype, rhs: anytype) ?MatrixOf(@TypeOf(f)).vector_type {
 /// whole reason to ask for several right-hand sides rather than calling
 /// `solveLu` in a loop. `B` is an n by m matrix whose j-th column is the j-th
 /// right-hand side, so the result has the same shape.
+///
+/// That shape is a compile-time obligation on `rhs`: it must be a `Mat` with
+/// exactly `M.rows` rows, at least one column, and the factorization's entry
+/// type, and the result is that same `Mat`. A plain array, a different row or
+/// column count, and a different entry type are each a compile error naming
+/// what does not line up.
+///
+/// `null` means a stored pivot of U was zero or not finite. The columns solved
+/// before that point were written only to a local value, so `f` is not
+/// modified and the caller receives no partial result.
 pub fn solveLuMultiple(f: anytype, rhs: anytype) ?RightHandSidesOf(@TypeOf(f), @TypeOf(rhs)) {
     const F = @TypeOf(f);
     const M = MatrixOf(F);
@@ -826,7 +910,8 @@ pub fn solveLuMultiple(f: anytype, rhs: anytype) ?RightHandSidesOf(@TypeOf(f), @
 /// policy and its reason. The positivity test is a pivot test DURING the
 /// factorization, so a matrix with a positive determinant and a negative
 /// eigenvalue is refused, which a sign on a determinant computed afterwards
-/// would not catch.
+/// would not catch. The factorization is a value returned by value: `value` is
+/// not modified, and a `null` leaves no partial result anywhere.
 pub fn cholesky(value: anytype) ?CholeskyOf(@TypeOf(value)) {
     return choleskyFactor(@TypeOf(value), value);
 }
@@ -864,8 +949,18 @@ pub fn determinantCholesky(f: anytype) MatrixOf(@TypeOf(f)).Element {
 }
 
 /// The solution `x` of `A * x = b`, where `A` is the symmetric positive
-/// definite matrix `f` was factorized from, or `null` if a stored pivot of L is
-/// zero or not finite.
+/// definite matrix `f` was factorized from, or `null`.
+///
+/// `rhs` must be exactly the factorization's `M.vector_type`, exactly as for
+/// `solveLu`: a plain array does not convert, and any other type is a compile
+/// error naming the type that was wanted.
+///
+/// `null` means a stored pivot of L was zero or not finite, which `cholesky`
+/// cannot produce and a hand-built factorization can. Both substitutions run
+/// on local values, so `f` is not modified and a `null` leaves no partial
+/// result.
+/// Computed entries are not checked for finiteness. Arithmetic overflow does
+/// not make the optional null; inspect the returned vector when needed.
 pub fn solveCholesky(f: anytype, rhs: anytype) ?MatrixOf(@TypeOf(f)).vector_type {
     const M = MatrixOf(@TypeOf(f));
     const V = M.vector_type;
@@ -878,6 +973,14 @@ pub fn solveCholesky(f: anytype, rhs: anytype) ?MatrixOf(@TypeOf(f)).vector_type
 
 /// The solutions of `A * X = B` for every COLUMN of `B` at once, where `A` is
 /// the symmetric positive definite matrix `f` was factorized from.
+///
+/// `rhs` must be a `Mat` with exactly `M.rows` rows, at least one column, and
+/// the factorization's entry type; every other shape or type is a compile
+/// error naming what does not line up, exactly as for `solveLuMultiple`.
+///
+/// `null` means a stored pivot of L was zero or not finite. The columns solved
+/// before that point were written only to a local value, so `f` is not
+/// modified and the caller receives no partial result.
 pub fn solveCholeskyMultiple(f: anytype, rhs: anytype) ?RightHandSidesOf(@TypeOf(f), @TypeOf(rhs)) {
     const F = @TypeOf(f);
     const M = MatrixOf(F);

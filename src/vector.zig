@@ -1,10 +1,9 @@
 //! Vector (`@Vector`) overloads for the elementwise scalar operations.
 //!
-//! Every operation here applies the *identical* accepted scalar kernel to each
-//! lane, so lane `i` of the result is bit-for-bit equal to the scalar result for
-//! lane `i` of the input. This preserves the schema-3 `max_ulp = 0` contract and
-//! the immutable corpus without new evidence: the vector path is a per-lane
-//! application of the same scalar code, never a re-derived polynomial.
+//! Each lane runs the identical scalar kernel and returns its scalar result
+//! bit-for-bit. The vector path never re-derives a polynomial. Accuracy and
+//! acceptance are inherited from the schema-5 scalar corpus manifest; an
+//! export or a sampled corpus does not prove whole-domain accuracy.
 //!
 //! Three naming forms are provided for each elementwise float operation:
 //!
@@ -84,8 +83,8 @@ pub const ieee_family = @import("vector_ieee.zig");
 
 /// The named-component vector value types. This is the value-type layer named
 /// by `API.md`, not the `@Vector` layer above; the two share this module path
-/// and nothing else. Every `@Vector` entry point here ends in `v`, and no
-/// `Vec*` name does, so the surfaces stay unambiguous at the call site.
+/// and nothing else. Portable-vector operations use `v` or `vLanes` names;
+/// the named-component value types use `Vec*` names.
 pub const Vec2f = value.Vec2f;
 pub const Vec3f = value.Vec3f;
 pub const Vec4f = value.Vec4f;

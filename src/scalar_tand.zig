@@ -33,6 +33,16 @@ const infinity_bits: u64 = 0x7ff0_0000_0000_0000;
 const quiet_nan_bit: u64 = 0x0008_0000_0000_0000;
 const canonical_nan_bits: u64 = infinity_bits | quiet_nan_bit;
 
+/// Tangent of `value` in radians.
+///
+/// The whole line is in domain. A NaN input is returned with its quiet bit
+/// set, its sign and payload kept; either infinity is a pole and gives the
+/// positive canonical quiet NaN (0x7ff8_0000_0000_0000). Magnitudes up to
+/// 1.354e-8, and either signed zero, are returned unchanged.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The
+/// returned float is the whole result: no error code, floating-point exception
+/// flag, or retained status reports anything else.
 pub fn tand(value: f64) f64 {
     @setFloatMode(.strict);
     const bits: u64 = @bitCast(value);

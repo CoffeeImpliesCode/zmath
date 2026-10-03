@@ -18,12 +18,13 @@
 //! that writes `raw` directly gives up the rotation guarantee, not the type.
 //!
 //! `w` is the scalar component and `x`, `y`, `z` are the vector part, which is
-//! the order `API.md:901-905` spells the fields in. Hamilton multiplication is
-//! written so the scalar part is the real part of the four-dimensional dot
-//! product, so `a.mul(a.conjugate())` is `normSquared(a) * identity()` and
-//! nothing else. Every product here is summed in the order `API.md:907` gives,
-//! with `@setFloatMode(.strict)`, because a caller that gets a different
-//! grouping gets a different answer and the difference is not always harmless.
+//! the order `API.md#vectors-and-quaternions` spells the fields in. Hamilton
+//! multiplication is written so the scalar part is the real part of the
+//! four-dimensional dot product, so `a.mul(a.conjugate())` is
+//! `normSquared(a) * identity()` and nothing else. Every product here is summed
+//! in the order that section gives, with `@setFloatMode(.strict)`, because a
+//! caller that gets a different grouping gets a different answer and the
+//! difference is not always harmless.
 //!
 //! ## Composition
 //!
@@ -37,8 +38,8 @@
 //!
 //! ## Special values
 //!
-//! `spec/core-math-2026-08-22.md:769-801` pins the encodings and this module
-//! meets it. A NaN anywhere in an operand keeps its sign and diagnostic
+//! `spec/core-math-2026-08-22.md#special-values` pins the encodings and this
+//! module meets it. A NaN anywhere in an operand keeps its sign and diagnostic
 //! payload with the quiet bit set, so a signaling NaN becomes quiet. An invalid
 //! operation on non-NaN operands gives the POSITIVE canonical quiet NaN, which
 //! the host unit does not produce on its own, so every result is checked.
@@ -46,14 +47,45 @@
 //! round-to-nearest, ties-to-even active.
 //!
 //! Every entry point that can be given a value with no meaningful answer
-//! returns an optional. `Quatf.inverse` returns `null` for a zero or
-//! non-finite norm, `UnitQuatf.init` returns `null` for a value it cannot make
-//! unit, `slerp` returns `null` for a non-finite `t`, and `fromAxisAngle`
-//! returns `null` for a zero or non-finite axis or a non-finite angle. The
-//! algebraic operations do not return optionals: a quaternion is closed under
-//! them, and a NaN component is the answer.
+//! returns an optional, and a `null` means one of that entry point's listed
+//! causes. `Quatf.inverse` returns `null` for a zero or non-finite norm,
+//! `UnitQuatf.init` for a value it cannot make unit, `slerp` for a non-finite
+//! `t` and for an interpolated value that misses the unit band, and
+//! `fromAxisAngle` for a non-finite angle or for an axis that has no usable
+//! direction: a non-finite one, a zero one, and a finite one whose length
+//! overflows to infinity. The algebraic operations do not return optionals: a
+//! quaternion is closed under them, and a NaN component is the answer.
 //!
-//! These are fixed-size value types. No operation allocates.
+//! These are fixed-size value types. No operation allocates, and every result
+//! is a value the caller owns.
+//!
+//! ## A shortest use
+//!
+//! ```zig
+//! const std = @import("std");
+//! const zmath = @import("zmath");
+//!
+//! pub fn rotateOnce() !void {
+//!     // A half turn about +z. The axis is normalized and the answer is
+//!     // validated, so this value is a rotation.
+//!     const half_turn = zmath.quaternion.UnitQuatf.fromAxisAngle(
+//!         zmath.vector.Vec3f.init(0, 0, 7),
+//!         std.math.pi,
+//!     ) orelse return error.NoRotation;
+//!     const moved = half_turn.rotate(zmath.vector.Vec3f.init(1, 0, 0));
+//!     // +x turns into -x, up to the binary32 rounding of pi.
+//!     std.debug.assert(
+//!         moved.distanceSquared(zmath.vector.Vec3f.init(-1, 0, 0)) < 1e-12,
+//!     );
+//!
+//!     // The failure path reports the cause instead of inventing a rotation.
+//!     const no_direction = zmath.quaternion.UnitQuatf.fromAxisAngle(
+//!         zmath.vector.Vec3f.zero(),
+//!         1.0,
+//!     );
+//!     std.debug.assert(no_direction == null);
+//! }
+//! ```
 
 const std = @import("std");
 const scalar = @import("scalar.zig");
@@ -132,14 +164,14 @@ fn maxOf(comptime T: type, a: T, b: T) T {
     };
 }
 
-/// The quiet bit of `T`, from the masks `spec/core-math-2026-08-22.md:781`
-/// gives for F and D.
+/// The quiet bit of `T`, from the F and D quiet-bit masks in the
+/// `spec/core-math-2026-08-22.md#special-values` table.
 fn quietMaskOf(comptime T: type) Bits(T) {
     return if (T == f32) 0x0040_0000 else 0x0008_0000_0000_0000;
 }
 
-/// The positive canonical quiet NaN of `T`, from
-/// `spec/core-math-2026-08-22.md:769-801`.
+/// The positive canonical quiet NaN of `T`, from the encoding table in
+/// `spec/core-math-2026-08-22.md#special-values`.
 fn canonicalNaNOf(comptime T: type) T {
     return @bitCast(@as(Bits(T), if (T == f32) 0x7fc0_0000 else 0x7ff8_0000_0000_0000));
 }
@@ -180,7 +212,7 @@ fn unaryResult(comptime T: type, a: [4]T, raw: T) T {
     return canonicalNaNOf(T);
 }
 
-/// The components as `[x, y, z, w]`, in the order `API.md:901` spells them.
+/// The components as `[x, y, z, w]`, in the order `API.md#vectors-and-quaternions` names.
 fn toArrayOf(comptime Q: type, a: Q) [4]Component(Q) {
     return .{ a.x, a.y, a.z, a.w };
 }
@@ -304,7 +336,7 @@ fn mulStep(comptime T: type, a: [4]T, b: [4]T, sum: T, product: T, negative: boo
     return binaryResult(T, a, b, if (negative) sum - product else sum + product);
 }
 
-/// Hamilton multiplication, in the form `API.md:907` names:
+/// Hamilton multiplication, in the form `API.md#vectors-and-quaternions` names:
 ///
 ///     w = a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
 ///     x = a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y
@@ -502,7 +534,7 @@ fn Quat(comptime T: type) type {
             return .{ .x = 0.0, .y = 0.0, .z = 0.0, .w = 0.0 };
         }
 
-        /// The components as `[x, y, z, w]`.
+        /// The value with the components of `a`, which is `[x, y, z, w]`.
         pub fn fromArray(a: [4]T) Self {
             return .{ .x = a[0], .y = a[1], .z = a[2], .w = a[3] };
         }
@@ -592,13 +624,13 @@ fn Quat(comptime T: type) type {
             return fromArrayOf(Self, divByOf(T, toArrayOf(Self, self.conjugate()), norm));
         }
 
-        /// The Hamilton product `self * other`. The summation order is
-        /// `API.md:907`'s, and it is not reassociated and not contracted into an
-        /// FMA, so this is a function of the written formula and not of the
-        /// optimizer. The product is not commutative, and a commuting pair is
-        /// bit-identical in both orders only when the products in the two
-        /// orderings are the same products, which is true of a pair about one
-        /// axis and not of a general pair.
+        /// The Hamilton product `self * other`. The summation order is the one
+        /// `API.md#vectors-and-quaternions` names, and it is not reassociated and
+        /// not contracted into an FMA, so this is a function of the written
+        /// formula and not of the optimizer. The product is not commutative, and
+        /// a commuting pair is bit-identical in both orders only when the products
+        /// in the two orderings are the same products, which is true of a pair
+        /// about one axis and not of a general pair.
         pub fn mul(self: Self, other: Self) Self {
             return fromArrayOf(Self, mulOf(T, toArrayOf(Self, self), toArrayOf(Self, other)));
         }
@@ -608,8 +640,11 @@ fn Quat(comptime T: type) type {
         /// algebra-building constructor and not a rotation, which is why it can
         /// live on the raw type: the answer is a raw quaternion, and the caller
         /// decides whether it is a rotation by handing it to `UnitQuat.init`.
-        /// A zero axis has no direction and gives `null`, as does a non-finite
-        /// axis or a non-finite angle.
+        ///
+        /// `null` means the axis has no usable direction or the angle has no
+        /// meaning: a non-finite `radians`, a non-finite axis, a zero axis, and
+        /// a finite axis whose length overflowed to infinity. Nothing is written
+        /// and nothing is mutated; the result is a value.
         pub fn fromAxisAngle(axis: Vec3Of(T), radians: T) ?Self {
             if (!std.math.isFinite(radians)) return null;
             const direction = unitAxisOf(T, axis) orelse return null;
@@ -670,14 +705,15 @@ fn Unit(comptime T: type) type {
 
         /// The stored quaternion. `init` and `fromAxisAngle` fill it with a
         /// unit value, but the field is public, so a consumer that assigns to
-        /// it owns the unit-norm invariant from that point on.
+        /// it owns the unit-norm invariant from that point on and no operation
+        /// here checks it again.
         raw: Q,
 
         /// The unit quaternion for `raw`, or `null` when there is none. A
         /// non-finite component, a zero quaternion, and a norm that overflowed
         /// to infinity all give `null`, and so does a value that survives
-        /// normalization without landing inside the unit band, which is the
-        /// specification's "not unit after normalization" case.
+        /// normalization without landing inside the unit band, which is
+        /// `8 * std.math.floatEps(T)` either side of one.
         ///
         /// A quaternion whose four components are all subnormal is one of
         /// those. Its length is subnormal and nonzero, so the division runs and
@@ -777,10 +813,11 @@ fn Unit(comptime T: type) type {
         }
 
         /// The unit quaternion for a rotation of `radians` about `axis`, with
-        /// the axis normalized first, so a non-unit axis is accepted. A zero
-        /// axis has no direction and gives `null`, as does a non-finite axis or
-        /// a non-finite angle. The raw quaternion is built by
-        /// `Quat.fromAxisAngle` and routed through `init`, which normalizes and
+        /// the axis normalized first, so a non-unit axis is accepted. `null`
+        /// means the axis has no usable direction or the angle has no meaning:
+        /// a non-finite `radians`, a non-finite axis, a zero axis, and a finite
+        /// axis whose length overflowed to infinity. The raw quaternion is built
+        /// by `Quat.fromAxisAngle` and routed through `init`, which normalizes and
         /// validates, so this cannot produce a value that `init` would have
         /// rejected.
         pub fn fromAxisAngle(axis: Vec, radians: T) ?Self {
@@ -788,23 +825,37 @@ fn Unit(comptime T: type) type {
         }
 
         /// The spherical interpolation toward `b` for a `t` in `[0, 1]`, along
-        /// the short arc, or `null` for a non-finite `t`.
+        /// the short arc, or `null`.
         ///
         /// `b` and `-b` name the same rotation, so which arc between them is
         /// the short one is decided by the sign of the dot product and by
         /// nothing else. A negative dot product means the arc toward `b` is the
         /// long one, so the endpoint is negated to `-b` and the dot product
         /// becomes positive with it; negating the endpoint unconditionally
-        /// would send every pair the long way round. Below `nearParallel` the
-        /// great circle is followed exactly; above it `acos` has lost the
-        /// relative accuracy the arc needs and the normalized lerp takes over,
-        /// which is the better-conditioned answer over the arc that remains.
+        /// would send every pair the long way round. `t == 0` and `t == 1`
+        /// return `self` and `b` themselves, unchanged.
         ///
         /// The result is the lift of the arc that starts at `self`, so its dot
         /// product with `self` is positive and its dot product with `b` is
         /// negative when the arc was flipped. Callers that need a
         /// representation-independent comparison have to use the magnitude, or
         /// compare the rotations rather than the quaternions.
+        ///
+        /// Which of two formulas runs is a switch on that dot product, not an
+        /// argument. At or below the near-parallel threshold
+        /// `1 - 4 * sqrt(floatEps(T))`, which is 0.9986 for binary32 and
+        /// `1 - 6.0e-8` for binary64, `acos` still carries the relative
+        /// accuracy the arc needs, so the spherical `sin` blend runs. Above
+        /// that threshold `acos` has lost it, so the normalized lerp takes
+        /// over for the rest of the arc. That branch is a chord rather than
+        /// the great circle, and where it is selected the two answers agree to
+        /// within a few ulps; neither branch is exact and neither claims to be.
+        ///
+        /// `null` means a non-finite `t`, or that the interpolated value came
+        /// back through `init` and missed the unit band. Both interpolation
+        /// branches renormalize, and the spherical one routes its result
+        /// through `init`, so the second case is reachable only from operands
+        /// whose unit norm the caller did not maintain.
         pub fn slerp(self: Self, b: Self, t: T) ?Self {
             if (!std.math.isFinite(t)) return null;
             if (t == 0.0) return self;

@@ -261,38 +261,78 @@ fn reduce(
     return .{ .value = value, .quotient = quotient };
 }
 
+/// Returns the truncated quotient of `x` divided by `y`, that is the unique
+/// value of the form `x - n * y` whose magnitude is below `y`'s and whose sign
+/// is the sign of `x`.
+///
+/// An infinite `x` or a zero `y` returns the binary16 positive canonical quiet
+/// NaN, and a NaN operand is returned with its quiet bit set and its sign and
+/// payload kept, `x` first when both are NaN. A zero `x` and an infinite `y`
+/// return `x` unchanged.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn fmodh(x: f16, y: f16) f16 {
     return reduce(h_format, x, y, .truncating).value;
 }
 
+/// Returns the truncated quotient of `x` divided by `y` at binary32 width, with
+/// the same domain, NaN and signed-zero rules as `fmodh`.
 pub fn fmodf(x: f32, y: f32) f32 {
     return reduce(f_format, x, y, .truncating).value;
 }
 
+/// Returns the truncated quotient of `x` divided by `y` at binary64 width, with
+/// the same domain, NaN and signed-zero rules as `fmodh`.
 pub fn fmodd(x: f64, y: f64) f64 {
     return reduce(d_format, x, y, .truncating).value;
 }
 
+/// Returns the IEEE remainder of `x` divided by `y`, the quotient rounded to
+/// the nearest integer with ties to even, so the result's magnitude is at most
+/// half of `y`'s.
+///
+/// An exact tie keeps the quotient even, and an increment flips the remainder's
+/// sign, so the result carries the sign of `x` unless the rounding changed the
+/// quotient by one. An infinite `x` or a zero `y` returns the binary16 positive
+/// canonical quiet NaN, and a NaN operand is returned with its quiet bit set and
+/// its sign and payload kept, `x` first when both are NaN.
+///
+/// Callers must keep IEEE round-to-nearest, ties-to-even active.
 pub fn remainderh(x: f16, y: f16) f16 {
     return reduce(h_format, x, y, .nearest_even).value;
 }
 
+/// Returns the IEEE remainder of `x` divided by `y` at binary32 width, with the
+/// same tie, sign, domain and NaN rules as `remainderh`.
 pub fn remainderf(x: f32, y: f32) f32 {
     return reduce(f_format, x, y, .nearest_even).value;
 }
 
+/// Returns the IEEE remainder of `x` divided by `y` at binary64 width, with the
+/// same tie, sign, domain and NaN rules as `remainderh`.
 pub fn remainderd(x: f64, y: f64) f64 {
     return reduce(d_format, x, y, .nearest_even).value;
 }
 
+/// Returns the IEEE remainder of `x` divided by `y` and the low three bits of
+/// the integer quotient, as `remainderh` defines `value`.
+///
+/// `quotient` is signed and lies in `[-7, 7]`, its sign being the sign of the
+/// quotient, and it is set on every path: it is `0` when the operation is
+/// invalid, which is when `value` is the positive canonical quiet NaN, and `0`
+/// when a NaN operand is propagated.
 pub fn remquoh(x: f16, y: f16) types.RemquoResult(f16) {
     return reduce(h_format, x, y, .nearest_even);
 }
 
+/// Returns the IEEE remainder and the low quotient bits at binary32 width, with
+/// the same rules as `remquoh`.
 pub fn remquof(x: f32, y: f32) types.RemquoResult(f32) {
     return reduce(f_format, x, y, .nearest_even);
 }
 
+/// Returns the IEEE remainder and the low quotient bits at binary64 width, with
+/// the same rules as `remquoh`.
 pub fn remquod(x: f64, y: f64) types.RemquoResult(f64) {
     return reduce(d_format, x, y, .nearest_even);
 }

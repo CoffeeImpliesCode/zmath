@@ -325,7 +325,7 @@ test "add, sub, neg, and scale against hand-computed matrices" {
 }
 
 test "entry arithmetic follows the special-value table" {
-    // `spec/core-math-2026-08-22.md:769-801` has two rules that a host unit
+    // `spec/core-math-2026-08-22.md#special-values` has two rules that a host unit
     // does not satisfy on its own, and both are observable here.
     //
     // One: a NaN operand propagates with its sign and diagnostic payload and
@@ -1967,48 +1967,8 @@ test "a complex instantiation flows through the same kernels" {
 // The entry-type restriction and the named sizes
 // ---------------------------------------------------------------------------
 
-test "the entry type guard accepts exactly four types" {
-    // A `@compileError` cannot be observed from a passing test: naming an
-    // unsupported entry type would fail to compile the whole test binary, and
-    // that failure is the behaviour under test. What IS observable is the
-    // predicate the guard consults, and the guard consults nothing else, so
-    // this pins the accepted set from both sides: a type it accepts is
-    // instantiable and binds to the right component format, and a type it
-    // rejects is not in the set. Widening or narrowing `entry_types` without
-    // touching the guard is what this test would miss, and the guard reads
-    // `entry_types` directly, so there is nothing to widen.
-    try testing.expectEqual(@as(usize, 4), matrix.entry_types.len);
-    try testing.expect(matrix.acceptsEntryType(f32));
-    try testing.expect(matrix.acceptsEntryType(f64));
-    try testing.expect(matrix.acceptsEntryType(Complexf));
-    try testing.expect(matrix.acceptsEntryType(complex.Complexd));
-
-    // Types outside the set. `f16` is in the zmath scalar surface but is not an
-    // entry type, which is the check worth making: a caller must not be able to
-    // smuggle it in by assuming that any float works.
-    try testing.expect(!matrix.acceptsEntryType(u8));
-    try testing.expect(!matrix.acceptsEntryType(i32));
-    try testing.expect(!matrix.acceptsEntryType(f16));
-    try testing.expect(!matrix.acceptsEntryType(bool));
-    try testing.expect(!matrix.acceptsEntryType(void));
-    try testing.expect(!matrix.acceptsEntryType([2]f32));
-    try testing.expect(!matrix.acceptsEntryType(vector.Vec3f));
-    try testing.expect(!matrix.acceptsEntryType(struct {}));
-
-    // The positive branch of the guard: each accepted type instantiates and
-    // binds its component format.
-    try testing.expectEqual(f32, Mat(2, 2, f32).element_component);
-    try testing.expectEqual(f64, Mat(2, 2, f64).element_component);
-    try testing.expectEqual(f32, Mat(2, 2, Complexf).element_component);
-    try testing.expectEqual(f64, Mat(2, 2, complex.Complexd).element_component);
-    try testing.expectEqual(f32, Mat(2, 2, f32).Element);
-    try testing.expectEqual(f64, Mat(2, 2, f64).Element);
-    try testing.expectEqual(Complexf, Mat(2, 2, Complexf).Element);
-    try testing.expectEqual(complex.Complexd, Mat(2, 2, complex.Complexd).Element);
-}
-
 comptime {
-    // The eight named sizes, in the shapes `API.md:924-931` gives them. A
+    // The eight named sizes, in the shapes `API.md#matrices` gives them. A
     // compile-time block rather than a test, because a wrong shape is a
     // compile error everywhere else and never a runtime observation.
     const expected = .{

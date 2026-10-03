@@ -35,50 +35,92 @@ const D = OptionalFormat(common.D, .{
     .quiet_nan_bit = 0x0008_0000_0000_0000,
 });
 
+/// Returns true when the magnitude of `left` is at most the magnitude of
+/// `right`, comparing the sign-cleared encodings directly.
+///
+/// The comparison is a total order over the magnitudes and deliberately does
+/// not distinguish `-0` from `+0`; use `ieee.totalOrderh` when the sign must
+/// take part.
 pub fn totalOrderMagh(left: f16, right: f16) bool {
     return H.totalOrderMag(left, right);
 }
 
+/// Returns true when the magnitude of `left` is at most the magnitude of
+/// `right`, at binary32 width, with the same total-order and signed-zero rule
+/// as `totalOrderMagh`.
 pub fn totalOrderMagf(left: f32, right: f32) bool {
     return F.totalOrderMag(left, right);
 }
 
+/// Returns true when the magnitude of `left` is at most the magnitude of
+/// `right`, at binary64 width, with the same total-order and signed-zero rule
+/// as `totalOrderMagh`.
 pub fn totalOrderMagd(left: f64, right: f64) bool {
     return D.totalOrderMag(left, right);
 }
 
+/// Returns the diagnostic payload of a NaN `value` as a binary16 value, and
+/// `-1.0` for every non-NaN input.
+///
+/// The 9-bit payload is exactly representable, so the result is exact.
+/// `-1.0` is a sentinel for "the operand was not a NaN"; no payload is
+/// negative, so a caller can always tell the two apart.
 pub fn getPayloadh(value: f16) f16 {
     return H.getPayload(value);
 }
 
+/// Returns the diagnostic payload of a NaN `value` as a binary32 value, and
+/// `-1.0` for every non-NaN input, as `getPayloadh` does at binary32 width.
 pub fn getPayloadf(value: f32) f32 {
     return F.getPayload(value);
 }
 
+/// Returns the diagnostic payload of a NaN `value` as a binary64 value, and
+/// `-1.0` for every non-NaN input, as `getPayloadh` does at binary64 width.
 pub fn getPayloadd(value: f64) f64 {
     return D.getPayload(value);
 }
 
+/// Builds a positive quiet NaN carrying the diagnostic payload `payload` and
+/// returns it with `ok` true.
+///
+/// A `payload` that is neither a signed zero nor an in-range positive integral
+/// value returns `+0.0` with `ok` false; that `0.0` is a sentinel and not a
+/// payload of zero, so a caller must read `ok` before using the result.
 pub fn setPayloadh(payload: f16) c23_types.PayloadResult(f16) {
     return H.setPayload(payload, false);
 }
 
+/// Builds a positive quiet NaN from a binary32 `payload`, returning `+0.0`
+/// with `ok` false on the same rejected inputs as `setPayloadh`.
 pub fn setPayloadf(payload: f32) c23_types.PayloadResult(f32) {
     return F.setPayload(payload, false);
 }
 
+/// Builds a positive quiet NaN from a binary64 `payload`, returning `+0.0`
+/// with `ok` false on the same rejected inputs as `setPayloadh`.
 pub fn setPayloadd(payload: f64) c23_types.PayloadResult(f64) {
     return D.setPayload(payload, false);
 }
 
+/// Builds a positive SIGNALING NaN carrying the diagnostic payload `payload`,
+/// and returns it with `ok` true.
+///
+/// The encoding is the same as `setPayloadh` with the quiet bit left clear, so
+/// a zero payload is not representable: `payload` of `+0.0` or `-0.0` returns
+/// `+0.0` with `ok` false, exactly as any other rejected input does.
 pub fn setPayloadSigh(payload: f16) c23_types.PayloadResult(f16) {
     return H.setPayload(payload, true);
 }
 
+/// Builds a positive signaling binary32 NaN from `payload`, returning `+0.0`
+/// with `ok` false on the same rejected inputs as `setPayloadSigh`.
 pub fn setPayloadSigf(payload: f32) c23_types.PayloadResult(f32) {
     return F.setPayload(payload, true);
 }
 
+/// Builds a positive signaling binary64 NaN from `payload`, returning `+0.0`
+/// with `ok` false on the same rejected inputs as `setPayloadSigh`.
 pub fn setPayloadSigd(payload: f64) c23_types.PayloadResult(f64) {
     return D.setPayload(payload, true);
 }

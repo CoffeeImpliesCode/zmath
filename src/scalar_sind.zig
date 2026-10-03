@@ -1074,6 +1074,12 @@ fn fastDiv(
     };
 }
 
+/// Writes a double-double approximation of `tan(value)` into `high` and `low`,
+/// and returns a bound on the absolute error of their sum.
+///
+/// `value` must be finite; a NaN or an infinity is the caller's to reject.
+/// When `high + (low - bound)` and `high + (low + bound)` differ, the caller
+/// must fall back to an accurate path.
 pub fn tanFast(high: *f64, low: *f64, value: f64) f64 {
     @setFloatMode(.strict);
     const input_bits: u64 = @bitCast(value);
@@ -1254,4 +1260,3 @@ test "sine preserves rounding after a reflected medium reduction" {
         @as(u64, @bitCast(sind(input))),
     );
 }
-

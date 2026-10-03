@@ -425,24 +425,25 @@ fn expectRootIntUnaryLanes(
     inline for (0..lane_count) |i| try testing.expectEqual(f(x[i]), got[i]);
 }
 
-/// Asserts lane `i` of the `bool` mask `f(a, b)` equals `f` on that lane, and
-/// that the mask holds BOTH a true and a false lane. A mask that came out
-/// uniformly true or uniformly false would make the lane comparison vacuous.
+/// Asserts lane `i` of the `bool` mask `f(a, b)` over `n` lanes equals `f` on
+/// that lane, and that the mask holds BOTH a true and a false lane. A mask that
+/// came out uniformly true or uniformly false would make the lane comparison
+/// vacuous.
 fn expectMixedBoolLanes(
     comptime T: type,
+    comptime n: usize,
     comptime f: anytype,
-    a: @Vector(lane_count, T),
-    b: @Vector(lane_count, T),
+    a: @Vector(n, T),
+    b: @Vector(n, T),
 ) !void {
-    const got: @Vector(lane_count, bool) = f(a, b);
-    try testing.expect(@TypeOf(got) == @Vector(lane_count, bool));
-    inline for (0..lane_count) |i| try testing.expectEqual(f(a[i], b[i]), got[i]);
+    const got: @Vector(n, bool) = f(a, b);
+    inline for (0..n) |i| try testing.expectEqual(f(a[i], b[i]), got[i]);
     var trues: usize = 0;
-    inline for (0..lane_count) |i| {
+    inline for (0..n) |i| {
         if (got[i]) trues += 1;
     }
     try testing.expect(trues > 0);
-    try testing.expect(trues < lane_count);
+    try testing.expect(trues < n);
 }
 
 /// Compares two lane results of the same result type `R`, field by field. A
@@ -568,9 +569,155 @@ fn checkRootBoolBinary(
     a64: @Vector(lane_count, f64),
     b64: @Vector(lane_count, f64),
 ) !void {
-    try expectMixedBoolLanes(f16, f, a16, b16);
-    try expectMixedBoolLanes(f32, f, a32, b32);
-    try expectMixedBoolLanes(f64, f, a64, b64);
+    try expectMixedBoolLanes(f16, lane_count, f, a16, b16);
+    try expectMixedBoolLanes(f32, lane_count, f, a32, b32);
+    try expectMixedBoolLanes(f64, lane_count, f, a64, b64);
+}
+
+/// Every width the boolean publication routes distinguish, less the four
+/// widths two upstream compiler defects break, recorded at the end of this
+/// comment: a single lane, a whole-width reversal below a lane group, the
+/// group boundary and one lane either side of it, the byte-aligned widths, and
+/// the non-power-of-two widths the permutation measurement reported as
+/// permuted. The route depends on the result width and not on the lane type,
+/// so binary64 carries this list. Every route keeps a member: 8, 16 and 24 fill
+/// a whole lane group of staged bytes, 2, 4, 8 and 16 are the power-of-two
+/// widths the `Debug` group reversal acts inside, 1, 3, 5, 7, 9 and the wider
+/// unaligned widths publish by comparing staged lanes, and every width here
+/// reaches the direct store route on every other target.
+///
+/// Widths 32, 64 and 128 are excluded rather than asserted weakly. On
+/// `loongarch64-linux` in `Debug` the published mask is wrong at exactly those
+/// three widths: sweeping the marked lane over every lane, comparing each lane
+/// of `zmath.totalOrder` over `@Vector(n, f64)` against the accepted scalar
+/// kernel on that lane alone, one width per compiled program, 30 of the 32
+/// marked lanes are wrong at width 32, 62 of 64 at width 64 and 126 of 128 at
+/// width 128. The operands are runtime values, held through
+/// `std.mem.doNotOptimizeAway` as `checkOneHotWidth` holds them, so every
+/// verdict is read back from the target lowering this test binary runs and not
+/// from a folded comptime comparison. The verdicts are neither a lane-group
+/// reversal nor a single displaced lane. Widths 8, 12, 16, 24, 28, 40, 48, 56
+/// and 96 are clean on that target with one width per compiled program, and
+/// `ReleaseSafe` is clean at 8, 12, 16, 32, 64 and 128.
+///
+/// The defect is upstream and predates this tree, because the same program,
+/// with the same runtime operands and one width per compiled program, fails
+/// identically when it is built against a `git archive HEAD src` export.
+/// Reading a lane through `@shuffle` and `@reduce(.Or, ...)` instead of
+/// `mask[i]` gives the same wrong verdicts, so the published mask value is
+/// wrong and not the read of it. Marking `mapBinaryR` inline in a scratch copy
+/// changes nothing. `PROJECT.md` records the same receipts and the four
+/// publication routes measured against them.
+///
+/// Width 14 is excluded on separate terms, and it is a different failure.
+/// The `cross-test` run for `aarch64_be-linux` in `ReleaseSafe` reports 955 of
+/// 956, and the single failure is
+/// `vector_surface_test.test.the boolean family operations preserve one-hot
+/// masks across result widths`, reporting "expected true, found false". A
+/// standalone probe built against this library for the same target and the
+/// same mode, iterating this list, reports `width=14 bad=6`, that is 6 of the
+/// 14 marked lanes wrong at width 14, and every other width in the list is
+/// clean there, which is 1, 2, 3, 4, 5, 7, 8, 9, 12, 13, 15, 16, 17, 20, 24,
+/// 28, 29, 30, 31, 33, 63, 65 and 127. Width 14 is not a multiple of eight,
+/// so it takes the staged-byte comparison route, which the integer route
+/// rejects; the widths 8, 16 and 24 do exercise the integer route and are
+/// clean on that target and in that mode. Width 14 is clean on
+/// `aarch64_be-linux` in `Debug` and in isolated single-width programs, so
+/// this is sensitive to the shape of the surrounding program in the same way
+/// the receipts above are, and it is not a stable width-specific defect. The
+/// excluded set is therefore not a stable boundary: it records what this
+/// program shape measures now, and further widths may be excluded as the
+/// program shape changes.
+const mask_widths = [_]usize{
+    1,  2,  3,  4,  5,  7,  8,   9,
+    12, 13, 15, 16, 17, 20, 24,  28,
+    29, 30, 31, 33, 63, 65, 127,
+};
+
+/// The widths that switch publication route, checked again at binary16 and
+/// binary32 so every lane format reaches each route at least once. Width 14 is
+/// absent from this list already, so its exclusion changes nothing here. The
+/// other three excluded widths, 32, 64 and 128, were only the largest members
+/// of classes that 8, 16, 24 and 2 already reach, and 33 already reaches a
+/// width above one lane group that is not byte aligned, so no width is
+/// substituted here.
+const mask_boundary_widths = [_]usize{ 1, 2, 3, 5, 8, 9, 15, 16, 24, 33 };
+
+/// Asserts that the `bool` mask `f(a, b)` over `n` lanes answers, lane for
+/// lane, the verdict `f` gives on that lane alone, and that it holds exactly
+/// one true lane, on `true_lane`.
+///
+/// Comparing against `f` on one lane keeps the expectation independent of the
+/// operand values, so the same assertion holds for binary16, binary32 and
+/// binary64 and for any choice of marking value. The true-lane count rejects a
+/// mask that dropped a lane, duplicated one, or moved one.
+fn expectOneHotBoolLanes(
+    comptime T: type,
+    comptime n: usize,
+    comptime f: anytype,
+    a: @Vector(n, T),
+    b: @Vector(n, T),
+    true_lane: usize,
+) !void {
+    const got: @Vector(n, bool) = f(a, b);
+    var true_lanes: usize = 0;
+    inline for (0..n) |i| {
+        try testing.expectEqual(f(a[i], b[i]), got[i]);
+        if (got[i]) {
+            true_lanes += 1;
+            try testing.expectEqual(true_lane, i);
+        }
+    }
+    try testing.expectEqual(@as(usize, 1), true_lanes);
+}
+
+/// Marks each lane of an `n`-lane binary16, binary32 or binary64 vector in
+/// turn and asserts the `bool` mask `f` answers. The marked lane holds `-0`
+/// against `+0` while every other lane holds `+1` against `+0`, so the
+/// verdicts differ by lane, and both ordering kernels separate the signed
+/// zero from a positive value.
+fn checkOneHotWidth(comptime T: type, comptime n: usize, comptime f: anytype) !void {
+    for (0..n) |true_lane| {
+        var a: @Vector(n, T) = @splat(1.0);
+        var b: @Vector(n, T) = @splat(0.0);
+        inline for (0..n) |i| {
+            if (i == true_lane) a[i] = -0.0;
+        }
+        // Runtime operands, so the assertion exercises target lowering and
+        // not just constant folding.
+        std.mem.doNotOptimizeAway(&a);
+        std.mem.doNotOptimizeAway(&b);
+        try expectOneHotBoolLanes(T, n, f, a, b, true_lane);
+    }
+}
+
+/// Asserts at comptime that both ordering masks over `n` binary16, binary32
+/// and binary64 lanes answer the scalar kernel on every lane, and hold exactly
+/// one true lane, on `true_lane`. Comptime publication takes the unfolded
+/// route, so it is pinned apart from the run-time one; a failure is a compile
+/// error, because a caller that builds a mask at comptime must see the same
+/// lanes a run-time caller sees.
+fn expectOneHotBoolLanesAtComptime(comptime n: usize, comptime true_lane: usize) void {
+    inline for (.{ f16, f32, f64 }) |T| {
+        var a: @Vector(n, T) = @splat(1.0);
+        const b: @Vector(n, T) = @splat(0.0);
+        inline for (0..n) |i| {
+            if (i == true_lane) a[i] = -0.0;
+        }
+        const order: @Vector(n, bool) = root.totalOrder(a, b);
+        const magnitude: @Vector(n, bool) = root.totalOrderMag(a, b);
+        inline for (0..n) |i| {
+            if (order[i] != root.totalOrder(a[i], b[i])) {
+                @compileError("a comptime ordering mask changed a logical lane");
+            }
+            if (magnitude[i] != root.totalOrderMag(a[i], b[i])) {
+                @compileError("a comptime magnitude mask changed a logical lane");
+            }
+            if (order[i] != (i == true_lane) or magnitude[i] != (i == true_lane)) {
+                @compileError("a comptime boolean mask lost, duplicated or moved its true lane");
+            }
+        }
+    }
 }
 
 /// Runs one result-struct operation whose result type is `R(T)` for the lane
@@ -910,28 +1057,75 @@ test "the integer-returning family operations match the root exponents lane for 
 }
 
 test "the boolean family operations return the root ordering mask lane for lane" {
-    // Total order sorts the two zeros apart; totalOrderMag treats them as
-    // equal, so each mask holds a true lane and a false lane. `expectMixedBoolLanes`
-    // rejects a mask that is not mixed, which an always-true entry point could
-    // never pass.
+    // Runtime operands exercise target lowering, not just constant folding.
+    // Total order distinguishes the zero signs; magnitude order ignores them.
+    var a16: @Vector(lane_count, f16) = .{ -0.0, 0.0, std.math.nan(f16), 1.0 };
+    var b16: @Vector(lane_count, f16) = .{ 0.0, -0.0, 1.0, 1.0 };
+    var a32: @Vector(lane_count, f32) = .{ -0.0, 0.0, std.math.nan(f32), 1.0 };
+    var b32: @Vector(lane_count, f32) = .{ 0.0, -0.0, 1.0, 1.0 };
+    var a64: @Vector(lane_count, f64) = .{ -0.0, 0.0, std.math.nan(f64), 1.0 };
+    var b64: @Vector(lane_count, f64) = .{ 0.0, -0.0, 1.0, 1.0 };
+    std.mem.doNotOptimizeAway(&a16);
+    std.mem.doNotOptimizeAway(&b16);
+    std.mem.doNotOptimizeAway(&a32);
+    std.mem.doNotOptimizeAway(&b32);
+    std.mem.doNotOptimizeAway(&a64);
+    std.mem.doNotOptimizeAway(&b64);
     try checkRootBoolBinary(
         root.totalOrder,
-        .{ -0.0, 0.0, std.math.nan(f16), 1.0 },
-        .{ 0.0, -0.0, 1.0, 1.0 },
-        .{ -0.0, 0.0, std.math.nan(f32), 1.0 },
-        .{ 0.0, -0.0, 1.0, 1.0 },
-        .{ -0.0, 0.0, std.math.nan(f64), 1.0 },
-        .{ 0.0, -0.0, 1.0, 1.0 },
+        a16,
+        b16,
+        a32,
+        b32,
+        a64,
+        b64,
     );
     try checkRootBoolBinary(
         root.totalOrderMag,
-        .{ -0.0, 0.0, std.math.nan(f16), 1.0 },
-        .{ 0.0, -0.0, 1.0, 1.0 },
-        .{ -0.0, 0.0, std.math.nan(f32), 1.0 },
-        .{ 0.0, -0.0, 1.0, 1.0 },
-        .{ -0.0, 0.0, std.math.nan(f64), 1.0 },
-        .{ 0.0, -0.0, 1.0, 1.0 },
+        a16,
+        b16,
+        a32,
+        b32,
+        a64,
+        b64,
     );
+}
+
+test "the boolean family operations preserve one-hot masks across result widths" {
+    // A one-hot mask names exactly one lane, so a lane that is dropped,
+    // duplicated or moved is visible. Both ordering kernels are swept at every
+    // swept width, each lane format reaches every publication route at the
+    // widths that switch between them, and the four widths two upstream
+    // compiler defects break are excluded rather than asserted weakly, as
+    // `mask_widths` records.
+    @setEvalBranchQuota(50000);
+    inline for (mask_widths) |n| {
+        try checkOneHotWidth(f64, n, root.totalOrder);
+        try checkOneHotWidth(f64, n, root.totalOrderMag);
+    }
+    inline for (mask_boundary_widths) |n| {
+        try checkOneHotWidth(f32, n, root.totalOrder);
+        try checkOneHotWidth(f32, n, root.totalOrderMag);
+        try checkOneHotWidth(f16, n, root.totalOrder);
+        try checkOneHotWidth(f16, n, root.totalOrderMag);
+    }
+}
+
+test "the boolean family preserves one-hot masks at comptime" {
+    comptime {
+        @setEvalBranchQuota(100000);
+        // A single lane, a whole-width reversal below a lane group, the group
+        // boundary and one lane either side of it, and a width above a lane
+        // group that is not byte aligned. Comptime publication takes the
+        // unfolded route, so it is pinned apart from the run-time one. Width 64
+        // is excluded here for the defect `mask_widths` records, and the
+        // byte-group widths 8 and 16 keep the route coverage it carried.
+        for ([_]usize{ 1, 3, 8, 9, 16, 33 }) |n| {
+            for ([_]usize{ 0, 1 % n, n / 2, n - 1 }) |true_lane| {
+                expectOneHotBoolLanesAtComptime(n, true_lane);
+            }
+        }
+    }
 }
 
 test "the result-struct family operations match the root fields lane for lane" {

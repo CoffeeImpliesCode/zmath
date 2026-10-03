@@ -9,7 +9,7 @@ const Vec3d = vv.Vec3d;
 const Vec4d = vv.Vec4d;
 
 /// The positive canonical quiet NaN of each format, from
-/// `spec/core-math-2026-08-22.md:769-801`.
+/// `spec/core-math-2026-08-22.md#special-values`.
 const qnan_f: u32 = 0x7fc0_0000;
 const qnan_d: u64 = 0x7ff8_0000_0000_0000;
 
@@ -59,16 +59,69 @@ fn bitsOf(comptime V: type, v: V) [widthOf(V)]intOf(@typeInfo(V).@"struct".field
     return out;
 }
 
-/// The lanes of a `@Vector` as an array, for a test that compares them.
-///
-/// This is the coercion from a `@Vector` to an array of the same length and
-/// element type, so lane `i` becomes element `i`. It must not be a `@bitCast`:
-/// that reinterprets the bytes of the vector, an array has a well-defined byte
-/// layout but a vector has none, and on a big-endian target the pun returned
-/// the lanes reversed.
+/// Reads logical lanes by index for the lane-order assertions.
 fn lanesOf(comptime N: usize, comptime T: type, v: @Vector(N, T)) [N]T {
-    const lanes: [N]T = v;
-    return lanes;
+    var out: [N]T = undefined;
+    inline for (0..N) |index| out[index] = v[index];
+    return out;
+}
+
+/// The exact bits of the `@Vector` lanes. A float comparison cannot tell the
+/// zeros apart and cannot compare a NaN at all, so a lane-order assertion that
+/// cares about those goes through here.
+fn laneBits(comptime T: type, comptime N: usize, v: @Vector(N, T)) [N]intOf(T) {
+    // SAFETY: Every result lane is assigned before the array is returned.
+    var out: [N]intOf(T) = undefined;
+    inline for (0..N) |index| out[index] = @bitCast(v[index]);
+    return out;
+}
+
+/// The exact bits of the produced lanes after a consumer reinterprets them as
+/// memory. Every other lane assertion here reads the lanes out of a register,
+/// so none of them pins the order the producer publishes the vector in, which
+/// is the order a consumer that copies the bytes observes. Going through
+/// `@memcpy` makes this read the bytes rather than the lanes.
+fn publishedBitsOf(comptime V: type, v: V) [widthOf(V)]intOf(@typeInfo(V).@"struct".fields[0].type) {
+    const T = @typeInfo(V).@"struct".fields[0].type;
+    const width = comptime widthOf(V);
+    const produced = v.toVector();
+    var bytes: [width * @sizeOf(T)]u8 = undefined;
+    @memcpy(&bytes, std.mem.asBytes(&produced)[0..bytes.len]);
+    const lanes: [width]T = @bitCast(bytes);
+    var out: [width]intOf(T) = undefined;
+    inline for (0..width) |index| {
+        out[index] = @bitCast(lanes[index]);
+    }
+    return out;
+}
+
+/// The lanes reach the consumer's bytes in declaration order, bit for bit.
+fn expectPublishedLanes(comptime V: type, v: V) !void {
+    try std.testing.expectEqual(bitsOf(V, v), publishedBitsOf(V, v));
+}
+
+/// The quiet NaN of each format with a diagnostic payload, which a float
+/// comparison cannot see and the canonical encoding cannot stand in for.
+const payload_f: f32 = @bitCast(@as(u32, qnan_f) | 1);
+const payload_d: f64 = @bitCast(@as(u64, qnan_d) | 1);
+
+/// The `@Vector` lanes carry the components, in declaration order, bit for bit.
+fn expectVectorLanes(comptime V: type, v: V) !void {
+    const T = @typeInfo(V).@"struct".fields[0].type;
+    try std.testing.expectEqual(bitsOf(V, v), laneBits(T, widthOf(V), v.toVector()));
+}
+
+/// `lanes` reach the components `expected` holds, bit for bit. The expectation
+/// is the caller's own rather than a re-read of `lanes`, so the two sides
+/// cannot agree on a lane order the target got wrong.
+fn expectFromVectorEquals(
+    comptime V: type,
+    comptime T: type,
+    comptime N: usize,
+    comptime expected: V,
+    lanes: @Vector(N, T),
+) !void {
+    try std.testing.expectEqual(bitsOf(V, expected), bitsOf(V, V.fromVector(lanes)));
 }
 
 /// The value one ulp above `v`, for a test that needs two distinct neighbours
@@ -1058,7 +1111,7 @@ test "eq compares a NaN with a NaN, whatever the sign or the payload" {
     // 0x7ff8_0000_0000_0000 is the positive canonical quiet NaN,
     // 0xfff8_0000_0000_0001 a negative quiet NaN with a payload, and
     // 0x7ff0_0000_0000_0001 a signaling NaN, from
-    // `spec/core-math-2026-08-22.md:769-801`.
+    // `spec/core-math-2026-08-22.md#special-values`.
     const canonical: f64 = @bitCast(@as(u64, qnan_d));
     const negative_payload: f64 = @bitCast(@as(u64, 0xfff8_0000_0000_0001));
     const signaling: f64 = @bitCast(@as(u64, 0x7ff0_0000_0000_0001));
@@ -1132,6 +1185,16 @@ test "toVector and fromVector move the components in lane order" {
         Vec4f.fromVector(@Vector(4, f32){ 1, 2, 3, 4 }),
     );
 
+    // Every `Vec*` instantiates the bridge separately, and the backend lowers
+    // each instantiation on its own, so a lane reversal that one width or
+    // element type hides is not a property of the others.
+    try std.testing.expectEqual(Vec2d.init(5, 6), Vec2d.fromVector(@Vector(2, f64){ 5, 6 }));
+    try std.testing.expectEqual(Vec3f.init(7, 8, 9), Vec3f.fromVector(@Vector(3, f32){ 7, 8, 9 }));
+    try std.testing.expectEqual(
+        Vec4d.init(1, 2, 3, 4),
+        Vec4d.fromVector(@Vector(4, f64){ 1, 2, 3, 4 }),
+    );
+
     // The lanes are the components, in declaration order.
     const v = Vec4d.init(0.1, 0.2, 0.3, 0.4);
     const lanes = v.toVector();
@@ -1158,6 +1221,203 @@ test "toVector and fromVector round-trip the bits a float comparison cannot see"
         Vec4d,
         Vec4d.init(subnormal_d, -subnormal_d, 0.1, -0.0),
     );
+}
+
+test "toVector carries every component onto its own lane, bit for bit" {
+    try expectVectorLanes(Vec2f, Vec2f.init(-0.0, subnormal_f));
+    try expectVectorLanes(Vec3f, Vec3f.init(1, 2, subnormal_f));
+    try expectVectorLanes(Vec4f, Vec4f.init(payload_f, 0.1, -0.0, std.math.inf(f32)));
+    try expectVectorLanes(Vec2d, Vec2d.init(-0.0, subnormal_d));
+    try expectVectorLanes(Vec3d, Vec3d.init(1, 2, payload_d));
+    try expectVectorLanes(Vec4d, Vec4d.init(subnormal_d, -subnormal_d, 0.1, -0.0));
+}
+
+test "toVector publishes lane zero at the lowest address, on every target" {
+    // The bridge is specified on logical lane order. This is the only assertion
+    // in this file that observes the produced lanes the way a consumer does
+    // when it reinterprets the vector's bytes, so it is the one that fails when
+    // the producer hands back the target's own storage order instead of the
+    // declaration order, whatever the registers happen to hold.
+    try expectPublishedLanes(Vec2f, Vec2f.init(-0.0, subnormal_f));
+    try expectPublishedLanes(Vec3f, Vec3f.init(1, 2, subnormal_f));
+    try expectPublishedLanes(Vec4f, Vec4f.init(payload_f, 0.1, -0.0, std.math.inf(f32)));
+    try expectPublishedLanes(Vec2d, Vec2d.init(-0.0, subnormal_d));
+    try expectPublishedLanes(Vec3d, Vec3d.init(1, 2, payload_d));
+    try expectPublishedLanes(Vec4d, Vec4d.init(subnormal_d, -subnormal_d, 0.1, -0.0));
+
+    // Run-time components as well, for the reason the run-time tests exist: a
+    // constant would let the folder answer without calling the bridge.
+    var f2: [2]f32 = .{ -0.0, subnormal_f };
+    var f4: [4]f32 = .{ payload_f, 0.1, -0.0, std.math.inf(f32) };
+    var d3: [3]f64 = .{ 1, 2, payload_d };
+    std.mem.doNotOptimizeAway(&f2);
+    std.mem.doNotOptimizeAway(&f4);
+    std.mem.doNotOptimizeAway(&d3);
+    try expectPublishedLanes(Vec2f, Vec2f.fromArray(f2));
+    try expectPublishedLanes(Vec4f, Vec4f.fromArray(f4));
+    try expectPublishedLanes(Vec3d, Vec3d.fromArray(d3));
+}
+
+test "fromVector carries every lane onto its own component, bit for bit" {
+    // Each expectation names the components the caller means these lanes to
+    // carry, rather than a re-read of the lanes themselves, so a lane order the
+    // target got wrong cannot appear on both sides and pass the comparison.
+    try expectFromVectorEquals(
+        Vec2f,
+        f32,
+        2,
+        Vec2f.init(-0.0, subnormal_f),
+        .{ -0.0, subnormal_f },
+    );
+    try expectFromVectorEquals(
+        Vec3f,
+        f32,
+        3,
+        Vec3f.init(1, 2, subnormal_f),
+        .{ 1, 2, subnormal_f },
+    );
+    try expectFromVectorEquals(
+        Vec4f,
+        f32,
+        4,
+        Vec4f.init(payload_f, 0.1, -0.0, std.math.inf(f32)),
+        .{ payload_f, 0.1, -0.0, std.math.inf(f32) },
+    );
+    try expectFromVectorEquals(
+        Vec2d,
+        f64,
+        2,
+        Vec2d.init(-0.0, subnormal_d),
+        .{ -0.0, subnormal_d },
+    );
+    try expectFromVectorEquals(Vec3d, f64, 3, Vec3d.init(1, 2, payload_d), .{ 1, 2, payload_d });
+    try expectFromVectorEquals(
+        Vec4d,
+        f64,
+        4,
+        Vec4d.init(subnormal_d, -subnormal_d, 0.1, -0.0),
+        .{ subnormal_d, -subnormal_d, 0.1, -0.0 },
+    );
+}
+
+test "toVector carries every component onto its own lane when the components are run-time values" {
+    // The fixtures live in mutable storage handed to `doNotOptimizeAway`, which
+    // is how the rest of this suite keeps a constant folder from replacing a
+    // call with a folded literal. The bridge therefore sees components that
+    // are run-time values, the way a caller whose components the compiler does
+    // not know produces them.
+    var f2: [2]f32 = .{ -0.0, subnormal_f };
+    var f3: [3]f32 = .{ 1, 2, payload_f };
+    var f4: [4]f32 = .{ subnormal_f, 0.1, -0.0, std.math.inf(f32) };
+    var d2: [2]f64 = .{ -0.0, subnormal_d };
+    var d3: [3]f64 = .{ 1, 2, payload_d };
+    var d4: [4]f64 = .{ subnormal_d, -subnormal_d, 0.1, -0.0 };
+    std.mem.doNotOptimizeAway(&f2);
+    std.mem.doNotOptimizeAway(&f3);
+    std.mem.doNotOptimizeAway(&f4);
+    std.mem.doNotOptimizeAway(&d2);
+    std.mem.doNotOptimizeAway(&d3);
+    std.mem.doNotOptimizeAway(&d4);
+
+    try expectVectorLanes(Vec2f, Vec2f.fromArray(f2));
+    try expectVectorLanes(Vec3f, Vec3f.fromArray(f3));
+    try expectVectorLanes(Vec4f, Vec4f.fromArray(f4));
+    try expectVectorLanes(Vec2d, Vec2d.fromArray(d2));
+    try expectVectorLanes(Vec3d, Vec3d.fromArray(d3));
+    try expectVectorLanes(Vec4d, Vec4d.fromArray(d4));
+}
+
+test "fromVector carries every lane onto its own component when the lanes are run-time values" {
+    var f2: @Vector(2, f32) = .{ -0.0, subnormal_f };
+    var f3: @Vector(3, f32) = .{ 1, 2, payload_f };
+    var f4: @Vector(4, f32) = .{ subnormal_f, 0.1, -0.0, std.math.inf(f32) };
+    var d2: @Vector(2, f64) = .{ -0.0, subnormal_d };
+    var d3: @Vector(3, f64) = .{ 1, 2, payload_d };
+    var d4: @Vector(4, f64) = .{ subnormal_d, -subnormal_d, 0.1, -0.0 };
+    std.mem.doNotOptimizeAway(&f2);
+    std.mem.doNotOptimizeAway(&f3);
+    std.mem.doNotOptimizeAway(&f4);
+    std.mem.doNotOptimizeAway(&d2);
+    std.mem.doNotOptimizeAway(&d3);
+    std.mem.doNotOptimizeAway(&d4);
+
+    // Each expectation is the components the fixture stands for, not a re-read
+    // of the fixture, so a lane order the target got wrong cannot cancel out.
+    try expectFromVectorEquals(Vec2f, f32, 2, Vec2f.init(-0.0, subnormal_f), f2);
+    try expectFromVectorEquals(Vec3f, f32, 3, Vec3f.init(1, 2, payload_f), f3);
+    try expectFromVectorEquals(
+        Vec4f,
+        f32,
+        4,
+        Vec4f.init(subnormal_f, 0.1, -0.0, std.math.inf(f32)),
+        f4,
+    );
+    try expectFromVectorEquals(Vec2d, f64, 2, Vec2d.init(-0.0, subnormal_d), d2);
+    try expectFromVectorEquals(Vec3d, f64, 3, Vec3d.init(1, 2, payload_d), d3);
+    try expectFromVectorEquals(
+        Vec4d,
+        f64,
+        4,
+        Vec4d.init(subnormal_d, -subnormal_d, 0.1, -0.0),
+        d4,
+    );
+}
+
+test "toVector and fromVector move run-time components in lane order" {
+    // The fixtures are `1` and `2`, and no lane pattern below reads the same
+    // backwards, so a reversal on any of them is a difference rather than a
+    // coincidence.
+    var f2: [2]f32 = .{ 1, 2 };
+    var f3: [3]f32 = .{ 1, 2, 2 };
+    var f4: [4]f32 = .{ 1, 2, 2, 2 };
+    var d2: [2]f64 = .{ 1, 2 };
+    var d3: [3]f64 = .{ 1, 2, 2 };
+    var d4: [4]f64 = .{ 1, 2, 2, 2 };
+    var l2: @Vector(2, f32) = .{ 1, 2 };
+    var l4: @Vector(4, f32) = .{ 1, 2, 2, 2 };
+    var l3: @Vector(3, f64) = .{ 1, 2, 2 };
+    std.mem.doNotOptimizeAway(&f2);
+    std.mem.doNotOptimizeAway(&f3);
+    std.mem.doNotOptimizeAway(&f4);
+    std.mem.doNotOptimizeAway(&d2);
+    std.mem.doNotOptimizeAway(&d3);
+    std.mem.doNotOptimizeAway(&d4);
+    std.mem.doNotOptimizeAway(&l2);
+    std.mem.doNotOptimizeAway(&l3);
+    std.mem.doNotOptimizeAway(&l4);
+
+    try std.testing.expectEqual([2]f32{ 1, 2 }, lanesOf(2, f32, Vec2f.fromArray(f2).toVector()));
+    try std.testing.expectEqual([3]f32{ 1, 2, 2 }, lanesOf(3, f32, Vec3f.fromArray(f3).toVector()));
+    try std.testing.expectEqual([4]f32{ 1, 2, 2, 2 }, lanesOf(4, f32, Vec4f.fromArray(f4).toVector()));
+    try std.testing.expectEqual([2]f64{ 1, 2 }, lanesOf(2, f64, Vec2d.fromArray(d2).toVector()));
+    try std.testing.expectEqual([3]f64{ 1, 2, 2 }, lanesOf(3, f64, Vec3d.fromArray(d3).toVector()));
+    try std.testing.expectEqual([4]f64{ 1, 2, 2, 2 }, lanesOf(4, f64, Vec4d.fromArray(d4).toVector()));
+
+    try std.testing.expectEqual(Vec2f.init(1, 2), Vec2f.fromVector(l2));
+    try std.testing.expectEqual(Vec3d.init(1, 2, 2), Vec3d.fromVector(l3));
+    try std.testing.expectEqual(Vec4f.init(1, 2, 2, 2), Vec4f.fromVector(l4));
+}
+
+test "toVector and fromVector round-trip the bits of run-time components" {
+    var f2: [2]f32 = .{ -0.0, subnormal_f };
+    var f3: [3]f32 = .{ 1, 2, payload_f };
+    var f4: [4]f32 = .{ subnormal_f, 0.1, -0.0, std.math.inf(f32) };
+    var d2: [2]f64 = .{ -0.0, subnormal_d };
+    var d3: [3]f64 = .{ 1, 2, payload_d };
+    var d4: [4]f64 = .{ subnormal_d, -subnormal_d, payload_d, -0.0 };
+    std.mem.doNotOptimizeAway(&f2);
+    std.mem.doNotOptimizeAway(&f3);
+    std.mem.doNotOptimizeAway(&f4);
+    std.mem.doNotOptimizeAway(&d2);
+    std.mem.doNotOptimizeAway(&d3);
+    std.mem.doNotOptimizeAway(&d4);
+
+    try expectVectorRoundTrip(Vec2f, Vec2f.fromArray(f2));
+    try expectVectorRoundTrip(Vec3f, Vec3f.fromArray(f3));
+    try expectVectorRoundTrip(Vec4f, Vec4f.fromArray(f4));
+    try expectVectorRoundTrip(Vec2d, Vec2d.fromArray(d2));
+    try expectVectorRoundTrip(Vec3d, Vec3d.fromArray(d3));
+    try expectVectorRoundTrip(Vec4d, Vec4d.fromArray(d4));
 }
 
 test "the public surface is concrete and free of v-suffixed names" {

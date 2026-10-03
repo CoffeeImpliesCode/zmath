@@ -150,6 +150,17 @@ fn hypotSpecialD(x_bits: u64, y_bits: u64) ?f64 {
 // Correctly rounded binary16 hypot, ported from CORE-MATH
 // src/binary16/hypot/hypotf16.c at revision
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa under the MIT License.
+/// Euclidean distance `sqrt(x*x + y*y)` of two `binary16` values.
+///
+/// Neither operand is domain-restricted. The result is never negative: one
+/// zero operand gives the magnitude of the other, two signed zeros give +0,
+/// and an overflow gives +inf. If exactly one operand is a NaN and the other
+/// an infinity the result is +inf; two NaNs give the first operand with its
+/// quiet bit set, and a lone NaN keeps its sign and payload.
+///
+/// The caller must keep IEEE round-to-nearest, ties-to-even active. The
+/// returned float is the whole result: no error code, floating-point exception
+/// flag, or retained status reports anything else.
 pub fn hypoth(x: f16, y: f16) f16 {
     @setFloatMode(.strict);
     const x_bits: u16 = @bitCast(x);
@@ -208,6 +219,13 @@ noinline fn hypotfRefine(
 // Correctly rounded binary32 hypot, ported from CORE-MATH
 // src/binary32/hypot/hypotf.c at revision
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa under the MIT License.
+/// Euclidean distance `sqrt(x*x + y*y)` of two `binary32` values.
+///
+/// Neither operand is domain-restricted. The result is never negative: one
+/// zero operand gives the magnitude of the other, two signed zeros give +0,
+/// and an overflow gives +inf. If exactly one operand is a NaN and the other
+/// an infinity the result is +inf; two NaNs give the first operand with its
+/// quiet bit set, and a lone NaN keeps its sign and payload.
 pub fn hypotf(x: f32, y: f32) f32 {
     @setFloatMode(.strict);
     const x_bits: u32 = @bitCast(x);
@@ -350,6 +368,13 @@ fn hypotdHard(x: f64, y: f64) f64 {
 // Correctly rounded binary64 hypot, ported from CORE-MATH
 // src/binary64/hypot/hypot.c at revision
 // 3bafed75e3c22399531857d63a3fa0e24bfb42fa under the MIT License.
+/// Euclidean distance `sqrt(x*x + y*y)` of two `binary64` values.
+///
+/// Neither operand is domain-restricted. The result is never negative: one
+/// zero operand gives the magnitude of the other, two signed zeros give +0,
+/// and an overflow gives +inf. If exactly one operand is a NaN and the other
+/// an infinity the result is +inf; two NaNs give the first operand with its
+/// quiet bit set, and a lone NaN keeps its sign and payload.
 pub fn hypotd(x: f64, y: f64) f64 {
     @setFloatMode(.strict);
     const x_bits: u64 = @bitCast(x);
