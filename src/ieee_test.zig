@@ -9,7 +9,7 @@ test "RoundMode defines the four public rounding modes" {
         .toward_negative,
     };
 
-    try std.testing.expectEqual(modes.len, @typeInfo(ieee.RoundMode).@"enum".fields.len);
+    try std.testing.expectEqual(modes.len, @typeInfo(ieee.RoundMode).@"enum".field_names.len);
 }
 
 test "classifyf identifies every public IEEE class" {

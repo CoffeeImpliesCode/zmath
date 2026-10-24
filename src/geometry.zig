@@ -387,7 +387,7 @@ fn infinityOf(comptime T: type) T {
 const component_names = [4][]const u8{ "x", "y", "z", "w" };
 
 fn fieldCount(comptime V: type) usize {
-    return @typeInfo(V).@"struct".fields.len;
+    return @typeInfo(V).@"struct".field_names.len;
 }
 
 fn fieldName(comptime index: usize) []const u8 {
@@ -395,7 +395,7 @@ fn fieldName(comptime index: usize) []const u8 {
 }
 
 fn componentType(comptime V: type) type {
-    return @typeInfo(V).@"struct".fields[0].type;
+    return @typeInfo(V).@"struct".field_types[0];
 }
 
 fn toArrayOf(comptime V: type, a: V) [fieldCount(V)]componentType(V) {
@@ -431,9 +431,9 @@ fn requireFiniteField(value: anytype) error{NonFiniteInput}!void {
         if (!std.math.isFinite(value)) return error.NonFiniteInput;
         return;
     }
-    const width = comptime @typeInfo(T).@"struct".fields.len;
+    const width = comptime @typeInfo(T).@"struct".field_names.len;
     inline for (0..width) |index| {
-        const name = comptime @typeInfo(T).@"struct".fields[index].name;
+        const name = comptime @typeInfo(T).@"struct".field_names[index];
         try requireFiniteField(@field(value, name));
     }
 }

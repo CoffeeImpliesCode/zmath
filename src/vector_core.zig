@@ -69,11 +69,11 @@ fn ResultVector(comptime R: type, comptime X: anytype) type {
 /// Indexed boolean vector stores lose lanes on LLVM AArch64 big-endian.
 /// Store scalar verdicts as bytes before forming the boolean vector.
 const byte_bool_lanes = builtin.zig_backend == .stage2_llvm and
-    builtin.cpu.arch == .aarch64_be;
+    builtin.target.cpu.arch == .aarch64_be;
 
 /// Debug boolean publication reverses each aligned lane group at
 /// power-of-two widths. Comptime publication and ReleaseSafe need no reversal.
-const reverse_bool_lanes = byte_bool_lanes and builtin.mode == .Debug;
+const reverse_bool_lanes = byte_bool_lanes and builtin.optimize == .debug;
 
 /// The lane group the measured Debug permutation acts inside. The permutation
 /// reverses a whole width below eight lanes, and each aligned group of eight
@@ -85,12 +85,7 @@ const bool_group_lanes = 8;
 /// comparison route rather than failing to compile.
 const max_integer_published_lanes = 65535;
 
-/// The lane group that makes a published mask byte aligned: a boolean mask byte
-/// holds eight lanes, and lane `i` is shifted to bit `n - 1 - i`, so a width
-/// that is a multiple of eight fills whole bytes and any other width leaves
-/// lanes in a partial byte. That is a property of the published mask, not of
-/// the staging, which is one byte per lane at every width. No measurement
-/// establishes this group; `publishesAtByteWidth` records the open question.
+/// Whole-byte mask widths use integer publication.
 const integer_publish_alignment = 8;
 
 /// The width rule of the reversal repair: the measured permutation only
@@ -112,19 +107,7 @@ fn reversesLanes(comptime n: usize) bool {
 /// which is what `integer_publish_alignment` states. The empty width publishes
 /// no lane and is excluded.
 ///
-/// The route now has a measurement: `cross-test --targets aarch64_be-linux
-/// -- -Doptimize=ReleaseSafe` on this tree compiles and runs it, because it
-/// needs an `aarch64_be` target and a non-`Debug` mode at once. That run
-/// reports 955 of 956, and its single failure is the one-hot mask sweep at
-/// width 14, which does not take this route. The widths this route does take
-/// in the shipped sweep, 8, 16 and 24, are clean on that target and mode.
-///
-/// What no measurement covers is a width this route rejects: those fall back
-/// to the comparison route, so nothing here has ever published an unaligned
-/// width. That leaves an open question the staging cannot answer, since a lane
-/// is one byte at every width and nothing in the staging requires whole bytes.
-/// The accepted widths are left exactly as they are, because no measurement
-/// justifies changing them.
+/// Zig 0.17 bit casts place logical lane zero in the least-significant bit.
 ///
 /// A width failing the rule is published by comparing the staged bytes instead,
 /// which is a valid mask at every width rather than an unsupported-width
@@ -138,7 +121,7 @@ fn publishesAtByteWidth(comptime n: usize) bool {
 /// Debug is excluded, because there the measured permutation is repaired by
 /// `reversesLanes` instead.
 fn publishesAsInteger(comptime n: usize) bool {
-    return byte_bool_lanes and builtin.mode != .Debug and publishesAtByteWidth(n);
+    return byte_bool_lanes and builtin.optimize != .debug and publishesAtByteWidth(n);
 }
 
 /// Reverses lanes within each aligned group of at most `bool_group_lanes`.
@@ -179,7 +162,7 @@ inline fn publish(comptime R: type, comptime n: usize, lanes: Storage(R, n)) @Ve
             // integer Zig admits, and inside a whole number of mask bytes.
             const Bits = @Int(.unsigned, n);
             var bits: Bits = 0;
-            inline for (0..n) |i| bits |= @as(Bits, lanes[i]) << @intCast(n - 1 - i);
+            inline for (0..n) |i| bits |= @as(Bits, lanes[i]) << @intCast(i);
             return @bitCast(bits);
         }
         const mask: @Vector(n, bool) = if (comptime byte_bool_lanes)

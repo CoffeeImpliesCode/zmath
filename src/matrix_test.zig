@@ -1183,7 +1183,7 @@ test "the determinant of a singular Mat4d is far below its entry scale" {
 /// applied to the wrong term, or a different way of walking the minors all
 /// produce a different number here.
 fn exactDet(comptime n: usize, m: [n][n]i64) i64 {
-    var used = [_]bool{false} ** n;
+    var used: [n]bool = @splat(false);
     return leibnizTerm(n, m, 0, 1, &used);
 }
 

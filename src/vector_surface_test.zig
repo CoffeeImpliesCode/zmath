@@ -1610,8 +1610,7 @@ fn audit() Audit {
     // Direction two: nothing in `root.zig` escapes the tables. The declared
     // exceptions are subtracted from the sweep, so a root operation given a
     // `@Vector` dispatch line without a table row is reported here.
-    for (std.meta.declarations(root), 0..) |_, i| {
-        const name = std.meta.declarations(root)[i].name;
+    for (@typeInfo(root).@"struct".decl_names) |name| {
         if (!isRootOperation(name)) continue;
         result.operations += 1;
         if (memberOf(name, scalar_only_ops)) continue;

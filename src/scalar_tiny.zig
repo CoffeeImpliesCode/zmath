@@ -73,7 +73,7 @@ const certificates = [_]Certificate{
 // (C+1)/2^125. Adjacent Farey fractions bracket that interval below; every
 // enclosed rational has denominator at least lower_d + upper_d > M.
 comptime {
-    std.debug.assert(certificates.len == @typeInfo(Kind).@"enum".fields.len);
+    std.debug.assert(certificates.len == @typeInfo(Kind).@"enum".field_names.len);
     const denominator: u256 = @as(u256, 1) << 125;
     for (certificates) |certificate| {
         std.debug.assert(certificate.coefficient > 1);
@@ -102,7 +102,7 @@ pub inline fn scale(comptime kind: Kind, value: f64) f64 {
     if (magnitude == 0) return value;
 
     const significand: u53 = @intCast(magnitude);
-    const coefficient = comptime certificates[@intFromEnum(kind)].coefficient;
+    const coefficient = comptime certificates[@backingInt(kind)].coefficient;
     const coefficient_low: u64 = @truncate(coefficient);
     const coefficient_high: u64 = @truncate(coefficient >> 64);
     const low_product = @as(u128, significand) * coefficient_low;

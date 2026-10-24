@@ -219,7 +219,7 @@ fn toArrayOf(comptime Q: type, a: Q) [4]Component(Q) {
 
 /// The component type of a raw or validated quaternion.
 fn Component(comptime Q: type) type {
-    return @typeInfo(Q).@"struct".fields[0].type;
+    return @typeInfo(Q).@"struct".field_types[0];
 }
 
 fn fromArrayOf(comptime Q: type, a: [4]Component(Q)) Q {

@@ -578,23 +578,23 @@ fn assertField(
     comptime name: []const u8,
     comptime fields: anytype,
 ) void {
-    if (!std.mem.eql(u8, fields[index].name, name)) {
+    if (!std.mem.eql(u8, fields.field_names[index], name)) {
         @compileError(std.fmt.comptimePrint(
             "C23 result field {d} is `{s}`, expected `{s}`",
-            .{ index, fields[index].name, name },
+            .{ index, fields.field_names[index], name },
         ));
     }
-    if (fields[index].type != FieldType) {
+    if (fields.field_types[index] != FieldType) {
         @compileError(std.fmt.comptimePrint(
             "C23 result field `{s}` has type `{s}`, expected `{s}`",
-            .{ name, @typeName(fields[index].type), @typeName(FieldType) },
+            .{ name, @typeName(fields.field_types[index]), @typeName(FieldType) },
         ));
     }
 }
 
-fn requireTwoFields(comptime Result: type) []const std.builtin.Type.StructField {
-    const fields = @typeInfo(Result).@"struct".fields;
-    if (fields.len != 2) {
+fn requireTwoFields(comptime Result: type) std.lang.Type.Struct {
+    const fields = @typeInfo(Result).@"struct";
+    if (fields.field_names.len != 2) {
         @compileError(std.fmt.comptimePrint(
             "C23 result `{s}` must contain exactly two fields",
             .{@typeName(Result)},
@@ -619,13 +619,13 @@ fn assertResultContainers(comptime Scalar: type) void {
         requireDecl(Scalar, name);
     }
 
-    const directions = @typeInfo(Scalar.FromFpRound).@"enum".fields;
+    const directions = @typeInfo(Scalar.FromFpRound).@"enum".field_names;
     if (directions.len != 5) @compileError("FromFpRound must contain five directions");
-    if (!std.mem.eql(u8, directions[0].name, "nearest_even")) @compileError("bad FromFpRound");
-    if (!std.mem.eql(u8, directions[1].name, "nearest_from_zero")) @compileError("bad FromFpRound");
-    if (!std.mem.eql(u8, directions[2].name, "toward_zero")) @compileError("bad FromFpRound");
-    if (!std.mem.eql(u8, directions[3].name, "toward_positive")) @compileError("bad FromFpRound");
-    if (!std.mem.eql(u8, directions[4].name, "toward_negative")) @compileError("bad FromFpRound");
+    if (!std.mem.eql(u8, directions[0], "nearest_even")) @compileError("bad FromFpRound");
+    if (!std.mem.eql(u8, directions[1], "nearest_from_zero")) @compileError("bad FromFpRound");
+    if (!std.mem.eql(u8, directions[2], "toward_zero")) @compileError("bad FromFpRound");
+    if (!std.mem.eql(u8, directions[3], "toward_positive")) @compileError("bad FromFpRound");
+    if (!std.mem.eql(u8, directions[4], "toward_negative")) @compileError("bad FromFpRound");
 
     const integer_fields = requireTwoFields(Scalar.IntegerResult);
     assertField(i64, 0, "value", integer_fields);

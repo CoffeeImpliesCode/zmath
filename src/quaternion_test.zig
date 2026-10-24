@@ -111,7 +111,7 @@ fn f64FromBits(v: u64) f64 {
 
 /// The component type of a raw or validated quaternion.
 fn scalarOf(comptime Q: type) type {
-    return @typeInfo(Q).@"struct".fields[0].type;
+    return @typeInfo(Q).@"struct".field_types[0];
 }
 
 /// Componentwise closeness, which is what a law over the four components
@@ -135,7 +135,7 @@ fn expectQuatClose(comptime Q: type, actual: Q, expected: Q, tolerance: scalarOf
 }
 
 fn expectVecClose(comptime V: type, actual: V, expected: V, tolerance: scalarOf(V)) !void {
-    const T = @typeInfo(V).@"struct".fields[0].type;
+    const T = @typeInfo(V).@"struct".field_types[0];
     const got = actual.toArray();
     const want = expected.toArray();
     inline for (0..3) |i| {

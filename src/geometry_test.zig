@@ -237,8 +237,8 @@ test "the predicate policy is an explicit parameter wherever it can differ" {
             @TypeOf(g.Line4d.intersect),
         };
         for (differing) |entry| {
-            const parameters = @typeInfo(entry).@"fn".params;
-            const last = parameters[parameters.len - 1].type.?;
+            const parameters = @typeInfo(entry).@"fn".param_types;
+            const last = parameters[parameters.len - 1].?;
             std.debug.assert(last == g.PredicatePolicy);
         }
         const fixed = .{
@@ -247,8 +247,8 @@ test "the predicate policy is an explicit parameter wherever it can differ" {
             @TypeOf(g.Aabb4f.intersect),
         };
         for (fixed) |entry| {
-            for (@typeInfo(entry).@"fn".params) |parameter| {
-                std.debug.assert(parameter.type.? != g.PredicatePolicy);
+            for (@typeInfo(entry).@"fn".param_types) |parameter| {
+                std.debug.assert(parameter.? != g.PredicatePolicy);
             }
         }
     }
@@ -2148,8 +2148,8 @@ test "API alignment: coincident rays stay half-lines" {
         const L = Case[3];
         const I = Case[4];
         const T = Case[5];
-        const dim = @typeInfo(P).@"struct".fields.len;
-        const coordinates = [_]T{0} ** dim;
+        const dim = @typeInfo(P).@"struct".field_names.len;
+        const coordinates: [dim]T = @splat(0);
         var direction = coordinates;
         direction[0] = 1;
         const point = try P.fromArray(coordinates);
@@ -2180,23 +2180,23 @@ test "API alignment: line, ray, and segment report the set they actually share" 
         const S = Case[4];
         const I = Case[5];
         const T = Case[6];
-        const dim = @typeInfo(P).@"struct".fields.len;
+        const dim = @typeInfo(P).@"struct".field_names.len;
         const axis = blk: {
-            var row = [_]T{0} ** dim;
+            var row: [dim]T = @splat(0);
             row[0] = 1;
             break :blk row;
         };
         const back = blk: {
-            var row = [_]T{0} ** dim;
+            var row: [dim]T = @splat(0);
             row[0] = -1;
             break :blk row;
         };
         const twice = blk: {
-            var row = [_]T{0} ** dim;
+            var row: [dim]T = @splat(0);
             row[0] = 2;
             break :blk row;
         };
-        const origin = try P.fromArray([_]T{0} ** dim);
+        const origin = try P.fromArray(@splat(0));
         const direction = try V.fromArray(axis);
         const ray = try R.init(origin, direction);
         const line = try L.init(origin, direction);
@@ -2573,7 +2573,7 @@ test "API alignment: subnormal directions remain unit" {
     inline for (.{ .{ g.Vector2f, f32 }, .{ g.Vector2d, f64 } }) |Case| {
         const V = Case[0];
         const T = Case[1];
-        const U = std.meta.Int(.unsigned, @bitSizeOf(T));
+        const U = @Int(.unsigned, @bitSizeOf(T));
         const tiny: T = @bitCast(@as(U, 1));
         const direction = try (try V.init(tiny, tiny)).normalize();
         try std.testing.expect(@abs(try direction.length() - 1) < 0.00001);
@@ -2599,8 +2599,8 @@ fn boxCenter(comptime B: type, lo: anytype, hi: anytype) !@FieldType(B, "minimum
     const P = @FieldType(B, "minimum");
     const T = ScalarOf(P);
     const dim = comptime fieldCountOf(P);
-    var lows: [dim]T = [1]T{lo} ** dim;
-    var highs: [dim]T = [1]T{hi} ** dim;
+    var lows: [dim]T = @splat(lo);
+    var highs: [dim]T = @splat(hi);
     std.mem.doNotOptimizeAway(&lows);
     std.mem.doNotOptimizeAway(&highs);
     return (try B.init(try pointOf(P, dim, lows), try pointOf(P, dim, highs))).center();
@@ -2610,7 +2610,7 @@ fn boxCenter(comptime B: type, lo: anytype, hi: anytype) !@FieldType(B, "minimum
 fn uniformPoint(comptime P: type, value: anytype) !P {
     const T = ScalarOf(P);
     const dim = comptime fieldCountOf(P);
-    const components: [dim]T = [1]T{value} ** dim;
+    const components: [dim]T = @splat(value);
     return pointOf(P, dim, components);
 }
 
@@ -2678,7 +2678,7 @@ const Reference = struct {
     limbs: [reference_words]u64,
 
     fn zero() Reference {
-        return .{ .negative = false, .used = 0, .limbs = [_]u64{0} ** reference_words };
+        return .{ .negative = false, .used = 0, .limbs = @splat(0) };
     }
 
     fn sign(a: Reference) g.Sign {
@@ -2901,11 +2901,11 @@ fn scaledAt(comptime T: type, value: T, base: usize) Reference {
 /// The published point type's scalar, read off its first field so a test can
 /// pick the matching corpus without naming the type again.
 fn ScalarOf(comptime P: type) type {
-    return @typeInfo(P).@"struct".fields[0].type;
+    return @typeInfo(P).@"struct".field_types[0];
 }
 
 fn fieldCountOf(comptime P: type) usize {
-    return @typeInfo(P).@"struct".fields.len;
+    return @typeInfo(P).@"struct".field_names.len;
 }
 
 /// One published point, built from the first `dim` components of a four-wide

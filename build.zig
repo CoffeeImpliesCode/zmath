@@ -357,13 +357,7 @@ pub fn build(b: *std.Build) void {
     // installation directory rather than directly from within the cache directory.
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // Zig 0.17 development builds temporarily removed Build.args. The coverage
-    // lane does not invoke `run`; retain argument forwarding where the field exists.
-    if (comptime @hasField(std.Build, "args")) {
-        if (@field(b, "args")) |args| {
-            run_cmd.addArgs(args);
-        }
-    }
+    run_cmd.addPassthruArgs();
 
     // Creates an executable that will run `test` blocks from the provided module.
     // Here `mod` needs to define a target, which is why earlier we made sure to
@@ -385,23 +379,9 @@ pub fn build(b: *std.Build) void {
     const test_build_step = b.step("test-build", "Install tests without running them");
     test_build_step.dependOn(&install_tests.step);
 
-    // Zig's documentation collector skips DT_UNKNOWN entries on NFS. Stage
-    // regular Zig sources individually so the archive sees local file kinds.
+    // Stage documentation inputs in the build cache.
     const docs_sources = b.addWriteFiles();
-    const io = b.graph.io;
-    const source_dir = b.build_root.handle.openDir(io, "src", .{ .iterate = true }) catch
-        @panic("unable to open zmath documentation sources");
-    defer source_dir.close(io);
-    var source_iterator = source_dir.iterate();
-    while (source_iterator.next(io) catch @panic("unable to enumerate zmath documentation sources")) |entry| {
-        if (!std.mem.endsWith(u8, entry.name, ".zig")) continue;
-        const kind = if (entry.kind == .unknown)
-            (source_dir.statFile(io, entry.name, .{}) catch @panic("unable to stat zmath documentation source")).kind
-        else
-            entry.kind;
-        if (kind != .file) continue;
-        _ = docs_sources.addCopyFile(b.path(b.fmt("src/{s}", .{entry.name})), entry.name);
-    }
+    _ = docs_sources.addCopyDirectory(b.path("src"), "", .{});
     const docs = b.addObject(.{
         .name = "zmath-docs",
         .root_module = b.createModule(.{

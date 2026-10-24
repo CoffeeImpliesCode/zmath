@@ -306,7 +306,7 @@ fn VecOf(comptime n_rows: usize, comptime Scalar: type) type {
 fn laneType(comptime V: type) type {
     return switch (@typeInfo(V)) {
         .array => |array| array.child,
-        .@"struct" => |shape| shape.fields[0].type,
+        .@"struct" => |shape| shape.field_types[0],
         else => @compileError("zmath.matrix: a vector is a Vec* value type or a plain array"),
     };
 }
@@ -341,10 +341,7 @@ fn laneSet(comptime V: type, v: *V, comptime index: usize, value: laneType(V)) v
 
 /// True when `T` declares a `pub` member called `name`.
 fn hasDecl(comptime T: type, comptime name: []const u8) bool {
-    for (@typeInfo(T).@"struct".decls) |decl| {
-        if (std.mem.eql(u8, decl.name, name)) return true;
-    }
-    return false;
+    return @hasDecl(T, name);
 }
 
 /// True when `T` is an instantiation of `Mat`.

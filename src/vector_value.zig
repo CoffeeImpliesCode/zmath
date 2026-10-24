@@ -101,12 +101,12 @@ const component_names = [4][]const u8{ "x", "y", "z", "w" };
 
 /// The number of components in `V`.
 fn componentCount(comptime V: type) usize {
-    return @typeInfo(V).@"struct".fields.len;
+    return @typeInfo(V).@"struct".field_names.len;
 }
 
 /// The component type of `V`.
 fn Component(comptime V: type) type {
-    return @typeInfo(V).@"struct".fields[0].type;
+    return @typeInfo(V).@"struct".field_types[0];
 }
 
 /// The unsigned integer of the same width as `T`, for bit comparisons.

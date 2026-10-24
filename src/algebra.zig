@@ -149,7 +149,7 @@
 //!     const A = zmath.algebra.Cl3d;
 //!
 //!     // A pure bivector, stored as the coefficient of the blade mask.
-//!     var coefficients = [_]f64{0} ** A.coefficient_count;
+//!     var coefficients: [A.coefficient_count]f64 = @splat(0);
 //!     coefficients[0b011] = 1.0; // e1 wedge e2
 //!     const rotor = A.unitRotor(A.fromCoefficients(coefficients)) orelse
 //!         return error.NoRotor;
@@ -442,7 +442,7 @@ fn Multivector(
 
         /// The blade of one grade, or `zero()` for a grade above the top one.
         fn gradedPart(self: Self, k: usize) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             if (k > n) return .{ .c = result };
             for (0..coefficient_count) |mask| {
                 if (gradeOf(mask) == k) result[mask] = self.c[mask];
@@ -456,19 +456,19 @@ fn Multivector(
 
         /// The multivector with every coefficient `+0`.
         pub fn zero() Self {
-            return .{ .c = [_]T{0} ** coefficient_count };
+            return .{ .c = @splat(0) };
         }
 
         /// The multivector with the scalar coefficient `+1` and no other.
         pub fn one() Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             result[scalar_mask] = 1;
             return .{ .c = result };
         }
 
         /// The multivector with the top blade coefficient `+1` and no other.
         pub fn pseudoscalar() Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             result[pseudoscalar_mask] = 1;
             return .{ .c = result };
         }
@@ -477,7 +477,7 @@ fn Multivector(
         /// coefficient `+1` and no metric sign. An index at or above the basis
         /// count gives `zero()`.
         pub fn blade(index: usize) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             if (index < basis_count) result[bit(index)] = 1;
             return .{ .c = result };
         }
@@ -538,7 +538,7 @@ fn Multivector(
 
         /// The coefficientwise sum.
         pub fn add(a: Self, b: Self) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 result[mask] = a.c[mask] + b.c[mask];
             }
@@ -547,7 +547,7 @@ fn Multivector(
 
         /// The coefficientwise difference.
         pub fn sub(a: Self, b: Self) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 result[mask] = a.c[mask] - b.c[mask];
             }
@@ -556,7 +556,7 @@ fn Multivector(
 
         /// The coefficientwise negation.
         pub fn neg(self: Self) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 result[mask] = -self.c[mask];
             }
@@ -565,7 +565,7 @@ fn Multivector(
 
         /// The coefficientwise product with `factor`.
         pub fn scale(self: Self, factor: T) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 result[mask] = self.c[mask] * factor;
             }
@@ -574,7 +574,7 @@ fn Multivector(
 
         /// Retains every even grade, including grade 6 where supported.
         pub fn evenPart(self: Self) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 if (@mod(gradeOf(mask), 2) == 0) result[mask] = self.c[mask];
             }
@@ -592,7 +592,7 @@ fn Multivector(
         /// factor annihilates that term instead of producing a NaN.
         pub fn geometricProduct(a: Self, b: Self) Self {
             const table = &product_table;
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |left| {
                 const value = a.c[left];
                 if (value == 0) continue;
@@ -609,7 +609,7 @@ fn Multivector(
         /// product. A pair that shares a basis vector contributes nothing.
         pub fn wedge(a: Self, b: Self) Self {
             const table = &product_table;
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |left| {
                 const value = a.c[left];
                 if (value == 0) continue;
@@ -628,7 +628,7 @@ fn Multivector(
         /// includes the scalar part.
         pub fn inner(a: Self, b: Self) Self {
             const table = &product_table;
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |left| {
                 const value = a.c[left];
                 if (value == 0) continue;
@@ -661,7 +661,7 @@ fn Multivector(
 
         /// The multivector with the grade sign `(-1)^(k * (k - 1) / 2)`.
         pub fn reverse(self: Self) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 const k: i32 = @intCast(gradeOf(mask));
                 const sign: i32 = paritySign(@divTrunc(k * (k - 1), 2));
@@ -676,7 +676,7 @@ fn Multivector(
         ///
         /// This is distinct from `reverse`; it is not a general versor inverse.
         pub fn conjugate(self: Self) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 const k: i32 = @intCast(gradeOf(mask));
                 const sign: T = @floatFromInt(paritySign(@divTrunc(k * (k + 1), 2)));
@@ -690,7 +690,7 @@ fn Multivector(
         /// satisfies `dual(dual(A)) == dual_square * A`.
         pub fn dual(self: Self) Self {
             const table = &dual_table;
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 const entry = table[mask];
                 result[entry.mask] += entry.scale * self.c[mask];
@@ -700,7 +700,7 @@ fn Multivector(
 
         /// The unsigned complementary dual, which drops the dual sign.
         pub fn dualComplement(self: Self) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..coefficient_count) |mask| {
                 result[(coefficient_count - 1) & ~mask] += self.c[mask];
             }
@@ -832,7 +832,7 @@ fn Multivector(
         /// exists only there and is a compile error elsewhere.
         pub fn point(x: [dimension]T) Self {
             if (kind != .projective) @compileError("zmath.algebra.point exists only for Pga");
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..dimension) |index| {
                 result[bit(0) | spatialMask(index)] = x[index];
             }
@@ -849,7 +849,7 @@ fn Multivector(
         /// operation exists only there.
         pub fn n_o() Self {
             if (kind != .conformal) @compileError("zmath.algebra.n_o exists only for Cga");
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             result[bit(n - 1)] = @as(T, 0.5);
             result[bit(n - 2)] = -@as(T, 0.5);
             return .{ .c = result };
@@ -864,7 +864,7 @@ fn Multivector(
         /// operation exists only there.
         pub fn n_inf() Self {
             if (kind != .conformal) @compileError("zmath.algebra.n_inf exists only for Cga");
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             result[bit(n - 1)] = 1;
             result[bit(n - 2)] = 1;
             return .{ .c = result };
@@ -873,7 +873,7 @@ fn Multivector(
         /// The point at the Euclidean origin, which is `n_o` itself: the grade-1
         /// blade with `+0.5` on `e_minus` and `-0.5` on `e_plus`, and no
         /// scalar part, no Euclidean part, and no `n_inf` part. It is the
-        /// embedding of the zero vector, so `origin()` and `embed(.{0} ** dimension)`
+        /// embedding of the zero vector, so `origin()` and `embed(@splat(0))`
         /// are the same multivector.
         ///
         /// Only `Cga` has a conformal origin, so this operation exists only
@@ -884,7 +884,7 @@ fn Multivector(
 
         /// The multivector with only the Euclidean components, used by `embed`.
         fn vectorOf(x: [dimension]T) Self {
-            var result = [_]T{0} ** coefficient_count;
+            var result: [coefficient_count]T = @splat(0);
             for (0..dimension) |index| {
                 result[spatialMask(index)] = x[index];
             }

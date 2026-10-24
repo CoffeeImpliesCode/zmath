@@ -32,7 +32,7 @@ const root_two_f: f32 = @sqrt(2.0);
 
 /// The number of components in `V`.
 fn widthOf(comptime V: type) usize {
-    return @typeInfo(V).@"struct".fields.len;
+    return @typeInfo(V).@"struct".field_names.len;
 }
 
 /// The unsigned integer of the same width as `T`.
@@ -48,8 +48,8 @@ fn bits(comptime T: type, v: T) intOf(T) {
 /// The exact component bits of `v`. A float comparison cannot tell `+0` from
 /// `-0` and cannot compare a NaN at all, so every test that cares about those
 /// goes through here.
-fn bitsOf(comptime V: type, v: V) [widthOf(V)]intOf(@typeInfo(V).@"struct".fields[0].type) {
-    const T = @typeInfo(V).@"struct".fields[0].type;
+fn bitsOf(comptime V: type, v: V) [widthOf(V)]intOf(@typeInfo(V).@"struct".field_types[0]) {
+    const T = @typeInfo(V).@"struct".field_types[0];
     const width = comptime widthOf(V);
     var out: [width]intOf(T) = undefined;
     const array = v.toArray();
@@ -81,13 +81,13 @@ fn laneBits(comptime T: type, comptime N: usize, v: @Vector(N, T)) [N]intOf(T) {
 /// so none of them pins the order the producer publishes the vector in, which
 /// is the order a consumer that copies the bytes observes. Going through
 /// `@memcpy` makes this read the bytes rather than the lanes.
-fn publishedBitsOf(comptime V: type, v: V) [widthOf(V)]intOf(@typeInfo(V).@"struct".fields[0].type) {
-    const T = @typeInfo(V).@"struct".fields[0].type;
+fn publishedBitsOf(comptime V: type, v: V) [widthOf(V)]intOf(@typeInfo(V).@"struct".field_types[0]) {
+    const T = @typeInfo(V).@"struct".field_types[0];
     const width = comptime widthOf(V);
     const produced = v.toVector();
     var bytes: [width * @sizeOf(T)]u8 = undefined;
     @memcpy(&bytes, std.mem.asBytes(&produced)[0..bytes.len]);
-    const lanes: [width]T = @bitCast(bytes);
+    const lanes = std.mem.bytesToValue([width]T, &bytes);
     var out: [width]intOf(T) = undefined;
     inline for (0..width) |index| {
         out[index] = @bitCast(lanes[index]);
@@ -107,7 +107,7 @@ const payload_d: f64 = @bitCast(@as(u64, qnan_d) | 1);
 
 /// The `@Vector` lanes carry the components, in declaration order, bit for bit.
 fn expectVectorLanes(comptime V: type, v: V) !void {
-    const T = @typeInfo(V).@"struct".fields[0].type;
+    const T = @typeInfo(V).@"struct".field_types[0];
     try std.testing.expectEqual(bitsOf(V, v), laneBits(T, widthOf(V), v.toVector()));
 }
 
@@ -146,7 +146,7 @@ fn productIsZero(comptime T: type, a: T, b: T) bool {
 /// and in the `hypot` fold. Eight eps covers those with room to spare, and is
 /// still far tighter than the agreement the fold could offer.
 fn expectUnit(comptime V: type, v: V) !void {
-    const T = @typeInfo(V).@"struct".fields[0].type;
+    const T = @typeInfo(V).@"struct".field_types[0];
     try std.testing.expect(@abs(v.normalize().length() - 1.0) <= 8 * std.math.floatEps(T));
 }
 
@@ -158,11 +158,10 @@ fn expectVectorRoundTrip(comptime V: type, v: V) !void {
 
 /// True when `info` mentions `anytype` in its return type or in a parameter,
 /// directly or inside a function or optional type.
-fn mentionsAnytype(comptime info: std.builtin.Type.Fn) bool {
+fn mentionsAnytype(comptime info: std.lang.Type.Fn) bool {
     if (info.return_type == null) return true;
-    inline for (info.params) |param| {
-        if (param.is_generic) return true;
-        const param_type = param.type orelse return true;
+    inline for (info.param_types) |param| {
+        const param_type = param orelse return true;
         switch (@typeInfo(param_type)) {
             .@"fn" => |nested| if (mentionsAnytype(nested)) return true,
             .optional => |nested| {
@@ -1423,8 +1422,7 @@ test "toVector and fromVector round-trip the bits of run-time components" {
 test "the public surface is concrete and free of v-suffixed names" {
     const types = [_]type{ Vec2f, Vec3f, Vec4f, Vec2d, Vec3d, Vec4d };
     inline for (types) |V| {
-        inline for (@typeInfo(V).@"struct".decls) |decl| {
-            const name = decl.name;
+        inline for (@typeInfo(V).@"struct".decl_names) |name| {
             // Every `@Vector` entry point in `vector.zig` ends in `v`, so a
             // name that does is the only way the two layers could be confused.
             if (name.len != 0 and name[name.len - 1] == 'v') {

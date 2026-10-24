@@ -99,7 +99,7 @@ fn expectCloseCoefficients(
 
 /// The unit blade at `mask`, with no other coefficient.
 fn bladeOf(comptime A: type, mask: usize) A {
-    var values = [_]A.element{0} ** A.coefficient_count;
+    var values: [A.coefficient_count]A.element = @splat(0);
     values[mask] = 1;
     return A.fromCoefficients(values);
 }
@@ -184,14 +184,14 @@ test "the geometric product distributes over addition" {
 
 test "the scalar and vector grades form a commutative subalgebra" {
     inline for (all_algebras) |A| {
-        var scalar_and_vector = [_]A.element{0} ** A.coefficient_count;
+        var scalar_and_vector: [A.coefficient_count]A.element = @splat(0);
         scalar_and_vector[A.scalar_mask] = 1.5;
         for (0..A.dimension) |index| {
             const offset = if (A.metric[0] == 0) 1 else 0;
             scalar_and_vector[@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index + offset))] = 0.5;
         }
         const a = A.fromCoefficients(scalar_and_vector);
-        var other = [_]A.element{0} ** A.coefficient_count;
+        var other: [A.coefficient_count]A.element = @splat(0);
         other[A.scalar_mask] = 0.25;
         for (0..A.dimension) |index| {
             const offset = if (A.metric[0] == 0) 1 else 0;
@@ -222,7 +222,7 @@ test "each basis vector squares to its metric and distinct ones anticommute" {
         for (0..A.basis_count) |i| {
             const e = A.blade(i);
             const squared = A.geometricProduct(e, e);
-            var expected = [_]A.element{0} ** A.coefficient_count;
+            var expected: [A.coefficient_count]A.element = @splat(0);
             expected[A.scalar_mask] = A.metric[i];
             try expectCoefficients(A, A.fromCoefficients(expected), squared);
         }
@@ -267,7 +267,7 @@ test "reverse is an involution" {
 
 test "reverse fixes grades zero, one, and four and negates grades two and three" {
     inline for (all_algebras) |A| {
-        var fixed = [_]A.element{0} ** A.coefficient_count;
+        var fixed: [A.coefficient_count]A.element = @splat(0);
         fixed[A.scalar_mask] = 1;
         if (A.coefficient_count > 2) fixed[1] = 1;
         if (A.basis_count >= 4) fixed[0b01111] = 1;
@@ -524,7 +524,7 @@ test "the scalar form is the diagonal blade square sum, bit for bit" {
 test "the scalar form skips zero terms and keeps the non-finite rule" {
     inline for (all_algebras) |A| {
         const positive_zero: A.element = 0;
-        var infinite = [_]A.element{0} ** A.coefficient_count;
+        var infinite: [A.coefficient_count]A.element = @splat(0);
         // The second basis vector squares to `+1` in all three families, so its
         // diagonal scale is a unit and the infinity is not skipped by it.
         infinite[2] = std.math.inf(A.element);
@@ -534,7 +534,7 @@ test "the scalar form skips zero terms and keeps the non-finite rule" {
         try expectSameBits(A.element, positive_zero, A.dot(A.zero(), broken));
         try expectSameBits(A.element, positive_zero, A.norm(A.zero()));
         // Negative zero is zero, so it takes the same skip.
-        var negative_zeros = [_]A.element{0} ** A.coefficient_count;
+        var negative_zeros: [A.coefficient_count]A.element = @splat(0);
         for (&negative_zeros) |*slot| slot.* = -@as(A.element, 0);
         const signed_zero = A.fromCoefficients(negative_zeros);
         try expectSameBits(A.element, positive_zero, A.dot(signed_zero, broken));
@@ -544,7 +544,7 @@ test "the scalar form skips zero terms and keeps the non-finite rule" {
         // nonzero coefficient there is not a term at all and the sum is still
         // the positive zero it starts at.
         if (A.metric[0] == 0) {
-            var null_values = [_]A.element{0} ** A.coefficient_count;
+            var null_values: [A.coefficient_count]A.element = @splat(0);
             null_values[1] = 1;
             const null_blade = A.fromCoefficients(null_values);
             try expectSameBits(A.element, positive_zero, null_blade.norm());
@@ -641,7 +641,7 @@ test "the conformal pair has inner product minus one" {
         try testing.expectEqual(@as(A.element, -1), A.dot(A.n_inf(), A.n_o()));
         try testing.expectEqual(@as(A.element, 0), A.n_inf().norm());
         try expectCoefficients(A, A.n_o(), A.origin());
-        try expectCoefficients(A, A.n_o(), A.embed(.{0} ** A.dimension));
+        try expectCoefficients(A, A.n_o(), A.embed(@splat(0)));
     }
 }
 
@@ -658,7 +658,7 @@ test "the embedding round trips the Euclidean part" {
         for (x) |value| squared += value * value;
         // The embedding is exactly n_o + x + (x dot x) * n_inf / 2.
         const recovered = embedded.sub(A.n_o()).sub(A.n_inf().scale(squared / 2));
-        var expected = [_]A.element{0} ** A.coefficient_count;
+        var expected: [A.coefficient_count]A.element = @splat(0);
         for (x, 0..) |value, index| {
             expected[@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index))] = value;
         }
@@ -668,11 +668,11 @@ test "the embedding round trips the Euclidean part" {
 
 test "the conformal origin is the point at the zero vector" {
     inline for (.{ algebra.Cga3f, algebra.Cga3d, algebra.Cga4f, algebra.Cga4d }) |A| {
-        const point = A.embed(.{0} ** A.dimension);
+        const point = A.embed(@splat(0));
         try expectCoefficients(A, A.n_o(), point);
         try expectCoefficients(A, A.n_o(), A.origin());
         // The Euclidean components of the origin are zero.
-        try testing.expectEqual(.{0} ** A.dimension, point.euclideanPart());
+        try testing.expectEqual(@as([A.dimension]A.element, @splat(0)), point.euclideanPart());
     }
 }
 
@@ -682,7 +682,7 @@ test "the projective point blade multiplies a position into the null direction" 
             3 => .{ 1, -2, 0.5 },
             else => .{ 1, -2, 0.5, 0.75 },
         };
-        var position = [_]A.element{0} ** A.coefficient_count;
+        var position: [A.coefficient_count]A.element = @splat(0);
         for (x, 0..) |value, index| {
             position[@as(usize, 1) << @as(std.math.Log2Int(usize), @intCast(index + 1))] = value;
         }
@@ -798,7 +798,7 @@ test "the checked forms reject zero and non-finite input" {
         try testing.expect(A.normalized(A.one()) != null);
         try testing.expect(A.inverseChecked(A.one()) != null);
 
-        var infinite = [_]A.element{0} ** A.coefficient_count;
+        var infinite: [A.coefficient_count]A.element = @splat(0);
         infinite[1] = std.math.inf(A.element);
         const broken = A.fromCoefficients(infinite);
         try testing.expect(!broken.isFinite());
@@ -837,7 +837,7 @@ test "the binary64 inverse of a huge versor keeps its subnormal reciprocal" {
 
 test "a zero left factor annihilates the geometric product" {
     inline for (all_algebras) |A| {
-        var infinite = [_]A.element{0} ** A.coefficient_count;
+        var infinite: [A.coefficient_count]A.element = @splat(0);
         infinite[1] = std.math.inf(A.element);
         const broken = A.fromCoefficients(infinite);
         try expectCoefficients(A, A.zero(), A.geometricProduct(A.zero(), broken));
@@ -908,7 +908,7 @@ test "normalization gives unit norm and null for a null blade" {
         // reachable with a finite input.
         if (A.metric[0] == 0) {
             // The null basis vector is its own null blade, so it has no unit form.
-            var null_blade = [_]A.element{0} ** A.coefficient_count;
+            var null_blade: [A.coefficient_count]A.element = @splat(0);
             null_blade[1] = 1;
             const null_part = A.fromCoefficients(null_blade);
             try testing.expectEqual(@as(A.element, 0), null_part.norm());
