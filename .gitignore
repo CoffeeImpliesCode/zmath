@@ -13,3 +13,12 @@ codedb.snapshot
 /.portability-primitives.zig
 /src/.*
 *.core
+zig-pkg/
+__pycache__/
+*.pyc
+.ruff_cache/
+/result*
+*.o
+*.a
+*.so
+*.log
