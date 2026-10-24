@@ -1,89 +1,100 @@
 # zmath
 
-IEC 60559 (`IEEE 754`) elementary functions for Zig, across `f16`, `f32`, `f64`
-and `@Vector`s of those.
+Experimental IEC 60559 (IEEE 754) elementary functions for Zig `f16`, `f32`,
+`f64`, and vectors of those formats. The library also provides complex numbers,
+quaternions, matrices, linear algebra, geometry, and geometric algebras.
 
-`zmath` implements the standard's recommended operations rather than whatever
-the platform's libm happens to provide, so results are the same on every target
-Zig supports. Correctness is pinned against the standard's own specification
-(`spec/core-math-2026-08-22.md`) and checked against a differential oracle
-(see `zmath-testing`).
+## Requirements
 
-## Modules
+- Zig 0.17.0.
+- FMA support on x86 and x86-64 (`-Dcpu=baseline+fma` when cross-compiling).
+- A C target with IEEE binary32/binary64, known byte order, and `_BitInt(128)`
+  or `__int128` support.
 
-Nine namespace modules hold the full surface, and each carries its own contract:
-
-| module | contents |
-|---|---|
-| `ieee` | encoding, classification, payload operations |
-| `scalar` | the per-format elementary functions |
-| `vector` | the portable `@Vector` layer and the `Vec*` value types |
-| `complex` | complex arithmetic |
-| `quaternion` | quaternion arithmetic |
-| `matrix` | matrix types and operations |
-| `geometry` | geometric primitives |
-| `linalg` | decompositions and solvers |
-| `algebra` | polynomial and related operations |
-
-`root.zig` adds generic convenience functions over `scalar` and `ieee` and
-re-exports their shared result types.
+No external runtime libraries are required. Private C kernels derived from
+[CORE-MATH](https://core-math.gitlabpages.inria.fr/) are included in `src/`.
+Public fixed-size operations do not allocate.
 
 ## Usage
 
-The floating-point argument type selects the format:
+Fetch a revision into your application's dependencies:
+
+```sh
+zig fetch --save=zmath git+https://github.com/CoffeeImpliesCode/zmath
+```
+
+Import its `zmath` module from your `build.zig`:
+
+```zig
+const dependency = b.dependency("zmath", .{
+    .target = target,
+    .optimize = optimize,
+});
+exe.root_module.addImport("zmath", dependency.module("zmath"));
+```
+
+The module includes its private C sources and link settings. In application code:
 
 ```zig
 const std = @import("std");
 const zmath = @import("zmath");
 
 pub fn main() void {
-    // Both calls use binary32: the scalar and the four-lane vector.
     const scalar_result = zmath.sin(@as(f32, 0.5));
     const lane_result = zmath.sin(@as(@Vector(4, f32), @splat(0.5)));
-    std.debug.print("{d} {d}\n", .{ scalar_result, lane_result[0] });
+    const bits = zmath.ieee.toBitsh(@as(f16, 1.0));
+    const c = zmath.complex.expf(.{ .re = 0, .im = 0 });
+    std.debug.print("{d} {d} {x} {d}\n", .{
+        scalar_result, lane_result[0], bits, c.re,
+    });
 }
 ```
 
-Generic operations accept supported scalar floats or `@Vector`s of those, except
-`nan`, which takes an explicit scalar type and a payload string. A vector
-argument keeps its lane count.
+The argument type selects the format for generic scalar and vector operations.
+Suffixed names use `h`, `f`, and `d` for `f16`, `f32`, and `f64`.
+See [API.md](API.md) for result types, rounding rules, and error contracts.
 
-Operations not named in `root.zig` are reached through their namespace:
-
-```zig
-const zmath = @import("zmath");
-
-const bits = zmath.ieee.toBits(@as(f32, 1.0));   // encoding
-const c = zmath.complex.exp(zmath.complex.Complex.f32.init(0, 0));
-```
-
-## Building
+## Build and test
 
 ```sh
-zig build            # compile the library
-zig build test       # run the unit suite
-zig build test-build # build the test binaries without running them
+zig build            # install the demonstration executable
+zig build test       # run the numerical unit suite
+zig build test-build # install the test executable without running it
 zig build run        # run the demonstration
-zig build docs       # generate the autodoc site into zig-out/docs
+zig build docs       # install the autodoc site in zig-out/docs
 ```
 
-Requires Zig 0.16.0. The repository has no third-party dependencies; the
-`coremath_*` translation units are vendored reference sources from the
-CORE-MATH project, not a dependency.
+Serve `zig-out/docs` over HTTP to view the generated documentation.
 
-## Correctness
+## Layout
 
-The suite is organised around what can actually go wrong in a floating-point
-library, and the files name the concern: `ieee_edge_test.zig`,
-`ieee_exhaustive_h_test.zig` (every binary16 value), `ieee_scale_widths_test.zig`
-(the widening and narrowing boundaries), `root_pow_test.zig`,
-`root_sinpi_test.zig`, `root_tgamma_contract_test.zig`,
-`c23_public_surface_test.zig`, and `api_suffix_test.zig` for the naming
-convention that selects a format by suffix.
+| Module | Contents |
+|---|---|
+| `ieee` | Encoding, classification, payloads, and rounding |
+| `scalar` | Elementary functions for each format |
+| `vector` | Elementwise `@Vector` operations and `Vec*` value types |
+| `complex` | Complex arithmetic |
+| `quaternion` | Raw and unit quaternions |
+| `matrix` | Fixed-size matrices and operations |
+| `linalg` | Decompositions and solvers |
+| `geometry` | Geometric primitives and predicates |
+| `algebra` | Clifford, projective, and conformal geometric algebras |
 
-Differential testing against an independent oracle, corpus replay, fuzzing and
-benchmark harnesses live in `zmath-testing`.
+Implementation and unit tests are under `src/`. The root module adds generic
+convenience functions over `scalar` and `ieee`.
+
+Independent oracle generation, corpus replay, fuzzing, and benchmarks live in
+[zmath-testing](https://github.com/CoffeeImpliesCode/zmath-testing).
+The [scalar corpus contract](spec/core-math-2026-08-22.md) defines that harness's
+schema. Unit tests and selected corpus cases do not prove whole-domain accuracy;
+the non-scalar modules have no general independent accuracy proof.
+
+Big-endian vector code retains compiler-specific workarounds. Tests exclude
+some boolean mask widths, and returned-vector register ordering has known
+compiler limits on ARM big-endian targets. Cross-target support requires tests
+on the selected compiler and target.
 
 ## License
 
-See [LICENSE](LICENSE).
+Derived CORE-MATH files carry their upstream copyright and MIT license notices.
+This repository has no project-wide license file for the remaining code.

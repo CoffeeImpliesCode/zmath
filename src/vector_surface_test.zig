@@ -606,8 +606,7 @@ fn checkRootBoolBinary(
 /// Reading a lane through `@shuffle` and `@reduce(.Or, ...)` instead of
 /// `mask[i]` gives the same wrong verdicts, so the published mask value is
 /// wrong and not the read of it. Marking `mapBinaryR` inline in a scratch copy
-/// changes nothing. `PROJECT.md` records the same receipts and the four
-/// publication routes measured against them.
+/// changes nothing.
 ///
 /// Width 14 is excluded on separate terms, and it is a different failure.
 /// The `cross-test` run for `aarch64_be-linux` in `ReleaseSafe` reports 955 of

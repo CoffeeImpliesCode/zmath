@@ -1,32 +1,20 @@
 # zmath API Contract
 
-## Status
-
-This document defines the target API and identifies the currently implemented public subset.
-
-The current public root exports the `zmath.ieee`, `zmath.scalar`, `zmath.vector`, `zmath.complex`,
-`zmath.quaternion`, `zmath.matrix`, `zmath.linalg`, `zmath.geometry`, and `zmath.algebra` modules,
-their shared result types, and the C23 source surface defined in
-`spec/core-math-2026-08-22.md`. Every module path listed under
-[Planned module paths](#planned-module-paths) is now implemented.
-`zmath.vector` is implemented as the portable `@Vector` layer described in [Vector API](#vector-api):
-417 public entry points covering the elementwise scalar operations, including the result-struct,
-integer-argument, integer-returning, boolean-returning, and narrowing ones. The same module also
-owns the linear-algebra `Vec*` value types from [Vectors and quaternions](#vectors-and-quaternions);
-the two layers share the module path and nothing else. Portable-vector operations use
-`v` names; operations with per-lane secondary arguments use `vLanes`.
+The public root exports `ieee`, `scalar`, `vector`, `complex`, `quaternion`,
+`matrix`, `linalg`, `geometry`, and `algebra`, their shared result types, and
+the C23 source surface in [the scalar contract](spec/core-math-2026-08-22.md).
 
 ## Scope
 
-`zmath` is a dependency-free Zig 0.16 mathematics library. Public fixed-size operations do not allocate.
+`zmath` is a dependency-free Zig 0.17.0 mathematics library. Public fixed-size operations do not allocate.
 
 Public real formats are `f16`, `f32`, and `f64` for the current IEEE and scalar primitives. Public type and function names use lower-case `h`, `f`, and `d` suffixes. `q`, `f128`, and bfloat16 are outside this contract and have no public API.
 
 The API uses one structural generic, `Mat`. Complex values, vectors, quaternions, geometry, factorizations, and geometric algebras use named concrete types.
 
-## Planned module paths
+## Module paths
 
-The module path is canonical. Root re-exports are optional convenience names after an implementation becomes public.
+Root re-exports provide convenience names for scalar and IEEE operations.
 
 ```text
 zmath.ieee
@@ -68,65 +56,16 @@ complex + vector + quaternion + matrix -> algebra
 
 Geometry and algebra do not depend on each other.
 
-## Use as a Zig dependency
+## Dependency and build setup
 
-The supported consumer route is the `zmath` module from `b.dependency`.
-Use Zig 0.16.0. A local checkout dependency has this manifest member:
+See [README.md](README.md#usage) for dependency setup and build commands.
+The module carries its private C kernels and link settings.
+The C headers are not a standalone C API.
 
-```zig
-.dependencies = .{
-    .zmath = .{ .path = "../zmath" },
-},
-```
+Checked geometry returns `NonFiniteInput` for invalid supplied coordinates
+and `NonFiniteResult` for arithmetic range failure. Fixed-size values need no cleanup.
+Other numerical APIs use IEEE values, status fields, or `null` as documented below.
 
-After creating your executable, add the module in `build.zig`:
-
-```zig
-const dependency = b.dependency("zmath", .{
-    .target = target,
-    .optimize = optimize,
-});
-exe.root_module.addImport("zmath", dependency.module("zmath"));
-```
-
-Here, `target` and `optimize` come from the standard build options.
-Import the module as `@import("zmath")` in your source.
-The module carries its private C kernels and their link settings.
-The C headers are implementation files, not a supported standalone C API.
-On x86 and x86-64, the selected CPU must include FMA.
-
-This complete consumer entry point exercises a value result and a checked failure:
-
-```zig
-const std = @import("std");
-const zmath = @import("zmath");
-
-pub fn main() !void {
-    const split = zmath.frexp(@as(f32, 8));
-    std.debug.assert(split.fraction == 0.5 and split.exponent == 4);
-
-    const geometry = zmath.geometry;
-    const largest = try geometry.Vector2f.init(std.math.floatMax(f32), 0);
-    if (largest.add(largest)) |_| {
-        return error.ExpectedOverflow;
-    } else |err| switch (err) {
-        error.NonFiniteResult => {},
-        error.NonFiniteInput => return err,
-    }
-}
-```
-
-Checked geometry returns an error instead of a partial result.
-No cleanup call is needed for these fixed-size values.
-Treat `NonFiniteInput` as invalid supplied coordinates.
-Treat `NonFiniteResult` as an arithmetic range failure. Rescale the problem or use a wider format.
-Other numerical APIs use IEEE values, status fields, or `null` as documented at their owning declarations.
-
-`zig build` installs the demonstration, not a compiled library artifact.
-`zig build docs` generates documentation from the public module.
-Serve the installed `docs` directory through HTTP so the browser can load its WebAssembly and source archive.
-Fetched packages include this contract, `PROJECT.md`, and the scalar corpus contract.
-Local plans, session notes, and development-environment files are not part of that package.
 
 ## Vector API
 
@@ -137,13 +76,8 @@ layer from the linear-algebra `Vec*` value types described in
 also owns and which are implemented in `src/vector_value.zig`. The two layers
 share this module path and nothing else.
 
-Every vector operation applies the identical accepted scalar kernel to each
-lane. Lane `i` of a vector result is therefore bit-for-bit equal to the scalar
-result for lane `i` of the input. That is what preserves the `max_ulp = 0`
-contract and the immutable corpus, so the vector surface requires no new
-acceptance evidence under the independent [status terms](#status-terms): the
-vector path is a per-lane application of the same scalar code, never a
-re-derived polynomial.
+Every vector operation applies the scalar kernel to each lane. Lane `i` of
+a vector result has the scalar result for lane `i` of the input.
 
 `src/vector_surface_test.zig` guards this surface, and `src/vector_test.zig` carries the per-lane bit-identity tests, including an exhaustive pass over all 65,536 binary16 bit patterns.
 
@@ -251,7 +185,7 @@ Most results are a real `@Vector(N, R)`:
 | `ilogb` and `llogb` | `@Vector(N, i32)` and `@Vector(N, i64)` |
 | `totalOrder` and `totalOrderMag` | `@Vector(N, bool)` |
 
-The 13 result-struct operations cannot be a `@Vector`. Zig 0.16 forbids a
+The 13 result-struct operations cannot be a `@Vector`. Zig forbids a
 struct as a vector element type and reports "expected integer, float, bool, or
 pointer for the vector element type", so `atan2`, `atan2pi`, `lgamma`,
 `frexp`, `modf`, `remquo`, `canonicalize`, `setPayload`, `setPayloadSig`,
@@ -303,30 +237,6 @@ zmath.vector.atan2v(y, x)                // [N]Atan2Result(T), lane-ordered
 
 ## IEEE and scalar API
 
-### Status terms
-
-These are independent status terms:
-
-- **Target** names a planned public symbol.
-- **Implemented** means that the current `zmath` root or module exports the symbol.
-- **Manifest-accepted** means that a `correct` or `bounded` manifest row accepts one operation-format pair.
-- **Corpus-evidenced** means that immutable rows for one pair passed the stated oracle checks.
-- **Whole-domain-proved** means that exhaustive evidence or a separate proof covers every input in the operation-format domain.
-
-Implementation, manifest acceptance, corpus coverage, and proof scope are separate facts.
-Export presence does not change manifest status.
-Manifest status does not widen a corpus beyond its stored inputs.
-Sampled corpus evidence does not establish whole-domain proof.
-
-The implemented C23 inventory is the `Implemented-source snapshot` in `spec/core-math-2026-08-22.md`.
-This document does not maintain a second exhaustive implemented-export list.
-
-The current source exports the `zmath.ieee` and `zmath.scalar` families described in that contract, their shared result types, and the corresponding generic root operations.
-`src/c23_public_surface_test.zig` validates those module and root signatures for `f16`, `f32`, and `f64`.
-
-The source also exports the six C23 root narrowing operations (`fadd`, `fsub`, `fmul`, `fdiv`, `ffma`, and `fsqrt`) and the Annex H format-pair forms from `zmath.scalar`.
-These source exports do not imply manifest acceptance.
-The versioned corpus manifest is the only acceptance authority.
 
 `ulpDistance` is a zmath extension. It is not a C23 scalar operation.
 
@@ -893,157 +803,6 @@ Implementations must not replace those results with a host-library choice.
 The manifest must record every operation-specific exception before acceptance.
 Target status or source availability cannot substitute for this evidence.
 
-### Typed scalar corpus manifest
-
-Before a manifest-gated scalar pair becomes accepted, the repository updates a versioned contract at `spec/core-math-<date>.md`.
-
-The schema-5 manifest is `zmath-testing/test/corpus/manifest.toml`.
-It contains exactly 347 sorted typed function rows for `f16`, `f32`, and `f64`.
-It pins the CORE-MATH revision, 512-bit MPFR/Arb settings for evaluator paths that use them, `nearest_even`, and the special-value policy.
-The checked-in manifest is the only acceptance authority.
-A successful candidate campaign does not change a row's manifest status.
-
-Each row defines the operation, provenance, status, arity, typed inputs, typed result, oracle, special-value policy, and maximum ULP bound.
-The root `operation_spelling` value is `"c23_hfd_lowercase_v1"`.
-For a standard H/F/D family, the typed descriptors select the suffix.
-Dedicated encoded names, including narrowing operations, remain unchanged.
-
-The provenance vocabulary is exactly `["zmath", "core_math"]`.
-Each row uses `["zmath"]`, `["core_math"]`, or `["zmath", "core_math"]`.
-Scalar results use `float:<format>`, `integer:<type>`, `bool`, or `classification`.
-Structure results use `struct:<kind>:<format>`.
-Status-container descriptors include:
-
-- `struct:atan2:<format>` for `Atan2Result(T) { value: T, resolved: bool }`.
-- `struct:power:<format>` for `PowerResult(T) { value: T, ok: bool }`.
-- `struct:integer:<format>` for `IntegerResult { value: i64, ok: bool }`.
-- `struct:quaternion:<format>` for four quaternion components in `x`, `y`, `z`, `w` order.
-- `struct:algebra:<format>` for eight Cl(3) coefficients in basis-mask order.
-- `struct:complex:<format>` for the two components of `Complexf` or `Complexd`, `re` then `im`.
-- `struct:luSolve:<format>` for three stored channels, `x0`, `x1`, and `ok`.
-
-These descriptors name the layout a stored record uses.
-Most of them also carry the public return shape.
-Two of them name no public type of their own.
-`zmath.complex` has no generic `Complex(T)`: its only public types are the concrete
-`Complexf` and `Complexd`, each with `re` and `im`, so `struct:complex` mirrors
-those two fields and promises no third type.
-`zmath.linalg` publishes no `LuSolve2Result(T)`: `lu` returns `?LuMat2f` through
-`?LuMat4d` and `solveLu` returns an optional vector, `?Vec2f` through `?Vec4d`.
-`struct:luSolve` is the adapter that turns that optional vector into stored
-fields. A refused factorization or solve publishes the canonical `+0`, `+0`, and
-`false`, because a `null` has no record encoding, and an accepted solve whose
-exact solution leaves the format may publish an infinite component with
-`ok=true`.
-No descriptor grants implementation, corpus evidence, or manifest acceptance.
-
-Ten rows cover selected non-scalar operations: five operations, each with one `f`
-and one `d` row. `complexAdd` and `complexMul` take four same-format floats `a.re`,
-`a.im`, `b.re`, `b.im`; `matrixDet2` takes four row-major `a00`, `a01`, `a10`,
-`a11`; `luSolve2` takes `a00`, `a01`, `a10`, `a11`, `b0`, `b1`; and
-`geometryOrient2` takes six coordinates `ax`, `ay`, `bx`, `by`, `cx`, `cy` plus a
-policy tag of exactly `adaptive_exact` or `fast`, and returns `integer:i32`
-carrying `-1`, `0`, or `+1` rather than a sign-enum ordinal. All ten use
-`oracle = "algebraic"`, `status = "correct"`, and `max_ulp = 0`.
-The independent exact-rational reference follows the arithmetic each public graph
-performs, so the ten rows do not share one rounding rule: `complexAdd` rounds each
-exact component sum once, `complexMul` rounds each product and each component sum,
-`matrixDet2` rounds two products and the final subtraction, `luSolve2` computes the
-exact rational Cramer solution and rounds once per component, and `geometryOrient2`
-uses the exact determinant of the stored coordinates under `adaptive_exact` and the
-target-rounded graph under `fast`.
-These rows hold 324 stored records over bounded named cases, and they are the
-approved selected coverage rather than a claim about the remaining operations of
-those modules.
-
-The status values are `correct`, `bounded`, and `unsupported`.
-An `unsupported` row uses `oracle = "none"` and `max_ulp = 0`.
-An accepted row uses the evaluator class assigned by the authoritative C operation table.
-A `correct` row uses `max_ulp = 0`.
-A `bounded` row uses an approved non-negative `max_ulp` value.
-Schema 5 accepts `none`, `exact_bits`, `algebraic`, `mpfr_arb`, and `definitional`.
-
-Status and oracle snapshots are not part of numerical descriptor identity.
-This permits review of candidate artifacts before a manifest promotion.
-The loader still checks that each snapshot has a valid status-oracle relation.
-It hashes the profile, numerical descriptors, special policy, ULP bound, and authoritative C signature.
-
-The current manifest accepts all 347 descriptors as `correct` with `max_ulp = 0`.
-Full publication and replay verified 72,035,642 records on the scalar lane and on the scalar-backed vector lane.
-The scalar benchmark receipt covers all 347 descriptors of this publication.
-It retains only repetition zero for each descriptor.
-A benchmark result is a timing record, not acceptance or whole-domain proof.
-Do not infer acceptance from source exports, evaluator availability, or a filtered campaign.
-
-#### Oracle evidence classes
-
-The authoritative C operation table selects one evaluator for each of the 347 descriptors.
-It assigns 150 descriptors to `exact_bits`, 126 to `mpfr_arb`, 49 to `algebraic`, and 22 to `definitional`.
-Operation spelling and manifest status do not select an evaluator.
-
-- `exact_bits` uses direct IEEE bit and integer models. It preserves bit-sensitive NaN and status behavior without numerical approximation.
-- `algebraic` uses exact GMP rational arithmetic for finite dyadic operations. Irrational algebraic roots use 512-bit MPFR candidates and 512-bit Arb enclosures.
-- `mpfr_arb` uses a 512-bit MPFR candidate and a 512-bit Arb proof, with operation-specific certified reductions where required.
-- `definitional` checks IEEE representations or published algebraic conventions without an MPFR/Arb enclosure.
-  Its 22 rows cover the four public helpers in three formats and five algebra/quaternion operations in two formats.
-  These rows do not establish general non-scalar numerical accuracy.
-
-Exact-bit and algebraic boundary checks use exact integer or rational arithmetic.
-The MPFR/Arb oracle uses fixed 1,024-bit MPFR boundary containers where their capacity is sufficient for exact binary values.
-This boundary storage is not adaptive numerical evaluation.
-The numerical MPFR and Arb precision remains fixed at 512 bits.
-
-The generator fails closed when an evaluator reports unsupported, error, uncertainty, a descriptor mismatch, or an unresolved rounding cell.
-It does not increase numerical precision or emit a best-effort record.
-
-Fixed MPFR512 evaluation followed by target RNE can double-round
-`atan2((2^52-1)*2^-1074, 2)`.
-The generator may correct the initial candidate by one adjacent lower-magnitude value only under the following proof:
-
-1. Exact dyadic arithmetic proves that `t = abs(y/x)` equals the midpoint above the corrected candidate.
-2. The proof establishes `0 < t < 1`.
-3. Arb512 proves `t^3` is less than the gap from `t` to the next lower rounding midpoint.
-4. The analytic bound `t - t^3 < atan(t) < t` places the exact result inside the corrected candidate's rounding cell.
-
-The correction preserves the result sign.
-If any condition is unresolved, the generator rejects the record.
-
-For exponentials and powers, Arb512 can prove positive overflow in the log domain.
-This proof does not construct the enormous result.
-For negative noninteger `lgamma` inputs, the Arb proof uses the reflection formula and evaluates `lgamma` at a positive argument.
-
-#### Typed corpus publication
-
-The generator uses oracle ABI v2.
-Every request declares the operation bytes, arity, typed input fields, result layout, structure kind, and typed result fields.
-The generator compares the zmath result with the declared evaluator before it writes a record.
-
-Published records use the length-framed binary `ZCDR` codec version 1.
-A record stores operation, ordered provenance, typed arguments, result descriptor, typed result fields, and `max_ulp`.
-Floating fields store the exact format, bits, and IEEE class.
-Other fields store their integer width, Boolean value, tag bytes, or rounding enumeration.
-
-A full publication covers all 347 descriptors.
-A filtered publication covers the exact `--operation` and `--format` selection.
-Metadata records the campaign class, seed, cardinality, selection rule, profile, and artifact digest.
-The 62 exhaustive unary H campaigns each enumerate all 65,536 input bit patterns.
-Only those campaigns claim exhaustive coverage of their one-argument binary16 domain.
-Selected Cartesian, explicit special-tuple, selected unary, bounded-integer, and exact-status campaigns cover only their declared tuples.
-
-The publication loader rejects `.incomplete`, requires `COMPLETE`, and verifies the metadata SHA-256.
-It also verifies the full or filtered scope, target profile, descriptor digest, record count, record order, and artifact SHA-256.
-Unavailable per-campaign source metadata uses the exact `source-metadata-unavailable` digest sentinel and `none` source fields.
-
-Generated raw records can be multi-gigabyte artifacts.
-Keep `generated/records/`, `generated/probes/`, `.incomplete`, and `*.tmp` local and ignored.
-Commit publication metadata, `COMPLETE`, `replay.txt`, and `benchmark.txt`.
-Regenerate the raw records with `generate-corpus` in a new checkout.
-
-The accepted corpus profile is target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe`.
-No other target, CPU, or optimization mode is manifest-qualified.
-Corpus evidence applies only to stored tuples unless an exhaustive campaign or separate proof covers the whole operation-format domain.
-Benchmark output measures performance only and does not change manifest acceptance.
-
 ## Complex API
 
 `zmath.complex` owns the canonical `Complexf` and `Complexd` types.
@@ -1120,7 +879,7 @@ divided by the accepted finite, nonzero length cannot round to zero, so the
 quotient is not the zero vector and a second norm check decides nothing the length
 has not already decided. The accepted and rejected calls are the same calls.
 
-`raw` is a public field, not a private one. Zig 0.16 cannot make a struct field private, and
+`raw` is a public field. Zig cannot make a struct field private, and
 `UnitQuatf` is a plain struct with no opaque handle, so `UnitQuatf{ .raw = q }` compiles for any
 consumer and can store any quaternion at all. The unit norm is therefore an invariant the
 constructors maintain and the consumer preserves, not one the language or the type enforces:
@@ -1404,182 +1163,13 @@ such a proof.
 
 ## Tests and benchmarks
 
-Local cross-target unit checks use the installed `cross-test` host tool and its
-auto-discovered [`cross-test.profile.sh`](cross-test.profile.sh). The profile
-builds the complete library suite through `zig build test-build`, which installs
-`bin/zmath-test` (with `.exe` on Windows and `.wasm` on WebAssembly) without
-running it. It inherits the host tool's version-pinned Zig 0.16.0 Tier 1/2
-matrix: all 53 published platforms, not an architecture/OS Cartesian product.
-The CPU is `baseline+fma` on x86/x86-64 and `baseline` elsewhere.
+`zig build test` runs the numerical unit suite. `zig build test-build` installs
+the same executable without running it. The optional `cross-test` host tool
+uses [cross-test.profile.sh](cross-test.profile.sh) to build that executable
+for its selected targets. x86 targets use `baseline+fma`.
 
-Run these commands from this repository:
-
-```text
-cross-test --list
-cross-test
-cross-test --output zig-out/cross-test-release-safe -- -Doptimize=ReleaseSafe
-cross-test --targets 'x86_64-linux x86-linux aarch64_be-linux arm-linux mips-linux' --require-runners
-```
-
-The default execution uses `Debug`. Native targets run directly and available
-foreign targets use the tool's detected QEMU/Wine/Wasmtime runner. A successful
-compile without a suitable OS runtime is `build_only`, not a test pass.
-`--require-runners` makes that incomplete execution coverage fail; `--targets`
-selects a subset of the inherited matrix.
-The default output is `zig-out/cross-test`, with per-run build/run logs and a
-schema-2 `cross-test-summary.json`; the separate ReleaseSafe output preserves
-both modes' current summaries. The tool and its sibling helpers must already
-be installed; this profile does not install tools or replace the gate.
-
-On hosts with Node.js but no Wasmtime, an installed WASI artifact can also run
-through Node's built-in Preview 1 runner. This is separate from `cross-test`'s
-automatic runner classification; that summary still reports WASI as build-only.
-The Node.js WASI runner emits an experimental-WASI warning. For a built WASI
-artifact:
-
-```sh
-node --input-type=module -e '
-import { readFile } from "node:fs/promises";
-import { WASI } from "node:wasi";
-const artifact = process.argv[1];
-const wasi = new WASI({ version: "preview1", args: [artifact], env: {}, preopens: {}, returnOnExit: true });
-const module = await WebAssembly.compile(await readFile(artifact));
-const instance = await WebAssembly.instantiate(module, wasi.getImportObject());
-process.exitCode = wasi.start(instance);
-' zig-out/cross-test-release-safe/wasm32-wasi/bin/zmath-test.wasm
-```
-
-These checks exercise fixed local correctness suites, not corpus replay,
-oracle generation, or profiling. A compiler failure, a failed executed test,
-and an unavailable runtime are separate outcomes. Emulated execution is not
-hardware, throughput, or whole-domain accuracy evidence and does not extend
-the manifest-qualified target profile.
-
-The C kernels require IEEE binary32/binary64 representations, a known little-
-or big-endian byte order, and `_BitInt(128)` or native `__int128`. Half kernels
-exchange binary16 bits through `uint16_t`; native `_Float16` conversions are
-optional and the portable conversion rounds directly from binary64.
-`src/scalar_fma_target.zig` selects native binary32 and binary64 FMA for Zig
-and C; other CPUs use exact bounded integer arithmetic with one final rounding.
-Finite binary64 round-to-even terms also have a portable tie-corrected path
-when the compiler would otherwise emit an unavailable C23 `roundeven` call.
-The x86/x86-64 `+fma` floor is unchanged.
-
-`zmath` has no MPFR, GMP, FLINT, Arb, BLIS, Eigen, or C++ runtime dependency.
-The sibling `zmath-testing` project owns integration tests, oracle generation, typed corpus replay, and benchmarks.
-It is the acceptance authority and is colocated as `../zmath-testing`.
-Run the following commands there, not in this repository.
-Obtain `zmath-testing` separately before running those commands.
-Its schema-5 manifest records the accepted publication and remaining numerical scope.
-
-The scalar manifest remains the acceptance authority. The previous consumer
-optimization round used a separate paired-reference gate over bounded named
-inputs. Its limit was 4096 evaluations per canonical f32 operation across all
-lanes, consumers, repetitions, and reference runs. Bounded consumer evidence is
-not a publication under
-[Typed scalar corpus manifest](#typed-scalar-corpus-manifest): it changes no
-descriptor row, status, oracle, ULP bound, or stored record, it is not a campaign
-the corpus loader accepts, and it establishes neither corpus coverage nor
-whole-domain proof, whatever such a comparison reports. At its strongest it says
-that a reworked path reproduced the reference it was compared against over the
-inputs it was compared on, and it says nothing about the rest of an
-operation-format domain. The bound is what makes the round checkable without a
-publication, and it relaxes no threshold stated elsewhere in this document.
-
-The [API-surface performance round](../zmath-testing/docs/reference-performance-analysis.md#api-surface-round-2026-10-03)
-uses the separate `bench-api-round` tool in `zmath-testing`. It publishes 7428
-named cases across all ten namespaces. Portable lanes cover widths 2, 4, and 8.
-Compile-time queries and identical canonical routes have explicit inventory entries.
-This is bounded API coverage, not whole-domain numerical acceptance.
-
-Build both source versions with the same harness, compiler, target, CPU, and mode:
-
-```sh
-source "$HOME/.local/lib/host-scratch.sh"
-export PERF_BUILDID_DIR="$XDG_CACHE_HOME/perf"
-zig build bench-api-round -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe \
-  --cache-dir "$ZIG_LOCAL_CACHE_DIR" --prefix "$TMPDIR/zmath-api"
-```
-
-The executable is `bin/zmath-api-round` under that prefix. Run paired measurements
-through `bench/run_api_round.py`, not an unaccounted direct numerical invocation:
-
-```sh
-python3 bench/run_api_round.py \
-  --baseline-exe "$BASELINE_EXE" --candidate-exe "$CANDIDATE_EXE" \
-  --out-dir "$TMPDIR/api-round-new" --ledger "$TMPDIR/api-round-global-ledger.jsonl" \
-  --calls 4 --pairs 1 --cpu 0 --plan-only
-```
-
-Select an allowed CPU. Use a new output directory for each measured attempt.
-Remove `--plan-only` only after the plan fits the shared ledger.
-The plan runs zero-math listings. It launches no measurement or profiler.
-The measurement limit is 1,048,576 evaluations per canonical accepted f32 kernel.
-Every measured lane, alias, consumer, reference run, profile, and failed attempt shares it.
-Correctness tests and untimed consumer smoke checks are separate from this ledger.
-This campaign limit changes no manifest threshold or numerical contract.
-Use repeatable `--bundle` and `--case` filters for focused cohorts.
-The SDK-independent benchmark, unit-test, and documentation steps need no comparison
-SDK. The separate `compare` step still requires its declared environment.
-
-The scalar tools use only target `x86_64-linux-gnu.2.38`, CPU `haswell`, and mode `ReleaseSafe` for manifest-qualified evidence.
-These build steps install the typed tools:
-
-```text
-zig build oracle-generator -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build corpus-replay -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build bench-scalar -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build bench-helpers -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-```
-
-The installed executables are:
-
-```text
-zig-out/bin/zmath-testing-corpus-producer
-zig-out/bin/zmath-corpus-replay
-zig-out/bin/zmath-scalar-matrix
-zig-out/bin/zmath-public-helpers
-```
-
-`zmath-public-helpers` measures `classify`, `ulpDistance`, and the binary16
-`scaleB` and `roundIntegral` entry points in all four rounding modes.
-The manifest now covers these helpers under `definitional` rows.
-The helper benchmark takes no corpus root and no
-operation filter, and accepts only `--repetitions=1..100`. The typed benchmark
-accepts `--repetitions=1..100` and `--with-zig`, which times same-input Zig
-intrinsic references beside zmath. 1024 is the typed benchmark's internal
-sample-loop cap, not a command-line range.
-
-The corpus producer, corpus replay, and scalar-matrix executables accept an
-optional first positional corpus root. The default root is `test/corpus`.
-These three executables also accept `--operation=<manifest-op>` and
-`--format=h|f|d`. The filters can be used independently or together.
-Each filtered command uses its own `generated/probes/<op>-<fmt>` publication.
-An omitted filter uses `all` in that path.
-Generate that probe before filtered replay or measurement.
-
-The standard full-publication commands are:
-
-```text
-zig build generate-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build replay-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-zig build run-bench-scalar -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe
-```
-
-The build steps already pass `test/corpus` as the positional root.
-Append filters after `--`, for example:
-
-```text
-zig build generate-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe -- --operation=atan2 --format=d
-zig build replay-corpus -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe -- --operation=atan2 --format=d
-zig build run-bench-scalar -Dtarget=x86_64-linux-gnu.2.38 -Dcpu=haswell -Doptimize=ReleaseSafe -- --operation=atan2 --format=d
-```
-
-The generator owns independent oracle evaluation and proof.
-Replay reads stored typed outputs and compares them with current zmath results.
-The replay executable does not link MPFR, Arb, GMP, or FLINT.
-The scalar benchmark validates publication metadata and artifact digests before measurement.
-It reports measurements only and does not grant manifest acceptance or whole-domain proof.
-
-A numerical oracle record names the exact zmath symbol, typed inputs, typed outputs, manifest descriptor, campaign, and acceptance rule.
-An external differential test names its baseline library, version, build options, scalar type, dimensions, and operation.
+Oracle generation, stored-corpus replay, fuzzing, and benchmarks are in
+[zmath-testing](https://github.com/CoffeeImpliesCode/zmath-testing).
+Its [scalar contract](spec/core-math-2026-08-22.md) defines the corpus schema
+and target profile. Source exports and unit tests do not establish
+whole-domain accuracy. See the harness documentation for its commands.

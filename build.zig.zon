@@ -76,7 +76,7 @@
         "cross-test.profile.sh",
         "src",
         "API.md",
-        "PROJECT.md",
+        "README.md",
         "spec/core-math-2026-08-22.md",
     },
 }
