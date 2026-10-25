@@ -96,5 +96,5 @@ on the selected compiler and target.
 
 ## License
 
-Derived CORE-MATH files carry their upstream copyright and MIT license notices.
-This repository has no project-wide license file for the remaining code.
+First-party code is licensed under MIT; see [LICENSE](LICENSE).
+Derived CORE-MATH files retain their upstream copyright and MIT license notices.

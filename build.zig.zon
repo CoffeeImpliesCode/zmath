@@ -75,8 +75,8 @@
         "build.zig.zon",
         "cross-test.profile.sh",
         "src",
-        "API.md",
         "README.md",
+        "LICENSE",
         "spec/core-math-2026-08-22.md",
     },
 }
